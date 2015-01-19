@@ -1,0 +1,16 @@
+OASISFormat: 0.3
+Name:        thin-lvhd-tools
+Version:     0.1
+Synopsis:    Simple thin LVHD tools
+Authors:     David Scott
+License:     ISC
+Plugins:     META (0.3)
+BuildTools:  ocamlbuild
+
+Executable "local-allocator"
+  CompiledObject:     best
+  Path:               .
+  MainIs:             local-allocator.ml
+  Custom:             true
+  Install:            false
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, shared-block-ring, cstruct, oUnit, io-page, io-page.unix, cmdliner

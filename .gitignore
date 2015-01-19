@@ -1,9 +1,8 @@
-*.annot
-*.cmo
-*.cma
-*.cmi
-*.a
-*.o
-*.cmx
-*.cmxs
-*.cmxa
+_build
+_tags
+myocamlbuild.ml
+setup.bin
+setup.data
+setup.log
+setup.ml
+*.native
