@@ -1,4 +1,31 @@
 open Lwt
+open Block_ring_unix
+
+let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
+let info  fmt = Printf.ksprintf (fun s -> print_endline s) fmt
+let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
+
+module Journal = struct
+  let replay filename =
+    Consumer.attach ~disk:filename ()
+    >>= function
+    | `Error msg ->
+      info "There is no journal on %s: no need to replay" filename;
+      return ()
+    | `Ok c ->
+      ( Consumer.fold ~f:(fun x y -> x :: y) ~t:c ~init:[] ()
+        >>= function
+        | `Error msg ->
+          error "Error replaying the journal, cannot continue: %s" msg;
+          Consumer.detach c
+          >>= fun () ->
+          fail (Failure msg)
+        | `Ok (pos, items) ->
+          info "There are %d items in the journal to replay" (List.length items);
+          (* -- replay them here *)
+          Consumer.detach c
+      )
+end
 
 let main socket journal freePool fromLVM toLVM =
   `Error(false, "not implemented")
