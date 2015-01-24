@@ -6,24 +6,15 @@ let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 let info  fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 
-module Op = struct
-  type t =
-    | Print of string
-  with sexp
+module type OP = sig
+  type t
 
-  let perform t =
-    sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-    return ()
-  let of_cstruct x =
-    Cstruct.to_string x |> Sexplib.Sexp.of_string |> t_of_sexp
-  let to_cstruct t =
-    let s = sexp_of_t t |> Sexplib.Sexp.to_string in
-    let c = Cstruct.create (String.length s) in
-    Cstruct.blit_from_string s 0 c 0 (Cstruct.len c);
-    c
+  val perform: t -> unit Lwt.t
+  val to_cstruct: t -> Cstruct.t
+  val of_cstruct: Cstruct.t -> t
 end
 
-module Journal = struct
+module Journal(Op: OP) = struct
 
   type t = {
     p: Producer.t;
@@ -151,14 +142,32 @@ module Journal = struct
     end
 end
 
+module Op = struct
+  type t =
+    | Print of string
+  with sexp
+
+  let perform t =
+    sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
+    return ()
+  let of_cstruct x =
+    Cstruct.to_string x |> Sexplib.Sexp.of_string |> t_of_sexp
+  let to_cstruct t =
+    let s = sexp_of_t t |> Sexplib.Sexp.to_string in
+    let c = Cstruct.create (String.length s) in
+    Cstruct.blit_from_string s 0 c 0 (Cstruct.len c);
+    c
+end
+
 let main socket journal freePool fromLVM toLVM =
   let t =
-    Journal.start journal
+    let module J = Journal(Op) in
+    J.start journal
     >>= fun j ->
     let rec loop () =
       Lwt_io.read_line Lwt_io.stdin
       >>= fun line ->
-      Journal.push j (Op.Print line)
+      J.push j (Op.Print line)
       >>= fun () ->
       loop () in
     loop () in
