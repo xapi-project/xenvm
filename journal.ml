@@ -6,7 +6,6 @@ open Log
 module type OP = sig
   type t
 
-  val perform: t -> unit Lwt.t
   val to_cstruct: t -> Cstruct.t
   val of_cstruct: Cstruct.t -> t
 end
@@ -20,6 +19,7 @@ module Make(Op: OP) = struct
     cvar: unit Lwt_condition.t;
     mutable please_shutdown: bool;
     mutable shutdown_complete: bool;
+    perform: Op.t -> unit Lwt.t;
   }
   let replay t =
     Consumer.fold ~f:(fun x y -> x :: y) ~t:t.c ~init:[] ()
@@ -33,7 +33,7 @@ module Make(Op: OP) = struct
        info "There are %d items in the journal to replay" (List.length items);
        Lwt_list.iter_p
          (fun item ->
-           Op.(perform (of_cstruct item))
+           t.perform (Op.of_cstruct item)
          ) items
        >>= fun () ->
        ( Consumer.advance ~t:t.c ~position ()
@@ -43,7 +43,7 @@ module Make(Op: OP) = struct
            fail (Failure msg)
          | `Ok () ->
            return () )
-  let start filename =
+  let start filename perform =
     ( Consumer.attach ~disk:filename ()
       >>= function
       | `Error msg ->
@@ -76,7 +76,7 @@ module Make(Op: OP) = struct
     let please_shutdown = false in
     let shutdown_complete = false in
     let cvar = Lwt_condition.create () in
-    let t = { p; c; filename; please_shutdown; shutdown_complete; cvar } in
+    let t = { p; c; filename; please_shutdown; shutdown_complete; cvar; perform } in
     replay t
     >>= fun () ->
     (* Run a background thread processing items from the journal *)
