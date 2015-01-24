@@ -152,7 +152,21 @@ module Journal = struct
 end
 
 let main socket journal freePool fromLVM toLVM =
-  `Error(false, "not implemented")
+  let t =
+    Journal.start journal
+    >>= fun j ->
+    let rec loop () =
+      Lwt_io.read_line Lwt_io.stdin
+      >>= fun line ->
+      Journal.push j (Op.Print line)
+      >>= fun () ->
+      loop () in
+    loop () in
+  try
+    `Ok (Lwt_main.run t)
+  with Failure msg ->
+    error "%s" msg;
+    `Error(false, msg)
 
 open Cmdliner
 let info =
@@ -170,7 +184,7 @@ let socket =
 
 let journal =
   let doc = "Path of the host local journal" in
-  Arg.(value & opt (some string) None & info [ "journal" ] ~docv:"JOURNAL" ~doc)
+  Arg.(value & opt file "journal" & info [ "journal" ] ~docv:"JOURNAL" ~doc)
 
 let freePool =
   let doc = "Path to the device mapper device containing the free blocks" in
