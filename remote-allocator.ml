@@ -75,36 +75,9 @@ module Op = struct
     c
 end
 
-let main socket journal freePool fromLVM toLVM =
+let main socket config =
   let t =
-    ToLVM.start toLVM
-    >>= fun tolvm ->
-    let perform t =
-      let open Op in
-      sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-      match t with
-      | Print _ -> return ()
-      | LocalAllocation b ->
-        ToLVM.push tolvm b
-        >>= fun position ->
-        print_endline "Suspend local dm devices";
-        print_endline "Move target from one to the other (make idempotent)";
-        ToLVM.advance tolvm position
-        >>= fun () ->
-        print_endline "Resume local dm devices";
-        return () in
-
-    let module J = Journal.Make(Op) in
-    J.start journal perform
-    >>= fun j ->
-
-    let rec loop () =
-      Lwt_io.read_line Lwt_io.stdin
-      >>= fun line ->
-      J.push j (Op.Print line)
-      >>= fun () ->
-      loop () in
-    loop () in
+    fail (Failure "unimplemented") in
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
@@ -114,7 +87,7 @@ let main socket journal freePool fromLVM toLVM =
 open Cmdliner
 let info =
   let doc =
-    "Local block allocator" in
+    "Remote block allocator" in
   let man = [
     `S "EXAMPLES";
     `P "TODO";
@@ -125,24 +98,12 @@ let socket =
   let doc = "Path of Unix domain socket to listen on" in
   Arg.(value & opt (some string) None & info [ "socket" ] ~docv:"SOCKET" ~doc)
 
-let journal =
-  let doc = "Path of the host local journal" in
-  Arg.(value & opt file "journal" & info [ "journal" ] ~docv:"JOURNAL" ~doc)
-
-let freePool =
-  let doc = "Path to the device mapper device containing the free blocks" in
-  Arg.(value & opt (some string) None & info [ "freePool" ] ~docv:"FREEPOOL" ~doc)
-
-let toLVM =
-  let doc = "Path to the device or file to contain the pending LVM metadata updates" in
-  Arg.(value & opt file "toLVM" & info [ "toLVM" ] ~docv:"TOLVM" ~doc)
-
-let fromLVM =
-  let doc = "Path to the device or file which contains new free blocks from LVM" in
-  Arg.(value & opt file "fromLVM" & info [ "fromLVM" ] ~docv:"FROMLVM" ~doc)
+let config =
+  let doc = "Path to the config file" in
+  Arg.(value & opt file "config" & info [ "config" ] ~docv:"CONFIG" ~doc)
 
 let () =
-  let t = Term.(pure main $ socket $ journal $ freePool $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ socket $ config) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0
