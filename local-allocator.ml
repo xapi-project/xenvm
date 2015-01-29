@@ -75,6 +75,41 @@ module Op = struct
     c
 end
 
+exception Retry (* out of space *)
+
+(* Return the physical (location, length) pairs which we're going
+   to use to extend the volume with *)
+let first_exn volume size =
+  let open Devmapper in
+  let rec loop targets size = match targets, size with
+  | _, 0L -> []
+  | [], _ -> raise Retry
+  | t :: ts, n ->
+    let available = min t.Target.size n in
+    let still_needed = Int64.sub n available in
+    let location = match t.Target.kind with
+    | Target.Linear l -> l
+    | Target.Unknown _ -> failwith "unknown is not implemented"
+    | Target.Striped _ -> failwith "striping is not implemented" in
+    (location, available) :: loop ts still_needed in
+  loop volume.targets size
+
+(* Return the virtual size of the volume *)
+let sizeof volume =
+  let open Devmapper in
+  let ends = List.map (fun t -> Int64.add t.Target.start t.Target.size) volume.targets in
+  List.fold_left max 0L ends
+
+(* Return the targets you would need to extend the volume with the given extents *)
+let new_targets volume extents =
+  let open Devmapper in
+  let size = sizeof volume in
+  List.map
+    (fun (location, available) ->
+      let sectors = Int64.div available 512L in
+      { Target.start = size; size = sectors; kind = Target.Linear location }
+    ) extents
+
 let main socket journal freePool fromLVM toLVM =
   let t =
     ToLVM.start toLVM
@@ -101,8 +136,30 @@ let main socket journal freePool fromLVM toLVM =
     let rec loop () =
       Lwt_io.read_line Lwt_io.stdin
       >>= fun line ->
-      J.push j (Op.Print line)
-      >>= fun () ->
+      ( match Devmapper.stat line with
+      | None ->
+        J.push j (Op.Print ("Couldn't find device mapper device: " ^ line))
+      | Some data_volume ->
+        ( match Devmapper.stat "free" with
+          | None ->
+            failwith "Couldn't find free volume"
+          | Some free_volume ->
+            (* choose the blocks we're going to transfer *)
+            let rec loop () =
+              try
+                let physical_blocks = first_exn free_volume 1048578L in
+                (* append these onto the data_volume *)
+                let new_targets = new_targets data_volume physical_blocks in
+                return (BlockUpdate.({ fromLV = "free"; toLV = line; targets = new_targets }))
+              with Retry ->
+                Lwt_unix.sleep 5.
+                >>= fun () ->
+                loop () in
+            loop ()
+            >>= fun bu ->
+            J.push j (Op.LocalAllocation bu)
+        )
+      ) >>= fun () ->
       loop () in
     loop () in
   try

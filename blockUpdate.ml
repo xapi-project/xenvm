@@ -4,7 +4,7 @@ type lv = string with sexp
 type t = {
   fromLV: lv;
   toLV: lv;
-  target: Devmapper.Target.t; (* Remove from fromLV, add to toLV *)
+  targets: Devmapper.Target.t list; (* Remove from fromLV, add to toLV *)
 } with sexp
 
 let of_cstruct x =
