@@ -110,7 +110,29 @@ let new_targets volume extents =
       { Target.start = size; size = sectors; kind = Target.Linear location }
     ) extents
 
+let rec try_forever f =
+  f ()
+  >>= function
+  | `Ok x -> return x
+  | _ ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    try_forever f
+
 let main socket journal freePool fromLVM toLVM =
+  (* Perform some prechecks *)
+  let freePool = match freePool with
+    | None -> failwith "You must provide a --freePool argument"
+    | Some freePool ->
+      begin match Devmapper.stat freePool with
+      | None ->
+        let ls = Devmapper.ls () in
+        failwith (Printf.sprintf "Failed to find freePool %s. Available volumes are: %s" freePool (String.concat ", " ls))
+      | Some _ ->
+        ()
+      end;
+      freePool in
+
   let t =
     ToLVM.start toLVM
     >>= fun tolvm ->
@@ -133,32 +155,38 @@ let main socket journal freePool fromLVM toLVM =
     J.start journal perform
     >>= fun j ->
 
+    let ls = Devmapper.ls () in
+    debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls);
+
     let rec loop () =
       Lwt_io.read_line Lwt_io.stdin
       >>= fun line ->
       ( match Devmapper.stat line with
       | None ->
+        (* Log this kind of error. This tapdisk may block but at least
+           others will keep going *)
         J.push j (Op.Print ("Couldn't find device mapper device: " ^ line))
       | Some data_volume ->
-        ( match Devmapper.stat "free" with
+        try_forever (fun () ->
+          match Devmapper.stat freePool with
+          | Some x -> return (`Ok x)
           | None ->
-            failwith "Couldn't find free volume"
-          | Some free_volume ->
-            (* choose the blocks we're going to transfer *)
-            let rec loop () =
-              try
-                let physical_blocks = first_exn free_volume 1048578L in
-                (* append these onto the data_volume *)
-                let new_targets = new_targets data_volume physical_blocks in
-                return (BlockUpdate.({ fromLV = "free"; toLV = line; targets = new_targets }))
-              with Retry ->
-                Lwt_unix.sleep 5.
-                >>= fun () ->
-                loop () in
-            loop ()
-            >>= fun bu ->
-            J.push j (Op.LocalAllocation bu)
+            error "The freePool device %s has disappeared. Waiting for it to come back." freePool;
+            return `Retry
+        ) >>= fun free_volume ->
+        (* choose the blocks we're going to transfer *)
+        try_forever (fun () ->
+          try
+            let physical_blocks = first_exn free_volume 1024L in
+            (* append these onto the data_volume *)
+            let new_targets = new_targets data_volume physical_blocks in
+            return (`Ok (BlockUpdate.({ fromLV = "free"; toLV = line; targets = new_targets })))
+          with Retry ->
+            info "There aren't enough free blocks, waiting.";
+            return `Retry
         )
+        >>= fun bu ->
+        J.push j (Op.LocalAllocation bu)
       ) >>= fun () ->
       loop () in
     loop () in
@@ -187,7 +215,7 @@ let journal =
   Arg.(value & opt file "journal" & info [ "journal" ] ~docv:"JOURNAL" ~doc)
 
 let freePool =
-  let doc = "Path to the device mapper device containing the free blocks" in
+  let doc = "Name of the device mapper device containing the free blocks" in
   Arg.(value & opt (some string) None & info [ "freePool" ] ~docv:"FREEPOOL" ~doc)
 
 let toLVM =
