@@ -1,10 +1,11 @@
 open Sexplib.Std
 
 type lv = string with sexp
+type targets = Devmapper.Target.t list with sexp
 type t = {
   fromLV: lv;
   toLV: lv;
-  targets: Devmapper.Target.t list; (* Remove from fromLV, add to toLV *)
+  targets: targets; (* Remove from fromLV, add to toLV *)
 } with sexp
 
 let of_cstruct x =

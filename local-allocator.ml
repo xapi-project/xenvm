@@ -110,6 +110,16 @@ let new_targets volume extents =
       { Target.start = size; size = sectors; kind = Target.Linear location }
     ) extents
 
+let remove_physical from targets =
+  let open Devmapper in
+  let extent_of_target target = match target.Target.kind with
+  | Target.Linear location -> location, target.size
+  | Target.Unknown _ -> failwith "unknown target not implemented"
+  | Target.Striped _ -> failwith "striping is not implemented" in
+  let extents = List.map extent_of_target targets in
+  (* for each target in from, remove any overlap with extents *)
+  failwith "unimplemented"
+
 let rec try_forever f =
   f ()
   >>= function
@@ -118,6 +128,13 @@ let rec try_forever f =
     Lwt_unix.sleep 5.
     >>= fun () ->
     try_forever f
+
+let stat x =
+  match Devmapper.stat x with
+  | Some x -> return (`Ok x)
+  | None ->
+    error "The device mapper device %s has disappeared." x;
+    return `Retry
 
 let main socket journal freePool fromLVM toLVM =
   (* Perform some prechecks *)
@@ -141,10 +158,20 @@ let main socket journal freePool fromLVM toLVM =
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       match t with
       | Print _ -> return ()
-      | LocalAllocation b ->
+      | LocalAllocation ({ BlockUpdate.fromLV; toLV; targets } as b) ->
         ToLVM.push tolvm b
         >>= fun position ->
+        try_forever (fun () -> stat fromLV)
+        >>= fun from_volume ->
+        try_forever (fun () -> stat toLV)
+        >>= fun to_volume ->
+        (* Remove the physical blocks from fromLV *)
+        let from_targets = remove_physical from_volume.Devmapper.targets targets in
+        (* Append the physical blocks to toLV *)
+        let to_targets = to_volume.Devmapper.targets @ targets in
         print_endline "Suspend local dm devices";
+        Printf.printf "reload %s with\n%s\n%!" fromLV (Sexplib.Sexp.to_string_hum (BlockUpdate.sexp_of_targets from_targets));
+        Printf.printf "reload %s with\n%S\n%!" toLV (Sexplib.Sexp.to_string_hum (BlockUpdate.sexp_of_targets to_targets));
         print_endline "Move target from one to the other (make idempotent)";
         ToLVM.advance tolvm position
         >>= fun () ->
@@ -167,20 +194,15 @@ let main socket journal freePool fromLVM toLVM =
            others will keep going *)
         J.push j (Op.Print ("Couldn't find device mapper device: " ^ line))
       | Some data_volume ->
-        try_forever (fun () ->
-          match Devmapper.stat freePool with
-          | Some x -> return (`Ok x)
-          | None ->
-            error "The freePool device %s has disappeared. Waiting for it to come back." freePool;
-            return `Retry
-        ) >>= fun free_volume ->
+        try_forever (fun () -> stat freePool)
+        >>= fun free_volume ->
         (* choose the blocks we're going to transfer *)
         try_forever (fun () ->
           try
             let physical_blocks = first_exn free_volume 1024L in
             (* append these onto the data_volume *)
             let new_targets = new_targets data_volume physical_blocks in
-            return (`Ok (BlockUpdate.({ fromLV = "free"; toLV = line; targets = new_targets })))
+            return (`Ok (BlockUpdate.({ fromLV = freePool; toLV = line; targets = new_targets })))
           with Retry ->
             info "There aren't enough free blocks, waiting.";
             return `Retry
