@@ -187,12 +187,18 @@ let main socket journal freePool fromLVM toLVM =
         let from_targets = remove_physical from_volume.Devmapper.targets targets in
         (* Append the physical blocks to toLV *)
         let to_targets = to_volume.Devmapper.targets @ targets in
+        Devmapper.suspend fromLV;
+        Devmapper.suspend toLV;
         print_endline "Suspend local dm devices";
         Printf.printf "reload %s with\n%s\n%!" fromLV (Sexplib.Sexp.to_string_hum (BlockUpdate.sexp_of_targets from_targets));
+        Devmapper.reload fromLV from_targets;
         Printf.printf "reload %s with\n%S\n%!" toLV (Sexplib.Sexp.to_string_hum (BlockUpdate.sexp_of_targets to_targets));
+        Devmapper.reload toLV to_targets;
         print_endline "Move target from one to the other (make idempotent)";
         ToLVM.advance tolvm position
         >>= fun () ->
+        Devmapper.resume fromLV;
+        Devmapper.resume toLV;
         print_endline "Resume local dm devices";
         return () in
 
