@@ -110,15 +110,33 @@ let new_targets volume extents =
       { Target.start = size; size = sectors; kind = Target.Linear location }
     ) extents
 
+module Allocator = Lvm.Allocator.Make(struct
+  open Devmapper
+  type t = Location.device with sexp
+  let compare (a: t) (b: t) = compare a b
+  let to_string t = Sexplib.Sexp.to_string (sexp_of_t t)
+end)
+
+(* Remove the physical blocks [targets] from [from], and then create a new
+   virtual LV containing the remainder *)
 let remove_physical from targets =
   let open Devmapper in
-  let extent_of_target target = match target.Target.kind with
-  | Target.Linear location -> location, target.size
+  let area_of_target target = match target.Target.kind with
+  | Target.Linear location -> location.Location.device, (location.Location.offset, target.size)
   | Target.Unknown _ -> failwith "unknown target not implemented"
   | Target.Striped _ -> failwith "striping is not implemented" in
-  let extents = List.map extent_of_target targets in
-  (* for each target in from, remove any overlap with extents *)
-  failwith "unimplemented"
+  let existing = List.map area_of_target from in
+  let to_remove = List.map area_of_target targets in
+  let remaining = Allocator.sub existing to_remove in
+  let _, targets =
+    List.fold_left
+      (fun (next_voffset, acc) (device, (poffset, size)) ->
+        Int64.add next_voffset size,
+        { Target.start = next_voffset;
+          size = size;
+          kind = Target.Linear { Location.device; offset = poffset } } :: acc
+      ) (0L, []) remaining in
+  List.rev targets
 
 let rec try_forever f =
   f ()

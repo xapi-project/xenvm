@@ -13,7 +13,7 @@ Executable "local-allocator"
   MainIs:             local-allocator.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, shared-block-ring.unix, devmapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, shared-block-ring.unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax
 
 Executable "remote-allocator"
   CompiledObject:     best
