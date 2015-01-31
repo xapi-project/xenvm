@@ -3,58 +3,50 @@ open Sexplib.Std
 open Block_ring_unix
 open Log
 
+module Config = struct
+  type lvm_rings = {
+    to_lvm: string; (* where to read changes to be written to LVM from *)
+    from_lvm: string; (* where to write changes from LVM to *)
+  } with sexp
+
+  type t = {
+    host_allocation_quantum: int64; (* amount of allocate each host at a time *)
+    hosts: (string * lvm_rings) list; (* host id -> rings *)
+  } with sexp
+end
+
 module ToLVM = struct
   type t = {
-    p: Producer.t;
+    c: Consumer.t;
   }
 
   let start filename =
-    Producer.attach ~disk:filename ()
+    Consumer.attach ~disk:filename ()
     >>= function
     | `Error msg ->
-      info "Failed to attach to existing ToLVM queue; creating a fresh one: %s" msg;
-      ( Producer.create ~disk:filename ()
-        >>= function
-        | `Error msg ->
-          error "Failed to create a fresh ToLVM queue: %s" msg;
-          fail (Failure msg)
-        | `Ok () ->
-          return ()
-      ) >>= fun () ->
-      ( Producer.attach ~disk:filename ()
-        >>= function
-        | `Error msg ->
-          error "Failed to attach to a ToLVM queue that I just created: %s" msg;
-          fail (Failure msg)
-        | `Ok p ->
-          return { p }
-      )
-    | `Ok p ->
-      return { p }
+      info "Failed to attach to existing ToLVM queue: %s" msg;
+      fail (Failure msg)
+    | `Ok c ->
+      return { c }
 
-  let rec push t bu =
-    let item = BlockUpdate.to_cstruct bu in
-    Producer.push ~t:t.p ~item ()
+  let rec pop t =
+    Consumer.fold ~f:(fun buf acc ->
+      let bu = BlockUpdate.of_cstruct buf in
+      bu :: acc
+    ) ~t:t.c ~init:[] ()
     >>= function
-    | `Retry ->
-       info "journal is full; sleeping 5s";
-       Lwt_unix.sleep 5.
-       >>= fun () ->
-       push t bu
-    | `TooBig ->
-       error "journal is too small to receive item of size %d bytes" (Cstruct.len item);
-       fail (Failure "journal too small")
     | `Error msg ->
-       error "Failed to write item toLVM queue: %s" msg;
-       fail (Failure msg)
-    | `Ok position ->
-       return position
+      error "Failed to read from the ToLVM queue: %s" msg;
+      fail (Failure msg)
+    | `Ok (position, rev_items) ->
+      let items = List.rev rev_items in
+      return (position, items)
 
   let advance t position =
-    Producer.advance ~t:t.p ~position ()
+    Consumer.advance ~t:t.c ~position ()
     >>= function
     | `Error msg ->
-      error "Failed to advance toLVM producer pointer: %s" msg;
+      error "Failed to advance toLVM consumer pointer: %s" msg;
       fail (Failure msg)
     | `Ok () ->
       return () 
