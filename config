@@ -1,0 +1,1 @@
+((host_allocation_quantum 1024)                                                   (hosts ((host1 ((to_lvm toLVM) (from_lvm fromLVM))))))
