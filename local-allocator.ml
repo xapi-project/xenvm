@@ -3,6 +3,16 @@ open Sexplib.Std
 open Block_ring_unix
 open Log
 
+module Config = struct
+  type t = {
+    socket: string; (* listen on this socket *)
+    localJournal: string; (* path to the host local journal *)
+    freePool: string; (* name of the device mapper device with free blocks *)
+    toLVM: string; (* pending updates for LVM *)
+    fromLVM: string; (* received updates from LVM *)
+  } with sexp
+end
+
 module ToLVM = struct
   type t = {
     p: Producer.t;
@@ -154,22 +164,30 @@ let stat x =
     error "The device mapper device %s has disappeared." x;
     return `Retry
 
-let main socket journal freePool fromLVM toLVM =
+let main config socket journal freePool fromLVM toLVM =
+  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  let config = {
+    Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
+    localJournal = (match journal with None -> config.Config.localJournal | Some x -> x);
+    freePool = (match freePool with None -> config.Config.freePool | Some x -> x);
+    toLVM = (match toLVM with None -> config.Config.toLVM | Some x -> x);
+    fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
+  } in
+  debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+
   (* Perform some prechecks *)
-  let freePool = match freePool with
-    | None -> failwith "You must provide a --freePool argument"
-    | Some freePool ->
-      begin match Devmapper.stat freePool with
+  let freePool =
+    begin match Devmapper.stat config.Config.freePool with
       | None ->
         let ls = Devmapper.ls () in
-        failwith (Printf.sprintf "Failed to find freePool %s. Available volumes are: %s" freePool (String.concat ", " ls))
+        failwith (Printf.sprintf "Failed to find freePool %s. Available volumes are: %s" config.Config.freePool (String.concat ", " ls))
       | Some _ ->
         ()
-      end;
-      freePool in
+    end;
+    freePool in
 
   let t =
-    ToLVM.start toLVM
+    ToLVM.start config.Config.toLVM
     >>= fun tolvm ->
     let perform t =
       let open Op in
@@ -203,7 +221,7 @@ let main socket journal freePool fromLVM toLVM =
         return () in
 
     let module J = Journal.Make(Op) in
-    J.start journal perform
+    J.start config.Config.localJournal perform
     >>= fun j ->
 
     let ls = Devmapper.ls () in
@@ -218,7 +236,7 @@ let main socket journal freePool fromLVM toLVM =
            others will keep going *)
         J.push j (Op.Print ("Couldn't find device mapper device: " ^ line))
       | Some data_volume ->
-        try_forever (fun () -> stat freePool)
+        try_forever (fun () -> stat config.Config.freePool)
         >>= fun free_volume ->
         (* choose the blocks we're going to transfer *)
         try_forever (fun () ->
@@ -226,7 +244,7 @@ let main socket journal freePool fromLVM toLVM =
             let physical_blocks = first_exn free_volume 1024L in
             (* append these onto the data_volume *)
             let new_targets = new_targets data_volume physical_blocks in
-            return (`Ok (BlockUpdate.({ fromLV = freePool; toLV = line; targets = new_targets })))
+            return (`Ok (BlockUpdate.({ fromLV = config.Config.freePool; toLV = line; targets = new_targets })))
           with Retry ->
             info "There aren't enough free blocks, waiting.";
             return `Retry
@@ -252,13 +270,17 @@ let info =
   ] in
   Term.info "local-allocator" ~version:"0.1-alpha" ~doc ~man
 
+let config =
+  let doc = "Path to the config file" in
+  Arg.(value & opt file "localConfig" & info [ "config" ] ~docv:"CONFIG" ~doc)
+
 let socket =
   let doc = "Path of Unix domain socket to listen on" in
   Arg.(value & opt (some string) None & info [ "socket" ] ~docv:"SOCKET" ~doc)
 
 let journal =
   let doc = "Path of the host local journal" in
-  Arg.(value & opt file "journal" & info [ "journal" ] ~docv:"JOURNAL" ~doc)
+  Arg.(value & opt (some file) None & info [ "journal" ] ~docv:"JOURNAL" ~doc)
 
 let freePool =
   let doc = "Name of the device mapper device containing the free blocks" in
@@ -266,14 +288,14 @@ let freePool =
 
 let toLVM =
   let doc = "Path to the device or file to contain the pending LVM metadata updates" in
-  Arg.(value & opt file "toLVM" & info [ "toLVM" ] ~docv:"TOLVM" ~doc)
+  Arg.(value & opt (some file) None & info [ "toLVM" ] ~docv:"TOLVM" ~doc)
 
 let fromLVM =
   let doc = "Path to the device or file which contains new free blocks from LVM" in
-  Arg.(value & opt file "fromLVM" & info [ "fromLVM" ] ~docv:"FROMLVM" ~doc)
+  Arg.(value & opt (some file) None & info [ "fromLVM" ] ~docv:"FROMLVM" ~doc)
 
 let () =
-  let t = Term.(pure main $ socket $ journal $ freePool $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ config $ socket $ journal $ freePool $ fromLVM $ toLVM) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0
