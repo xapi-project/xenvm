@@ -136,7 +136,7 @@ let socket =
 
 let config =
   let doc = "Path to the config file" in
-  Arg.(value & opt file "config" & info [ "config" ] ~docv:"CONFIG" ~doc)
+  Arg.(value & opt file "remoteConfig" & info [ "config" ] ~docv:"CONFIG" ~doc)
 
 let () =
   let t = Term.(pure main $ socket $ config) in
