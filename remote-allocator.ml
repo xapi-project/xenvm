@@ -12,6 +12,7 @@ module Config = struct
   type t = {
     host_allocation_quantum: int64; (* amount of allocate each host at a time *)
     hosts: (string * lvm_rings) list; (* host id -> rings *)
+    master_journal: string; (* path to the SRmaster journal *)
   } with sexp
 end
 
@@ -55,7 +56,7 @@ end
 module Op = struct
   type t =
     | Print of string
-    | LocalAllocation of BlockUpdate.t
+    | BatchOfAllocations of BlockUpdate.t list
   with sexp
 
   let of_cstruct x =
@@ -68,8 +69,51 @@ module Op = struct
 end
 
 let main socket config =
+  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
   let t =
-    fail (Failure "unimplemented") in
+    let to_LVMs = List.map (fun (_, { Config.to_lvm }) ->
+      ToLVM.start to_lvm
+    ) config.Config.hosts in
+
+    let perform t =
+      let open Op in
+      sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
+      match t with
+      | Print _ -> return ()
+      | BatchOfAllocations _ -> return () in
+
+    let module J = Journal.Make(Op) in
+    J.start config.Config.master_journal perform
+    >>= fun j ->
+
+    let rec main_loop () =
+      Lwt_list.map_p
+        (fun t ->
+          t >>= fun to_lvm ->
+          ToLVM.pop to_lvm
+          >>= fun (pos, item) ->
+          return (to_lvm, pos, item)
+        ) to_LVMs
+      >>= fun work ->
+      let items = List.concat (List.map (fun (_, _, bu) -> bu) work) in
+      if items = [] then begin
+        debug "sleeping for 5s";
+        Lwt_unix.sleep 5.
+        >>= fun () ->
+        main_loop ()
+      end else begin
+        J.push j (Op.BatchOfAllocations (List.concat (List.map (fun (_, _, bu) -> bu) work)))
+        >>= fun () -> 
+        (* write the work to a journal *)
+        Lwt_list.iter_p
+          (fun (t, pos, _) ->
+            ToLVM.advance t pos
+          ) work
+        >>= fun () ->
+        main_loop ()
+      end in
+    main_loop () in
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
