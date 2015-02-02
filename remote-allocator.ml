@@ -83,7 +83,7 @@ let main socket config =
       | Print _ -> return ()
       | BatchOfAllocations _ -> return () in
 
-    let module J = Journal.Make(Op) in
+    let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
     J.start config.Config.master_journal perform
     >>= fun j ->
 

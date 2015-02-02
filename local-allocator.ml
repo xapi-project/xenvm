@@ -220,7 +220,7 @@ let main config socket journal freePool fromLVM toLVM =
         print_endline "Resume local dm devices";
         return () in
 
-    let module J = Journal.Make(Op) in
+    let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
     J.start config.Config.localJournal perform
     >>= fun j ->
 
