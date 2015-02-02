@@ -1,7 +1,7 @@
 (
  (socket socket)
  (localJournal localJournal)
- (freePool freePool)
+ (freePool djstest-free)
  (toLVM toLVM)
  (fromLVM fromLVM)
 )

@@ -6,3 +6,8 @@ setup.data
 setup.log
 setup.ml
 *.native
+bigdisk
+masterJournal
+localJournal
+toLVM
+fromLVM
