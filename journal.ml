@@ -21,6 +21,7 @@ module Make(Op: OP) = struct
     mutable shutdown_complete: bool;
     perform: Op.t -> unit Lwt.t;
   }
+
   let replay t =
     Consumer.fold ~f:(fun x y -> x :: y) ~t:t.c ~init:[] ()
     >>= function
@@ -42,7 +43,10 @@ module Make(Op: OP) = struct
            error "In replay, failed to advance consumer: %s" msg;
            fail (Failure msg)
          | `Ok () ->
+           (* wake up anyone stuck in a `Retry loop *)
+           Lwt_condition.broadcast t.cvar ();
            return () )
+
   let start filename perform =
     ( Consumer.attach ~disk:filename ()
       >>= function
@@ -117,8 +121,8 @@ module Make(Op: OP) = struct
       Producer.push ~t:t.p ~item ()
       >>= function
       | `Retry ->
-         info "journal is full; sleeping 5s";
-         Lwt_unix.sleep 5.
+         info "journal is full; waiting for a notification";
+         Lwt_condition.wait t.cvar
          >>= fun () ->
          push t op
       | `TooBig ->
