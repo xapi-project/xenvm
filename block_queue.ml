@@ -73,12 +73,14 @@ module Popper(Item: CSTRUCTABLE) = struct
     c: Consumer.t;
   }
 
-  let start filename =
+  let rec start filename =
     Consumer.attach ~disk:filename ()
     >>= function
     | `Error msg ->
       info "Failed to attach to existing queue: %s" msg;
-      fail (Failure msg)
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      start filename
     | `Ok c ->
       return { c }
 
