@@ -6,8 +6,8 @@
  (device /dev/loop0)
   (hosts (
     (host1 (
-      (to_lvm toLVM) 
-      (from_lvm fromLVM)
+      (to_lvm /dev/mapper/djstest-toLVM) 
+      (from_lvm /dev/mapper/djstest-fromLVM)
       (free free)
     ))
   ))
