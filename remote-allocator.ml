@@ -12,12 +12,15 @@ module Config = struct
 
   type t = {
     host_allocation_quantum: int64; (* amount of allocate each host at a time *)
+    vg: string; (* name of the volume group *)
+    device: string; (* physical device containing the volume group *)
     hosts: (string * host) list; (* host id -> rings *)
     master_journal: string; (* path to the SRmaster journal *)
   } with sexp
 end
 
 module ToLVM = Block_queue.Popper(BlockUpdate)
+module FromLVM = Block_queue.Pusher(BlockUpdate)
 
 module Op = struct
   type t =
@@ -53,8 +56,21 @@ let main socket config =
     J.start config.Config.master_journal perform
     >>= fun j ->
 
+    let top_up_free_volumes () =
+      let module Disk = Disk_mirage.Make(Block)(Io_page) in
+      let module Vg_IO = Lvm.Vg.Make(Disk) in
+      Vg_IO.read [ config.Config.device ]
+      >>= function
+      | `Error e ->
+        error "Ignoring error reading LVM metadata: %s" e;
+        return ()
+      | `Ok x ->
+        return () in
+
     let rec main_loop () =
       (* 1. Do any of the host free LVs need topping up? *)
+      top_up_free_volumes ()
+      >>= fun () ->
 
       (* 2. Are there any pending LVM updates from hosts? *)
       Lwt_list.map_p

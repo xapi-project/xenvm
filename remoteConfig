@@ -1,6 +1,8 @@
 (
  (host_allocation_quantum 1024)
  (master_journal masterJournal)
+ (vg djstest)
+ (device /dev/loop0)
   (hosts (
     (host1 (
       (to_lvm toLVM) 
