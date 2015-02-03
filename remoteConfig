@@ -1,5 +1,6 @@
 (
  (host_allocation_quantum 1024)
+ (host_low_water_mark 512)
  (master_journal masterJournal)
  (vg djstest)
  (device /dev/loop0)
@@ -7,7 +8,7 @@
     (host1 (
       (to_lvm toLVM) 
       (from_lvm fromLVM)
-      (free djstest-free)
+      (free free)
     ))
   ))
 )

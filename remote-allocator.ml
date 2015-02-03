@@ -12,6 +12,7 @@ module Config = struct
 
   type t = {
     host_allocation_quantum: int64; (* amount of allocate each host at a time *)
+    host_low_water_mark: int64; (* when the free memory drops below here, we allocate *)
     vg: string; (* name of the volume group *)
     device: string; (* physical device containing the volume group *)
     hosts: (string * host) list; (* host id -> rings *)
@@ -65,6 +66,17 @@ let main socket config =
         error "Ignoring error reading LVM metadata: %s" e;
         return ()
       | `Ok x ->
+        List.iter
+         (fun (host, { Config.free }) ->
+           try
+             let lv = List.find (fun lv -> lv.Lvm.Lv.name = free) x.Lvm.Vg.lvs in
+             let size = Lvm.Lv.size_in_extents lv in
+             if size < config.Config.host_low_water_mark then begin
+               Printf.printf "LV %s has %Ld extents < low_water_mark %Ld\n%!" free size config.Config.host_low_water_mark
+             end
+           with Not_found ->
+             error "Failed to find host %s free LV %s" host free
+         ) config.Config.hosts;
         return () in
 
     let rec main_loop () =
