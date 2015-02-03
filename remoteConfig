@@ -1,5 +1,11 @@
 (
  (host_allocation_quantum 1024)
  (master_journal masterJournal)
-  (hosts ((host1 ((to_lvm toLVM) (from_lvm fromLVM)))))
+  (hosts (
+    (host1 (
+      (to_lvm toLVM) 
+      (from_lvm fromLVM)
+      (free djstest-free)
+    ))
+  ))
 )

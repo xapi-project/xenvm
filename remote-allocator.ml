@@ -4,54 +4,20 @@ open Block_ring_unix
 open Log
 
 module Config = struct
-  type lvm_rings = {
+  type host = {
     to_lvm: string; (* where to read changes to be written to LVM from *)
     from_lvm: string; (* where to write changes from LVM to *)
+    free: string; (* name of the free block LV *)
   } with sexp
 
   type t = {
     host_allocation_quantum: int64; (* amount of allocate each host at a time *)
-    hosts: (string * lvm_rings) list; (* host id -> rings *)
+    hosts: (string * host) list; (* host id -> rings *)
     master_journal: string; (* path to the SRmaster journal *)
   } with sexp
 end
 
-module ToLVM = struct
-  type t = {
-    c: Consumer.t;
-  }
-
-  let start filename =
-    Consumer.attach ~disk:filename ()
-    >>= function
-    | `Error msg ->
-      info "Failed to attach to existing ToLVM queue: %s" msg;
-      fail (Failure msg)
-    | `Ok c ->
-      return { c }
-
-  let rec pop t =
-    Consumer.fold ~f:(fun buf acc ->
-      let bu = BlockUpdate.of_cstruct buf in
-      bu :: acc
-    ) ~t:t.c ~init:[] ()
-    >>= function
-    | `Error msg ->
-      error "Failed to read from the ToLVM queue: %s" msg;
-      fail (Failure msg)
-    | `Ok (position, rev_items) ->
-      let items = List.rev rev_items in
-      return (position, items)
-
-  let advance t position =
-    Consumer.advance ~t:t.c ~position ()
-    >>= function
-    | `Error msg ->
-      error "Failed to advance toLVM consumer pointer: %s" msg;
-      fail (Failure msg)
-    | `Ok () ->
-      return () 
-end
+module ToLVM = Block_queue.Popper(BlockUpdate)
 
 module Op = struct
   type t =
@@ -88,6 +54,9 @@ let main socket config =
     >>= fun j ->
 
     let rec main_loop () =
+      (* 1. Do any of the host free LVs need topping up? *)
+
+      (* 2. Are there any pending LVM updates from hosts? *)
       Lwt_list.map_p
         (fun t ->
           t >>= fun to_lvm ->

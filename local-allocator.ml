@@ -13,62 +13,7 @@ module Config = struct
   } with sexp
 end
 
-module ToLVM = struct
-  type t = {
-    p: Producer.t;
-  }
-
-  let start filename =
-    Producer.attach ~disk:filename ()
-    >>= function
-    | `Error msg ->
-      info "Failed to attach to existing ToLVM queue; creating a fresh one: %s" msg;
-      ( Producer.create ~disk:filename ()
-        >>= function
-        | `Error msg ->
-          error "Failed to create a fresh ToLVM queue: %s" msg;
-          fail (Failure msg)
-        | `Ok () ->
-          return ()
-      ) >>= fun () ->
-      ( Producer.attach ~disk:filename ()
-        >>= function
-        | `Error msg ->
-          error "Failed to attach to a ToLVM queue that I just created: %s" msg;
-          fail (Failure msg)
-        | `Ok p ->
-          return { p }
-      )
-    | `Ok p ->
-      return { p }
-
-  let rec push t bu =
-    let item = BlockUpdate.to_cstruct bu in
-    Producer.push ~t:t.p ~item ()
-    >>= function
-    | `Retry ->
-       info "journal is full; sleeping 5s";
-       Lwt_unix.sleep 5.
-       >>= fun () ->
-       push t bu
-    | `TooBig ->
-       error "journal is too small to receive item of size %d bytes" (Cstruct.len item);
-       fail (Failure "journal too small")
-    | `Error msg ->
-       error "Failed to write item toLVM queue: %s" msg;
-       fail (Failure msg)
-    | `Ok position ->
-       return position
-
-  let advance t position =
-    Producer.advance ~t:t.p ~position ()
-    >>= function
-    | `Error msg ->
-      error "Failed to advance toLVM producer pointer: %s" msg;
-      fail (Failure msg)
-    | `Ok () ->
-      return () 
-end
+module ToLVM = Block_queue.Pusher(BlockUpdate)
 
 module Op = struct
   type t =
