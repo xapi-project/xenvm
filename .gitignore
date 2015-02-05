@@ -1,5 +1,4 @@
 _build
-_tags
 myocamlbuild.ml
 setup.bin
 setup.data
