@@ -41,7 +41,7 @@ end
 
 (* Compute the BlockUpdate to send a host given a set of allocated segments *)
 let extend_free_volume vg lv extents =
-  let to_sector segment = Int64.mul segment vg.Lvm.Vg.extent_size in
+  let to_sector pv segment = Int64.(add pv.Lvm.Pv.pe_start (mul segment vg.Lvm.Vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
   let next_vsegment = List.fold_left (fun acc s -> max acc Lvm.Lv.Segment.(Int64.add s.start_extent s.extent_count)) 0L lv.Lvm.Lv.segments in
  let _, targets =
@@ -52,9 +52,9 @@ let extend_free_volume vg lv extents =
          let pv = List.find (fun p -> p.Lvm.Pv.name = pvname) vg.Lvm.Vg.pvs in
          let device = Location.Path pv.Lvm.Pv.real_device in
          Int64.add next_vsegment size,
-         { Target.start = to_sector next_vsegment;
-           size = to_sector size;
-           kind = Target.Linear { Location.device; offset = to_sector psegment } } :: acc
+         { Target.start = to_sector pv next_vsegment;
+           size = to_sector pv size;
+           kind = Target.Linear { Location.device; offset = to_sector pv psegment } } :: acc
        with Not_found ->
          error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
          next_vsegment, acc
