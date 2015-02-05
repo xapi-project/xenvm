@@ -26,7 +26,8 @@ module FromLVM = Block_queue.Pusher(BlockUpdate)
 module Op = struct
   type t =
     | Print of string
-    | BatchOfAllocations of BlockUpdate.t list
+    | BatchOfAllocations of BlockUpdate.t list (* from the host *)
+    | FreeAllocation of BlockUpdate.t (* to a host *)
   with sexp
 
   let of_cstruct x =
@@ -37,6 +38,28 @@ module Op = struct
     Cstruct.blit_from_string s 0 c 0 (Cstruct.len c);
     c
 end
+
+(* Compute the BlockUpdate to send a host given a set of allocated segments *)
+let extend_free_volume vg lv extents =
+  let to_sector segment = Int64.mul segment vg.Lvm.Vg.extent_size in
+  (* We will extend the LV, so find the next 'virtual segment' *)
+  let next_vsegment = List.fold_left (fun acc s -> max acc Lvm.Lv.Segment.(Int64.add s.start_extent s.extent_count)) 0L lv.Lvm.Lv.segments in
+ let _, targets =
+   let open Devmapper in
+   List.fold_left
+     (fun (next_vsegment, acc) (pvname, (psegment, size)) ->
+       try
+         let pv = List.find (fun p -> p.Lvm.Pv.name = pvname) vg.Lvm.Vg.pvs in
+         let device = Location.Path pv.Lvm.Pv.real_device in
+         Int64.add next_vsegment size,
+         { Target.start = to_sector next_vsegment;
+           size = to_sector size;
+           kind = Target.Linear { Location.device; offset = to_sector psegment } } :: acc
+       with Not_found ->
+         error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
+         next_vsegment, acc
+     ) (next_vsegment, []) extents in
+  BlockUpdate.({ fromLV = ""; toLV = lv.Lvm.Lv.name; targets })
 
 let read_sector_size device =
   Block.connect device
@@ -67,7 +90,8 @@ let main socket config =
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       match t with
       | Print _ -> return ()
-      | BatchOfAllocations _ -> return () in
+      | BatchOfAllocations _ -> return ()
+      | FreeAllocation _ -> return () in
 
     let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
     J.start config.Config.master_journal perform
@@ -84,18 +108,30 @@ let main socket config =
       | `Ok x ->
         let extent_size = x.Lvm.Vg.extent_size in (* in sectors *)
         let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
-        List.iter
+        (* XXX: avoid double-allocating the same free blocks *)
+        Lwt_list.iter_s
          (fun (host, { Config.free }) ->
-           try
-             let lv = List.find (fun lv -> lv.Lvm.Lv.name = free) x.Lvm.Vg.lvs in
+           match try Some(List.find (fun lv -> lv.Lvm.Lv.name = free) x.Lvm.Vg.lvs) with _ -> None with
+           | Some lv ->
              let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
              if size_mib < config.Config.host_low_water_mark then begin
-               Printf.printf "LV %s is %Ld MiB < low_water_mark %Ld MiB\n%!" free size_mib config.Config.host_low_water_mark
-             end
-           with Not_found ->
-             error "Failed to find host %s free LV %s" host free
-         ) config.Config.hosts;
-        return () in
+               Printf.printf "LV %s is %Ld MiB < low_water_mark %Ld MiB\n%!" free size_mib config.Config.host_low_water_mark;
+               (* find free space in the VG *)
+               begin match Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.Config.host_allocation_quantum extent_size_mib) with
+               | `Error free_extents ->
+                 info "LV %s is %Ld MiB but total space free (%Ld MiB) is less than allocation quantum (%Ld MiB)"
+                   free size_mib Int64.(mul free_extents extent_size_mib) config.Config.host_allocation_quantum;
+                 (* try again later *)
+                 return ()
+               | `Ok allocated_extents ->
+                 let bu = extend_free_volume x lv allocated_extents in
+                 J.push j (Op.FreeAllocation bu)
+               end
+             end else return ()
+           | None ->
+             error "Failed to find host %s free LV %s" host free;
+             return ()
+         ) config.Config.hosts in
 
     let rec main_loop () =
       (* 1. Do any of the host free LVs need topping up? *)
