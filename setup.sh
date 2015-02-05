@@ -4,9 +4,9 @@ losetup /dev/loop0 bigdisk
 pvcreate --metadatasize=10M /dev/loop0
 vgcreate djstest /dev/loop0
 # Volume djstest-free will contain the free blocks
-lvcreate -L 256M djstest -n free
+lvcreate -L 4M djstest -n free
 # Volume djstest-live is the guest LV
-lvcreate -L 256M djstest -n live
+lvcreate -L 4M djstest -n live
 
 # create journals: one for a slave, one for a master
 lvcreate -L 1M djstest -n masterJournal

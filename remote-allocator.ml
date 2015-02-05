@@ -11,8 +11,8 @@ module Config = struct
   } with sexp
 
   type t = {
-    host_allocation_quantum: int64; (* amount of allocate each host at a time *)
-    host_low_water_mark: int64; (* when the free memory drops below here, we allocate *)
+    host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)
+    host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
     vg: string; (* name of the volume group *)
     device: string; (* physical device containing the volume group *)
     hosts: (string * host) list; (* host id -> rings *)
@@ -38,10 +38,26 @@ module Op = struct
     c
 end
 
+let read_sector_size device =
+  Block.connect device
+  >>= function
+  | `Ok x ->
+    Block.get_info x
+    >>= fun info ->
+    Block.disconnect x
+    >>= fun () ->
+    return info.Block.sector_size
+  | _ ->
+    error "Failed to read sector size of %s" device;
+    fail (Failure (Printf.sprintf "Failed to read sector size of %s" device))
+
 let main socket config =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
   let t =
+    read_sector_size config.Config.device
+    >>= fun sector_size ->
+
     let to_LVMs = List.map (fun (_, { Config.to_lvm }) ->
       ToLVM.start to_lvm
     ) config.Config.hosts in
@@ -66,13 +82,15 @@ let main socket config =
         error "Ignoring error reading LVM metadata: %s" e;
         return ()
       | `Ok x ->
+        let extent_size = x.Lvm.Vg.extent_size in (* in sectors *)
+        let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
         List.iter
          (fun (host, { Config.free }) ->
            try
              let lv = List.find (fun lv -> lv.Lvm.Lv.name = free) x.Lvm.Vg.lvs in
-             let size = Lvm.Lv.size_in_extents lv in
-             if size < config.Config.host_low_water_mark then begin
-               Printf.printf "LV %s has %Ld extents < low_water_mark %Ld\n%!" free size config.Config.host_low_water_mark
+             let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
+             if size_mib < config.Config.host_low_water_mark then begin
+               Printf.printf "LV %s is %Ld MiB < low_water_mark %Ld MiB\n%!" free size_mib config.Config.host_low_water_mark
              end
            with Not_found ->
              error "Failed to find host %s free LV %s" host free
@@ -125,7 +143,7 @@ let info =
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.info "local-allocator" ~version:"0.1-alpha" ~doc ~man
+  Term.info "remote-allocator" ~version:"0.1-alpha" ~doc ~man
 
 let socket =
   let doc = "Path of Unix domain socket to listen on" in
