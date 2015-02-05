@@ -7,6 +7,29 @@ License:     ISC
 Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
+Library xenvmidl
+  CompiledObject:     best
+  Path:               idl
+  Findlibname:        xenvmidl
+  Modules:            Xenvm_interface
+  BuildDepends:       rpclib, rpclib.syntax, lvm, cohttp.lwt
+
+Executable "xenvmd"
+  CompiledObject:     best
+  Path:               xenvmd
+  MainIs:             xenvmd.ml
+  Custom:             true
+  Install:            false
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, shared-block-ring.unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mirage
+
+Executable "xenvm"
+  CompiledObject:     best
+  Path:               xenvm
+  MainIs:             xenvm.ml
+  Custom:             true
+  Install:            false
+  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl
+
 Executable "local-allocator"
   CompiledObject:     best
   Path:               .
