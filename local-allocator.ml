@@ -14,6 +14,7 @@ module Config = struct
 end
 
 module ToLVM = Block_queue.Pusher(BlockUpdate)
+module FromLVM = Block_queue.Popper(BlockUpdate)
 
 module Op = struct
   type t =
@@ -134,6 +135,29 @@ let main config socket journal freePool fromLVM toLVM =
   let t =
     ToLVM.start config.Config.toLVM
     >>= fun tolvm ->
+
+    let receive_free_blocks_forever () =
+      debug "Receiving free blocks from the SRmaster forever";
+      FromLVM.start config.Config.fromLVM
+      >>= fun from_lvm -> (* blocks for a while *)
+      let rec loop_forever () =
+        FromLVM.pop from_lvm
+        >>= fun (pos, ts) ->
+        let open BlockUpdate in
+        Lwt_list.iter_s
+          (fun t ->
+            sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
+            assert (t.fromLV = "");
+            (* update device mapper *)
+            return ()
+          ) ts
+        >>= fun () ->
+        FromLVM.advance from_lvm pos
+        >>= fun () ->
+        loop_forever () in
+      loop_forever () in
+    let (_: unit Lwt.t) = receive_free_blocks_forever () in
+
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
