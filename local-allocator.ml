@@ -13,13 +13,13 @@ module Config = struct
   } with sexp
 end
 
-module ToLVM = Block_queue.Pusher(BlockUpdate)
-module FromLVM = Block_queue.Popper(BlockUpdate)
+module ToLVM = Block_queue.Pusher(LocalAllocation)
+module FromLVM = Block_queue.Popper(LocalAllocation)
 
 module Op = struct
   type t =
     | Print of string
-    | LocalAllocation of BlockUpdate.t
+    | LocalAllocation of LocalAllocation.t
   with sexp
 
   let of_cstruct x =
@@ -143,7 +143,7 @@ let main config socket journal freePool fromLVM toLVM =
       let rec loop_forever () =
         FromLVM.pop from_lvm
         >>= fun (pos, ts) ->
-        let open BlockUpdate in
+        let open LocalAllocation in
         Lwt_list.iter_s
           (fun t ->
             sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
@@ -168,7 +168,7 @@ let main config socket journal freePool fromLVM toLVM =
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       match t with
       | Print _ -> return ()
-      | LocalAllocation ({ BlockUpdate.fromLV; toLV; targets } as b) ->
+      | LocalAllocation ({ LocalAllocation.fromLV; toLV; targets } as b) ->
         ToLVM.push tolvm b
         >>= fun position ->
         try_forever (fun () -> stat fromLV)
@@ -182,9 +182,9 @@ let main config socket journal freePool fromLVM toLVM =
         Devmapper.suspend fromLV;
         Devmapper.suspend toLV;
         print_endline "Suspend local dm devices";
-        Printf.printf "reload %s with\n%s\n%!" fromLV (Sexplib.Sexp.to_string_hum (BlockUpdate.sexp_of_targets from_targets));
+        Printf.printf "reload %s with\n%s\n%!" fromLV (Sexplib.Sexp.to_string_hum (LocalAllocation.sexp_of_targets from_targets));
         Devmapper.reload fromLV from_targets;
-        Printf.printf "reload %s with\n%S\n%!" toLV (Sexplib.Sexp.to_string_hum (BlockUpdate.sexp_of_targets to_targets));
+        Printf.printf "reload %s with\n%S\n%!" toLV (Sexplib.Sexp.to_string_hum (LocalAllocation.sexp_of_targets to_targets));
         Devmapper.reload toLV to_targets;
         print_endline "Move target from one to the other (make idempotent)";
         ToLVM.advance tolvm position
@@ -218,7 +218,7 @@ let main config socket journal freePool fromLVM toLVM =
             let physical_blocks = first_exn free_volume 1024L in
             (* append these onto the data_volume *)
             let new_targets = new_targets data_volume physical_blocks in
-            return (`Ok (BlockUpdate.({ fromLV = config.Config.freePool; toLV = line; targets = new_targets })))
+            return (`Ok (LocalAllocation.({ fromLV = config.Config.freePool; toLV = line; targets = new_targets })))
           with Retry ->
             info "There aren't enough free blocks, waiting.";
             return `Retry

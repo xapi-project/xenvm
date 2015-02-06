@@ -20,14 +20,14 @@ module Config = struct
   } with sexp
 end
 
-module ToLVM = Block_queue.Popper(BlockUpdate)
-module FromLVM = Block_queue.Pusher(BlockUpdate)
+module ToLVM = Block_queue.Popper(LocalAllocation)
+module FromLVM = Block_queue.Pusher(LocalAllocation)
 
 module Op = struct
   type t =
     | Print of string
-    | BatchOfAllocations of BlockUpdate.t list (* from the host *)
-    | FreeAllocation of (string * BlockUpdate.t) (* to a host *)
+    | BatchOfAllocations of LocalAllocation.t list (* from the host *)
+    | FreeAllocation of (string * LocalAllocation.t) (* to a host *)
   with sexp
 
   let of_cstruct x =
@@ -39,7 +39,7 @@ module Op = struct
     c
 end
 
-(* Compute the BlockUpdate to send a host given a set of allocated segments *)
+(* Compute the LocalAllocation to send a host given a set of allocated segments *)
 let extend_free_volume vg lv extents =
   let to_sector pv segment = Int64.(add pv.Lvm.Pv.pe_start (mul segment vg.Lvm.Vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
@@ -59,7 +59,7 @@ let extend_free_volume vg lv extents =
          error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
          next_vsegment, acc
      ) (next_vsegment, []) extents in
-  BlockUpdate.({ fromLV = ""; toLV = lv.Lvm.Lv.name; targets })
+  LocalAllocation.({ fromLV = ""; toLV = lv.Lvm.Lv.name; targets })
 
 let read_sector_size device =
   Block.connect device
