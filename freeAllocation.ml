@@ -1,13 +1,7 @@
 open Sexplib.Std
 
-type lv = string with sexp
-type targets = Devmapper.Target.t list with sexp
-type t = {
-  fromLV: lv;
-  toLV: lv;
-  targets: targets; (* Remove from fromLV, add to toLV *)
-} with sexp
-(** A local allocation from a freeLV to a user data LV *)
+type t = Lvm.Pv.Allocator.t with sexp
+(** Physical blocks which should be included in the free pool *)
 
 let of_cstruct x =
   Cstruct.to_string x |> Sexplib.Sexp.of_string |> t_of_sexp

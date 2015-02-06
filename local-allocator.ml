@@ -7,14 +7,46 @@ module Config = struct
   type t = {
     socket: string; (* listen on this socket *)
     localJournal: string; (* path to the host local journal *)
+    devices: string list; (* devices containing the PVs *)
     freePool: string; (* name of the device mapper device with free blocks *)
     toLVM: string; (* pending updates for LVM *)
     fromLVM: string; (* received updates from LVM *)
   } with sexp
 end
 
+type pv = {
+  pe_start: int64;
+  device: string;
+} with sexp
+(* The minimum amount of info about a PV we need ot know *)
+
+type vg = {
+  extent_size: int64;
+  pvs: (string * pv) list;
+}
+(* The minimum amount of info about a VG we need ot know *)
+
+let query_lvm config =
+  let module Disk = Disk_mirage.Make(Block)(Io_page) in
+  let module Vg_IO = Lvm.Vg.Make(Disk) in
+  match config.Config.devices with
+  | [] ->
+    fail (Failure "I require at least one physical device")
+  | device :: _ ->
+    Vg_IO.read [ device ]
+    >>= function
+    | `Error e ->
+      error "Fatal error reading LVM metadata: %s" e;
+      fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
+    | `Ok x ->
+      let extent_size = x.Lvm.Vg.extent_size in
+      let pvs = List.map (fun pv ->
+        pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device = pv.Lvm.Pv.real_device }
+      ) x.Lvm.Vg.pvs in
+      return { extent_size; pvs }
+
 module ToLVM = Block_queue.Pusher(LocalAllocation)
-module FromLVM = Block_queue.Popper(LocalAllocation)
+module FromLVM = Block_queue.Popper(FreeAllocation)
 
 module Op = struct
   type t =
@@ -66,6 +98,28 @@ let new_targets volume extents =
       { Target.start = size; size = sectors; kind = Target.Linear location }
     ) extents
 
+(* Compute the LocalAllocation to send a host given a set of allocated segments *)
+let extend_free_volume vg lv extents =
+  let to_sector pv segment = Int64.(add pv.pe_start (mul segment vg.extent_size)) in
+  (* We will extend the LV, so find the next 'virtual segment' *)
+  let next_sector = sizeof lv in
+  let _, targets =
+    let open Devmapper in
+    List.fold_left
+      (fun (next_sector, acc) (pvname, (psegment, size)) ->
+        try
+          let pv = List.assoc pvname vg.pvs in
+          let device = Location.Path pv.device in
+          Int64.(add next_sector (mul size vg.extent_size)),
+          { Target.start = next_sector;
+            size = Int64.mul size vg.extent_size;
+            kind = Target.Linear { Location.device; offset = to_sector pv psegment } } :: acc
+        with Not_found ->
+          error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
+          next_sector, acc
+      ) (next_sector, []) extents in
+   targets
+
 module Allocator = Lvm.Allocator.Make(struct
   open Devmapper
   type t = Location.device with sexp
@@ -115,6 +169,7 @@ let main config socket journal freePool fromLVM toLVM =
   let config = {
     Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
     localJournal = (match journal with None -> config.Config.localJournal | Some x -> x);
+    devices = config.Config.devices;
     freePool = (match freePool with None -> config.Config.freePool | Some x -> x);
     toLVM = (match toLVM with None -> config.Config.toLVM | Some x -> x);
     fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
@@ -136,6 +191,9 @@ let main config socket journal freePool fromLVM toLVM =
     ToLVM.start config.Config.toLVM
     >>= fun tolvm ->
 
+    query_lvm config
+    >>= fun vg ->
+
     let receive_free_blocks_forever () =
       debug "Receiving free blocks from the SRmaster forever";
       FromLVM.start config.Config.fromLVM
@@ -143,15 +201,15 @@ let main config socket journal freePool fromLVM toLVM =
       let rec loop_forever () =
         FromLVM.pop from_lvm
         >>= fun (pos, ts) ->
-        let open LocalAllocation in
+        let open FreeAllocation in
         Lwt_list.iter_s
           (fun t ->
             sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-            assert (t.fromLV = "");
             Devmapper.suspend config.Config.freePool;
             try_forever (fun () -> stat config.Config.freePool)
             >>= fun to_volume ->
-            let to_targets = to_volume.Devmapper.targets @ t.targets in
+            let targets = extend_free_volume vg to_volume t in
+            let to_targets = to_volume.Devmapper.targets @ targets in
             Devmapper.reload config.Config.freePool to_targets;
             Devmapper.resume config.Config.freePool;
             return ()

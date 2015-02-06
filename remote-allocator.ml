@@ -21,13 +21,13 @@ module Config = struct
 end
 
 module ToLVM = Block_queue.Popper(LocalAllocation)
-module FromLVM = Block_queue.Pusher(LocalAllocation)
+module FromLVM = Block_queue.Pusher(FreeAllocation)
 
 module Op = struct
   type t =
     | Print of string
     | BatchOfAllocations of LocalAllocation.t list (* from the host *)
-    | FreeAllocation of (string * LocalAllocation.t) (* to a host *)
+    | FreeAllocation of (string * FreeAllocation.t) (* to a host *)
   with sexp
 
   let of_cstruct x =
@@ -38,28 +38,6 @@ module Op = struct
     Cstruct.blit_from_string s 0 c 0 (Cstruct.len c);
     c
 end
-
-(* Compute the LocalAllocation to send a host given a set of allocated segments *)
-let extend_free_volume vg lv extents =
-  let to_sector pv segment = Int64.(add pv.Lvm.Pv.pe_start (mul segment vg.Lvm.Vg.extent_size)) in
-  (* We will extend the LV, so find the next 'virtual segment' *)
-  let next_vsegment = List.fold_left (fun acc s -> max acc Lvm.Lv.Segment.(Int64.add s.start_extent s.extent_count)) 0L lv.Lvm.Lv.segments in
- let _, targets =
-   let open Devmapper in
-   List.fold_left
-     (fun (next_vsegment, acc) (pvname, (psegment, size)) ->
-       try
-         let pv = List.find (fun p -> p.Lvm.Pv.name = pvname) vg.Lvm.Vg.pvs in
-         let device = Location.Path pv.Lvm.Pv.real_device in
-         Int64.add next_vsegment size,
-         { Target.start = to_sector pv next_vsegment;
-           size = to_sector pv size;
-           kind = Target.Linear { Location.device; offset = to_sector pv psegment } } :: acc
-       with Not_found ->
-         error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
-         next_vsegment, acc
-     ) (next_vsegment, []) extents in
-  LocalAllocation.({ fromLV = ""; toLV = lv.Lvm.Lv.name; targets })
 
 let read_sector_size device =
   Block.connect device
@@ -95,11 +73,11 @@ let main socket config =
       match t with
       | Print _ -> return ()
       | BatchOfAllocations _ -> return ()
-      | FreeAllocation (host, bu) ->
+      | FreeAllocation (host, allocation) ->
         begin match try Some(List.assoc host from_LVMs) with Not_found -> None with
         | Some from_lvm_t ->
           from_lvm_t >>= fun from_lvm ->
-          FromLVM.push from_lvm bu
+          FromLVM.push from_lvm allocation
           >>= fun pos ->
           FromLVM.advance from_lvm pos
         | None ->
@@ -138,8 +116,7 @@ let main socket config =
                  (* try again later *)
                  return ()
                | `Ok allocated_extents ->
-                 let bu = extend_free_volume x lv allocated_extents in
-                 J.push j (Op.FreeAllocation (host, bu))
+                 J.push j (Op.FreeAllocation (host, allocated_extents))
                end
              end else return ()
            | None ->

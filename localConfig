@@ -2,6 +2,7 @@
  (socket socket)
  (localJournal localJournal)
  (freePool djstest-free)
+ (devices (/dev/loop0))
  (toLVM /dev/mapper/djstest-toLVM)
  (fromLVM /dev/mapper/djstest-fromLVM)
 )
