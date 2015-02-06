@@ -27,7 +27,7 @@ module Op = struct
   type t =
     | Print of string
     | BatchOfAllocations of BlockUpdate.t list (* from the host *)
-    | FreeAllocation of BlockUpdate.t (* to a host *)
+    | FreeAllocation of (string * BlockUpdate.t) (* to a host *)
   with sexp
 
   let of_cstruct x =
@@ -85,13 +85,27 @@ let main socket config =
       ToLVM.start to_lvm
     ) config.Config.hosts in
 
+    let from_LVMs = List.map (fun (host, { Config.from_lvm }) ->
+      host, FromLVM.start from_lvm
+    ) config.Config.hosts in
+
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       match t with
       | Print _ -> return ()
       | BatchOfAllocations _ -> return ()
-      | FreeAllocation _ -> return () in
+      | FreeAllocation (host, bu) ->
+        begin match try Some(List.assoc host from_LVMs) with Not_found -> None with
+        | Some from_lvm_t ->
+          from_lvm_t >>= fun from_lvm ->
+          FromLVM.push from_lvm bu
+          >>= fun pos ->
+          FromLVM.advance from_lvm pos
+        | None ->
+          info "unable to push block update to host %s because it has disappeared" host;
+          return () 
+        end in
 
     let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
     J.start config.Config.master_journal perform
@@ -125,7 +139,7 @@ let main socket config =
                  return ()
                | `Ok allocated_extents ->
                  let bu = extend_free_volume x lv allocated_extents in
-                 J.push j (Op.FreeAllocation bu)
+                 J.push j (Op.FreeAllocation (host, bu))
                end
              end else return ()
            | None ->
