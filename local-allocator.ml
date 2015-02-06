@@ -148,7 +148,12 @@ let main config socket journal freePool fromLVM toLVM =
           (fun t ->
             sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
             assert (t.fromLV = "");
-            (* update device mapper *)
+            Devmapper.suspend config.Config.freePool;
+            try_forever (fun () -> stat config.Config.freePool)
+            >>= fun to_volume ->
+            let to_targets = to_volume.Devmapper.targets @ t.targets in
+            Devmapper.reload config.Config.freePool to_targets;
+            Devmapper.resume config.Config.freePool;
             return ()
           ) ts
         >>= fun () ->
