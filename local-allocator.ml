@@ -134,14 +134,15 @@ module Allocator = Lvm.Allocator.Make(struct
   let to_string t = Sexplib.Sexp.to_string (sexp_of_t t)
 end)
 
-let rec try_forever f =
+let rec try_forever msg f =
   f ()
   >>= function
   | `Ok x -> return x
   | _ ->
+    debug "%s: retrying after 5s" msg;
     Lwt_unix.sleep 5.
     >>= fun () ->
-    try_forever f
+    try_forever msg f
 
 let stat x =
   match Devmapper.stat x with
@@ -202,7 +203,9 @@ let main config socket journal freePool fromLVM toLVM =
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       ToLVM.push tolvm t.volume
       >>= fun position ->
-      try_forever (fun () -> stat t.device.ExpandDevice.device)
+      try_forever
+        (Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device)
+        (fun () -> stat t.device.ExpandDevice.device)
       >>= fun to_device ->
       FreePool.remove t.device.ExpandDevice.extents
       >>= fun () ->
@@ -234,9 +237,11 @@ let main config socket journal freePool fromLVM toLVM =
         error "Couldn't find device mapper device: %s" device;
         return ()
       | Some data_volume ->
-        try_forever (fun () ->
-          FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib)
-        ) >>= fun extents ->
+        try_forever
+          (Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum)
+          (fun () ->
+            FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib)
+          ) >>= fun extents ->
         let size_sectors = sizeof data_volume in
         let size_extents = Int64.div size_sectors vg.extent_size in
         let segments, targets = extend_volume vg data_volume extents in
