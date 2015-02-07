@@ -60,9 +60,12 @@ let main socket config =
       ToLVM.start to_lvm
     ) config.Config.hosts in
 
-    let from_LVMs = List.map (fun (host, { Config.from_lvm }) ->
-      host, FromLVM.start from_lvm
-    ) config.Config.hosts in
+    Lwt_list.map_s (fun (host, { Config.from_lvm }) ->
+      FromLVM.start from_lvm
+      >>= fun from_lvm ->
+      return (host, from_lvm)
+    ) config.Config.hosts
+    >>= fun from_LVMs ->
 
     let perform t =
       let open Op in
@@ -72,8 +75,7 @@ let main socket config =
       | BatchOfAllocations _ -> return ()
       | FreeAllocation (host, allocation) ->
         begin match try Some(List.assoc host from_LVMs) with Not_found -> None with
-        | Some from_lvm_t ->
-          from_lvm_t >>= fun from_lvm ->
+        | Some from_lvm ->
           FromLVM.push from_lvm allocation
           >>= fun pos ->
           FromLVM.advance from_lvm pos
