@@ -46,7 +46,7 @@ let query_lvm config =
       ) x.Lvm.Vg.pvs in
       return { extent_size; pvs }
 
-module ToLVM = Block_queue.Pusher(LocalAllocation)
+module ToLVM = Block_queue.Pusher(ExpandVolume)
 module FromLVM = Block_queue.Popper(FreeAllocation)
 
 module FreePool = struct
@@ -78,10 +78,10 @@ end
 
 module Op = struct
   module T = struct
-    type t =
-      | Print of string
-      | LocalAllocation of LocalAllocation.t
-    with sexp
+    type t = {
+      volume: ExpandVolume.t;
+      device: ExpandDevice.t;
+    } with sexp 
   end
   include SexpToCstruct.Make(T)
   include T
@@ -95,37 +95,37 @@ let sizeof volume =
   let ends = List.map (fun t -> Int64.add t.Target.start t.Target.size) volume.targets in
   List.fold_left max 0L ends
 
-(* Return the targets you would need to extend the volume with the given extents *)
-let new_targets volume extents =
-  let open Devmapper in
-  let size = sizeof volume in
-  List.map
-    (fun (location, available) ->
-      let sectors = Int64.div available 512L in
-      { Target.start = size; size = sectors; kind = Target.Linear location }
-    ) extents
-
-(* Compute the new device mapper targets if [extents] are appended onto [lv] *)
+(* Compute the new segments and device mapper targets if [extents] are appended onto [lv] *)
 let extend_volume vg lv extents =
   let to_sector pv segment = Int64.(add pv.pe_start (mul segment vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
   let next_sector = sizeof lv in
-  let _, targets =
+  let next_segment = Int64.div next_sector vg.extent_size in
+  let _, segments, targets =
     let open Devmapper in
     List.fold_left
-      (fun (next_sector, acc) (pvname, (psegment, size)) ->
+      (fun (next_sector, segments, targets) (pvname, (psegment, size)) ->
         try
+          let next_segment = Int64.div next_sector vg.extent_size in
           let pv = List.assoc pvname vg.pvs in
           let device = Location.Path pv.device in
+          let segment =
+            { Lvm.Lv.Segment.start_extent = next_segment;
+              extent_count = size;
+              cls = Lvm.Lv.Segment.Linear { Lvm.Lv.Linear.name = pvname; start_extent = psegment } } in
+          let target =
+            { Target.start = next_sector;
+              size = Int64.mul size vg.extent_size;
+              kind = Target.Linear { Location.device; offset = to_sector pv psegment } } in
+
           Int64.(add next_sector (mul size vg.extent_size)),
-          { Target.start = next_sector;
-            size = Int64.mul size vg.extent_size;
-            kind = Target.Linear { Location.device; offset = to_sector pv psegment } } :: acc
+          segment :: segments,
+          target :: targets
         with Not_found ->
           error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
-          next_sector, acc
-      ) (next_sector, []) extents in
-   targets
+          next_sector, segments, targets
+      ) (next_sector, [], []) extents in
+   segments, targets
 
 module Allocator = Lvm.Allocator.Make(struct
   open Devmapper
@@ -200,27 +200,22 @@ let main config socket journal freePool fromLVM toLVM =
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-      match t with
-      | Print _ -> return ()
-      | LocalAllocation ({ LocalAllocation.extents; toLV; targets } as b) ->
-        ToLVM.push tolvm b
-        >>= fun position ->
-        try_forever (fun () -> stat toLV)
-        >>= fun to_volume ->
-        FreePool.remove extents
-        >>= fun () ->
-        (* Append the physical blocks to toLV *)
-        let to_targets = to_volume.Devmapper.targets @ targets in
-        Devmapper.suspend toLV;
-        print_endline "Suspend local dm device";
-        Printf.printf "reload %s with\n%S\n%!" toLV (Sexplib.Sexp.to_string_hum (LocalAllocation.sexp_of_targets to_targets));
-        Devmapper.reload toLV to_targets;
-        print_endline "Move target from one to the other (make idempotent)";
-        ToLVM.advance tolvm position
-        >>= fun () ->
-        Devmapper.resume toLV;
-        print_endline "Resume local dm device";
-        return () in
+      ToLVM.push tolvm t.volume
+      >>= fun position ->
+      try_forever (fun () -> stat t.device.ExpandDevice.device)
+      >>= fun to_device ->
+      FreePool.remove t.device.ExpandDevice.extents
+      >>= fun () ->
+      (* Append the physical blocks to toLV *)
+      let to_targets = to_device.Devmapper.targets @ t.device.ExpandDevice.targets in
+      Devmapper.suspend t.device.ExpandDevice.device;
+      print_endline "Suspend local dm device";
+      Devmapper.reload t.device.ExpandDevice.device to_targets;
+      ToLVM.advance tolvm position
+      >>= fun () ->
+      Devmapper.resume t.device.ExpandDevice.device;
+      print_endline "Resume local dm device";
+      return () in
 
     let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
     J.start config.Config.localJournal perform
@@ -231,18 +226,24 @@ let main config socket journal freePool fromLVM toLVM =
 
     let rec loop () =
       Lwt_io.read_line Lwt_io.stdin
-      >>= fun line ->
-      ( match Devmapper.stat line with
+      >>= fun device ->
+      ( match Devmapper.stat device with
       | None ->
         (* Log this kind of error. This tapdisk may block but at least
            others will keep going *)
-        J.push j (Op.Print ("Couldn't find device mapper device: " ^ line))
+        error "Couldn't find device mapper device: %s" device;
+        return ()
       | Some data_volume ->
         try_forever (fun () ->
           FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib)
         ) >>= fun extents ->
-        let targets = extend_volume vg data_volume extents in
-        J.push j (Op.LocalAllocation(LocalAllocation.({ extents; toLV = line; targets })))
+        let size_sectors = sizeof data_volume in
+        let size_extents = Int64.div size_sectors vg.extent_size in
+        let segments, targets = extend_volume vg data_volume extents in
+        let volume = device in (* XXX *)
+        let volume = { ExpandVolume.volume; segments } in
+        let device = { ExpandDevice.extents; device; targets } in
+        J.push j { Op.volume; device }
         (* XXX: need ot wait to prevent double-allocation *) 
       ) >>= fun () ->
       loop () in

@@ -20,14 +20,14 @@ module Config = struct
   } with sexp
 end
 
-module ToLVM = Block_queue.Popper(LocalAllocation)
+module ToLVM = Block_queue.Popper(ExpandVolume)
 module FromLVM = Block_queue.Pusher(FreeAllocation)
 
 module Op = struct
   module T = struct
     type t =
       | Print of string
-      | BatchOfAllocations of LocalAllocation.t list (* from the host *)
+      | BatchOfAllocations of ExpandVolume.t list (* from the host *)
       | FreeAllocation of (string * FreeAllocation.t) (* to a host *)
     with sexp
   end

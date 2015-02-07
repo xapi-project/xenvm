@@ -2,14 +2,14 @@ open Sexplib.Std
 
 module T = struct
 
-  type lv = string with sexp
+  type device = string with sexp
   type targets = Devmapper.Target.t list with sexp
   type t = {
     extents: Lvm.Pv.Allocator.t; (* The physical extents in the VG *)
-    toLV: lv;                    (* The destination LV *)
-    targets: targets;            (* The resulting targets *)
+    device: device;              (* The destination dm device *)
+    targets: targets;            (* The additional dm targets *)
   } with sexp
-  (** A local allocation from a freeLV to a user data LV. *)
+  (** A local allocation to a user data dm device *)
 
 end
 
