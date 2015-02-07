@@ -1,6 +1,6 @@
 open Sexplib.Std
 
-module Type = struct
+module T = struct
 
   type lv = string with sexp
   type targets = Devmapper.Target.t list with sexp
@@ -13,5 +13,5 @@ module Type = struct
 
 end
 
-include SexpToCstruct.Make(Type)
-include Type
+include SexpToCstruct.Make(T)
+include T

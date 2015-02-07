@@ -24,19 +24,16 @@ module ToLVM = Block_queue.Popper(LocalAllocation)
 module FromLVM = Block_queue.Pusher(FreeAllocation)
 
 module Op = struct
-  type t =
-    | Print of string
-    | BatchOfAllocations of LocalAllocation.t list (* from the host *)
-    | FreeAllocation of (string * FreeAllocation.t) (* to a host *)
-  with sexp
+  module T = struct
+    type t =
+      | Print of string
+      | BatchOfAllocations of LocalAllocation.t list (* from the host *)
+      | FreeAllocation of (string * FreeAllocation.t) (* to a host *)
+    with sexp
+  end
 
-  let of_cstruct x =
-    Cstruct.to_string x |> Sexplib.Sexp.of_string |> t_of_sexp
-  let to_cstruct t =
-    let s = sexp_of_t t |> Sexplib.Sexp.to_string in
-    let c = Cstruct.create (String.length s) in
-    Cstruct.blit_from_string s 0 c 0 (Cstruct.len c);
-    c
+  include SexpToCstruct.Make(T)
+  include T
 end
 
 let read_sector_size device =
