@@ -1,5 +1,6 @@
 (
  (socket socket)
+ (allocation_quantum 16)
  (localJournal localJournal)
  (freePool djstest-free)
  (devices (/dev/loop0))

@@ -11,6 +11,8 @@ lvcreate -L 4M djstest -n live
 # create journals: one for a slave, one for a master
 lvcreate -L 1M djstest -n masterJournal
 dd if=/dev/zero of=localJournal bs=1M count=1
+# Clear the local free block list
+rm -f djstest-free
 
 # create the to/FromLVM rings for one host
 lvcreate -L 1M djstest -n toLVM

@@ -6,9 +6,10 @@ open Log
 module Config = struct
   type t = {
     socket: string; (* listen on this socket *)
+    allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
     localJournal: string; (* path to the host local journal *)
     devices: string list; (* devices containing the PVs *)
-    freePool: string; (* name of the device mapper device with free blocks *)
+    freePool: string; (* path where we will store free block information *)
     toLVM: string; (* pending updates for LVM *)
     fromLVM: string; (* received updates from LVM *)
   } with sexp
@@ -48,6 +49,33 @@ let query_lvm config =
 module ToLVM = Block_queue.Pusher(LocalAllocation)
 module FromLVM = Block_queue.Popper(FreeAllocation)
 
+module FreePool = struct
+  (** Record the free block list in a file *)
+
+  let m = Lwt_mutex.create ()
+  let free = ref []
+
+  let add extents =
+    Lwt_mutex.with_lock m
+      (fun () ->
+        free := Lvm.Pv.Allocator.merge !free extents;
+        return ()
+      )
+
+  let find nr_extents =
+    Lwt_mutex.with_lock m
+      (fun () ->
+        return (Lvm.Pv.Allocator.find !free nr_extents)
+      )
+
+  let remove extents =
+    Lwt_mutex.with_lock m
+      (fun () ->
+        free := Lvm.Pv.Allocator.sub !free extents;
+        return ()
+      )
+end
+
 module Op = struct
   module T = struct
     type t =
@@ -60,23 +88,6 @@ module Op = struct
 end
 
 exception Retry (* out of space *)
-
-(* Return the physical (location, length) pairs which we're going
-   to use to extend the volume with *)
-let first_exn volume size =
-  let open Devmapper in
-  let rec loop targets size = match targets, size with
-  | _, 0L -> []
-  | [], _ -> raise Retry
-  | t :: ts, n ->
-    let available = min t.Target.size n in
-    let still_needed = Int64.sub n available in
-    let location = match t.Target.kind with
-    | Target.Linear l -> l
-    | Target.Unknown _ -> failwith "unknown is not implemented"
-    | Target.Striped _ -> failwith "striping is not implemented" in
-    (location, available) :: loop ts still_needed in
-  loop volume.targets size
 
 (* Return the virtual size of the volume *)
 let sizeof volume =
@@ -94,8 +105,8 @@ let new_targets volume extents =
       { Target.start = size; size = sectors; kind = Target.Linear location }
     ) extents
 
-(* Compute the LocalAllocation to send a host given a set of allocated segments *)
-let extend_free_volume vg lv extents =
+(* Compute the new device mapper targets if [extents] are appended onto [lv] *)
+let extend_volume vg lv extents =
   let to_sector pv segment = Int64.(add pv.pe_start (mul segment vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
   let next_sector = sizeof lv in
@@ -123,27 +134,6 @@ module Allocator = Lvm.Allocator.Make(struct
   let to_string t = Sexplib.Sexp.to_string (sexp_of_t t)
 end)
 
-(* Remove the physical blocks [targets] from [from], and then create a new
-   virtual LV containing the remainder *)
-let remove_physical from targets =
-  let open Devmapper in
-  let area_of_target target = match target.Target.kind with
-  | Target.Linear location -> location.Location.device, (location.Location.offset, target.size)
-  | Target.Unknown _ -> failwith "unknown target not implemented"
-  | Target.Striped _ -> failwith "striping is not implemented" in
-  let existing = List.map area_of_target from in
-  let to_remove = List.map area_of_target targets in
-  let remaining = Allocator.sub existing to_remove in
-  let _, targets =
-    List.fold_left
-      (fun (next_voffset, acc) (device, (poffset, size)) ->
-        Int64.add next_voffset size,
-        { Target.start = next_voffset;
-          size = size;
-          kind = Target.Linear { Location.device; offset = poffset } } :: acc
-      ) (0L, []) remaining in
-  List.rev targets
-
 let rec try_forever f =
   f ()
   >>= function
@@ -162,33 +152,30 @@ let stat x =
 
 let main config socket journal freePool fromLVM toLVM =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
-  let config = {
+  let config = { config with
     Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
     localJournal = (match journal with None -> config.Config.localJournal | Some x -> x);
-    devices = config.Config.devices;
     freePool = (match freePool with None -> config.Config.freePool | Some x -> x);
     toLVM = (match toLVM with None -> config.Config.toLVM | Some x -> x);
     fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
   } in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
 
-  (* Perform some prechecks *)
-  let freePool =
-    begin match Devmapper.stat config.Config.freePool with
-      | None ->
-        let ls = Devmapper.ls () in
-        failwith (Printf.sprintf "Failed to find freePool %s. Available volumes are: %s" config.Config.freePool (String.concat ", " ls))
-      | Some _ ->
-        ()
-    end;
-    freePool in
-
   let t =
-    ToLVM.start config.Config.toLVM
-    >>= fun tolvm ->
+    Device.read_sector_size (List.hd config.Config.devices)
+    >>= fun sector_size ->
 
     query_lvm config
     >>= fun vg ->
+
+    ToLVM.start config.Config.toLVM
+    >>= fun tolvm ->
+
+    let extent_size = vg.extent_size in (* in sectors *)
+    let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
+
+    info "Device %s has %d byte sectors" (List.hd config.Config.devices) sector_size;
+    info "The Volume Group has %Ld sector (%Ld MiB) extents" extent_size extent_size_mib;
 
     let receive_free_blocks_forever () =
       debug "Receiving free blocks from the SRmaster forever";
@@ -201,14 +188,7 @@ let main config socket journal freePool fromLVM toLVM =
         Lwt_list.iter_s
           (fun t ->
             sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-            Devmapper.suspend config.Config.freePool;
-            try_forever (fun () -> stat config.Config.freePool)
-            >>= fun to_volume ->
-            let targets = extend_free_volume vg to_volume t in
-            let to_targets = to_volume.Devmapper.targets @ targets in
-            Devmapper.reload config.Config.freePool to_targets;
-            Devmapper.resume config.Config.freePool;
-            return ()
+            FreePool.add t
           ) ts
         >>= fun () ->
         FromLVM.advance from_lvm pos
@@ -222,30 +202,24 @@ let main config socket journal freePool fromLVM toLVM =
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       match t with
       | Print _ -> return ()
-      | LocalAllocation ({ LocalAllocation.fromLV; toLV; targets } as b) ->
+      | LocalAllocation ({ LocalAllocation.extents; toLV; targets } as b) ->
         ToLVM.push tolvm b
         >>= fun position ->
-        try_forever (fun () -> stat fromLV)
-        >>= fun from_volume ->
         try_forever (fun () -> stat toLV)
         >>= fun to_volume ->
-        (* Remove the physical blocks from fromLV *)
-        let from_targets = remove_physical from_volume.Devmapper.targets targets in
+        FreePool.remove extents
+        >>= fun () ->
         (* Append the physical blocks to toLV *)
         let to_targets = to_volume.Devmapper.targets @ targets in
-        Devmapper.suspend fromLV;
         Devmapper.suspend toLV;
-        print_endline "Suspend local dm devices";
-        Printf.printf "reload %s with\n%s\n%!" fromLV (Sexplib.Sexp.to_string_hum (LocalAllocation.sexp_of_targets from_targets));
-        Devmapper.reload fromLV from_targets;
+        print_endline "Suspend local dm device";
         Printf.printf "reload %s with\n%S\n%!" toLV (Sexplib.Sexp.to_string_hum (LocalAllocation.sexp_of_targets to_targets));
         Devmapper.reload toLV to_targets;
         print_endline "Move target from one to the other (make idempotent)";
         ToLVM.advance tolvm position
         >>= fun () ->
-        Devmapper.resume fromLV;
         Devmapper.resume toLV;
-        print_endline "Resume local dm devices";
+        print_endline "Resume local dm device";
         return () in
 
     let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
@@ -264,21 +238,12 @@ let main config socket journal freePool fromLVM toLVM =
            others will keep going *)
         J.push j (Op.Print ("Couldn't find device mapper device: " ^ line))
       | Some data_volume ->
-        try_forever (fun () -> stat config.Config.freePool)
-        >>= fun free_volume ->
-        (* choose the blocks we're going to transfer *)
         try_forever (fun () ->
-          try
-            let physical_blocks = first_exn free_volume 1024L in
-            (* append these onto the data_volume *)
-            let new_targets = new_targets data_volume physical_blocks in
-            return (`Ok (LocalAllocation.({ fromLV = config.Config.freePool; toLV = line; targets = new_targets })))
-          with Retry ->
-            info "There aren't enough free blocks, waiting.";
-            return `Retry
-        )
-        >>= fun bu ->
-        J.push j (Op.LocalAllocation bu)
+          FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib)
+        ) >>= fun extents ->
+        let targets = extend_volume vg data_volume extents in
+        J.push j (Op.LocalAllocation(LocalAllocation.({ extents; toLV = line; targets })))
+        (* XXX: need ot wait to prevent double-allocation *) 
       ) >>= fun () ->
       loop () in
     loop () in

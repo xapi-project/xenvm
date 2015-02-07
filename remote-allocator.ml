@@ -36,24 +36,11 @@ module Op = struct
   include T
 end
 
-let read_sector_size device =
-  Block.connect device
-  >>= function
-  | `Ok x ->
-    Block.get_info x
-    >>= fun info ->
-    Block.disconnect x
-    >>= fun () ->
-    return info.Block.sector_size
-  | _ ->
-    error "Failed to read sector size of %s" device;
-    fail (Failure (Printf.sprintf "Failed to read sector size of %s" device))
-
 let main socket config =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
   let t =
-    read_sector_size config.Config.device
+    Device.read_sector_size config.Config.device
     >>= fun sector_size ->
 
     let to_LVMs = List.map (fun (_, { Config.to_lvm }) ->
