@@ -93,7 +93,7 @@ let main socket config =
            | Some lv ->
              let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
              if size_mib < config.Config.host_low_water_mark then begin
-               Printf.printf "LV %s is %Ld MiB < low_water_mark %Ld MiB\n%!" free size_mib config.Config.host_low_water_mark;
+               Printf.printf "LV %s is %Ld MiB < low_water_mark %Ld MiB; allocating %Ld MiB\n%!" free size_mib config.Config.host_low_water_mark config.Config.host_allocation_quantum;
                (* find free space in the VG *)
                begin match Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.Config.host_allocation_quantum extent_size_mib) with
                | `Error free_extents ->
