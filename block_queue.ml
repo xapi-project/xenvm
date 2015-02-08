@@ -6,7 +6,7 @@ open Log
 module type CSTRUCTABLE = sig
   type t
   val to_cstruct: t -> Cstruct.t
-  val of_cstruct: Cstruct.t -> t
+  val of_cstruct: Cstruct.t -> t option
 end
 
 module Pusher(Item: CSTRUCTABLE) = struct
@@ -86,14 +86,20 @@ module Popper(Item: CSTRUCTABLE) = struct
 
   let rec pop t =
     Consumer.fold ~f:(fun buf acc ->
-      let item = Item.of_cstruct buf in
-      item :: acc
-    ) ~t:t.c ~init:[] ()
+      match acc, Item.of_cstruct buf with
+      | `Error x, _ -> `Error x
+      | `Ok acc, None ->
+        error "Failed to unmarshal queue item";
+        `Error "Failed to unmarshal queue item"
+      | `Ok acc, Some item ->
+        `Ok (item :: acc)
+    ) ~t:t.c ~init:(`Ok []) ()
     >>= function
-    | `Error msg ->
+    | `Error msg
+    | `Ok (_, `Error msg) ->
       error "Failed to read from the queue: %s" msg;
       fail (Failure msg)
-    | `Ok (position, rev_items) ->
+    | `Ok (position, `Ok rev_items) ->
       let items = List.rev rev_items in
       return (position, items)
 

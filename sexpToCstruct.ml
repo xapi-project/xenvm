@@ -7,7 +7,10 @@ end
 module Make(S: SEXPABLE) = struct
 
   let of_cstruct x =
-    Cstruct.to_string x |> Sexplib.Sexp.of_string |> S.t_of_sexp
+    try
+      Some (Cstruct.to_string x |> Sexplib.Sexp.of_string |> S.t_of_sexp)
+    with _ ->
+      None
 
   let to_cstruct t =
     let s = S.sexp_of_t t |> Sexplib.Sexp.to_string in
