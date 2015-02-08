@@ -186,6 +186,11 @@ let main config socket journal freePool fromLVM toLVM =
         FromLVM.pop from_lvm
         >>= fun (pos, ts) ->
         let open FreeAllocation in
+        ( if ts = [] then begin
+            debug "No free blocks, sleeping for 5s";
+            Lwt_unix.sleep 5.
+          end else return ()
+        ) >>= fun () ->
         Lwt_list.iter_s
           (fun t ->
             sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
