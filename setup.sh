@@ -1,4 +1,5 @@
 # Making a 1G disk on /dev/loop0
+rm -f bigdisk
 dd if=/dev/zero of=bigdisk bs=1 seek=1G count=0
 losetup /dev/loop0 bigdisk
 pvcreate --metadatasize=10M /dev/loop0
