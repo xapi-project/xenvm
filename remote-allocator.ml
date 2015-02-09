@@ -25,10 +25,11 @@ module FromLVM = Block_queue.Pusher(FreeAllocation)
 
 module Op = struct
   module T = struct
+    type host = string with sexp
     type t =
       | Print of string
-      | BatchOfAllocations of ExpandVolume.t list (* from the host *)
-      | FreeAllocation of (string * FreeAllocation.t) (* to a host *)
+      | BatchOfAllocations of (host * ExpandVolume.t) list (* from the host *)
+      | FreeAllocation of (host * FreeAllocation.t) (* to a host *)
     with sexp
   end
 
@@ -47,8 +48,8 @@ let main socket config =
     Device.read_sector_size config.Config.device
     >>= fun sector_size ->
 
-    let to_LVMs = List.map (fun (_, { Config.to_lvm }) ->
-      ToLVM.start to_lvm
+    let to_LVMs = List.map (fun (host, { Config.to_lvm }) ->
+      host, ToLVM.start to_lvm
     ) config.Config.hosts in
 
     Lwt_list.map_s (fun (host, { Config.from_lvm }) ->
@@ -66,6 +67,16 @@ let main socket config =
       Vg_IO.write vg >>|= fun _ ->
       return () in
 
+    let update_lv'' (vg: Lvm.Vg.t) name f =
+      let open Lvm.Result in
+      match List.partition (fun lv -> lv.Lvm.Lv.name = name) vg.Lvm.Vg.lvs with
+      | [ lv ], others ->
+        f lv
+        >>= fun lv' ->
+        (* NB this doesn't update free space *)
+        return { vg with Lvm.Vg.lvs = lv' :: others }
+      | _, _ -> `Error (Printf.sprintf "Failed to isolate LV with name %s" name) in
+
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
@@ -74,7 +85,23 @@ let main socket config =
       | BatchOfAllocations expands ->
         update_vg
           (fun vg ->
-            return (`Ok vg)
+            let expand (vg: Lvm.Vg.t) (host, { ExpandVolume.volume; segments }) : Lvm.Vg.t =
+              let open Lvm.Result in
+              (* expand the data volume with the segments *)
+              let vg, _ =
+                Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(volume, { lvex_segments = segments })))
+                |> ok_or_failwith in
+              let free = (List.assoc host config.Config.hosts).Config.free in
+              (* remove the segments from the free volume *)
+              update_lv'' (vg: Lvm.Vg.t) free
+                (fun lv ->
+                  let current = Lvm.Lv.to_allocation lv in
+                  let allocated = List.fold_left Lvm.Pv.Allocator.merge [] (List.map Lvm.Lv.Segment.to_allocation segments) in
+                  let reduced = Lvm.Pv.Allocator.sub current allocated in
+                  let segments = Lvm.Lv.Segment.linear 0L reduced in
+                  return { lv with Lvm.Lv.segments }
+                ) |> ok_or_failwith in
+            return (`Ok (List.fold_left expand vg expands))
           )
       | FreeAllocation (host, allocation) ->
         let q = try Some(List.assoc host from_LVMs) with Not_found -> None in
@@ -149,25 +176,25 @@ let main socket config =
 
       (* 2. Are there any pending LVM updates from hosts? *)
       Lwt_list.map_p
-        (fun t ->
+        (fun (host, t) ->
           t >>= fun to_lvm ->
           ToLVM.pop to_lvm
           >>= fun (pos, item) ->
-          return (to_lvm, pos, item)
+          return (host, to_lvm, pos, item)
         ) to_LVMs
       >>= fun work ->
-      let items = List.concat (List.map (fun (_, _, bu) -> bu) work) in
+      let items = List.concat (List.map (fun (_, _, _, bu) -> bu) work) in
       if items = [] then begin
         debug "sleeping for 5s";
         Lwt_unix.sleep 5.
         >>= fun () ->
         main_loop ()
       end else begin
-        J.push j (Op.BatchOfAllocations (List.concat (List.map (fun (_, _, bu) -> bu) work)))
+        J.push j (Op.BatchOfAllocations (List.concat (List.map (fun (host, _, _, bu) -> List.map (fun x -> host, x) bu) work)))
         >>= fun () -> 
         (* write the work to a journal *)
         Lwt_list.iter_p
-          (fun (t, pos, _) ->
+          (fun (_, t, pos, _) ->
             ToLVM.advance t pos
           ) work
         >>= fun () ->
