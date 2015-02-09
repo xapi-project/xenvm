@@ -65,12 +65,16 @@ module FreePool = struct
   let find nr_extents =
     Lwt_mutex.with_lock m
       (fun () ->
+        debug "FreePool.find %Ld extents from %s" nr_extents
+          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t !free)); 
         return (Lvm.Pv.Allocator.find !free nr_extents)
       )
 
   let remove extents =
     Lwt_mutex.with_lock m
       (fun () ->
+        debug "FreePool.remove %s"
+          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t extents));
         free := Lvm.Pv.Allocator.sub !free extents;
         return ()
       )
