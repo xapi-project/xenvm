@@ -117,7 +117,14 @@ let create config name size =
   Lwt_main.run
     (let size_in_bytes = Int64.mul 1048576L size in
      Client.create name size_in_bytes)
-       
+
+let activate config lvname =
+  Lwt_main.run
+    (Client.activate ~name:lvname)
+
+let start_journal config filename =
+  Lwt_main.run
+    (Client.start_journal filename)
 
 let help config =
   Printf.printf "help - %s %s %d\n" config.config (match config.host with Some s -> s | None -> "<unset>") (match config.port with Some d -> d | None -> -1)
@@ -151,6 +158,10 @@ let host =
 let filenames =
   let doc = "Path to the files" in
   Arg.(non_empty & pos_all file [] & info [] ~docv:"FILENAMES" ~doc)
+
+let filename =
+  let doc = "Path to the files" in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"FILENAMES" ~doc)
 
 let vgname =
   let doc = "Name of the volume group" in
@@ -208,12 +219,32 @@ let open_cmd =
   Term.(pure vgopen $ copts_t $ filenames),
   Term.info "open" ~sdocs:copts_sect ~doc ~man
 
+let activate_cmd = 
+  let doc = "Activate a logical volume on the host on which the daemon is running" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Activates a logical volume";
+  ] in
+  Term.(pure activate $ copts_t $ lvname),
+  Term.info "activate" ~sdocs:copts_sect ~doc ~man
+
+let start_journal_cmd =
+  let doc = "Start updating the metadata using a journal rather than synchronously" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Starts the journal on the named device";
+  ] in
+  Term.(pure start_journal $ copts_t $ filename),
+  Term.info "start_journal" ~sdocs:copts_sect ~doc ~man
+
 let default_cmd =
   let doc = "A fast, journalled LVM-compatible volume manager" in
   let man = [] in
   Term.(pure help $ copts_t), info
+
+
       
-let cmds = [lvs_cmd; format_cmd; open_cmd; create_cmd]
+let cmds = [lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd; start_journal_cmd]
 
 let () = match Term.eval_choice default_cmd cmds with
   | `Error _ -> exit 1 | _ -> exit 0
