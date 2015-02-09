@@ -254,7 +254,7 @@ let main config socket journal freePool fromLVM toLVM =
         let size_sectors = sizeof data_volume in
         let size_extents = Int64.div size_sectors vg.extent_size in
         let segments, targets = extend_volume vg data_volume extents in
-        let volume = device in (* XXX *)
+        let _, volume = Mapper.vg_lv_of_name device in
         let volume = { ExpandVolume.volume; segments } in
         let device = { ExpandDevice.extents; device; targets } in
         J.push j { Op.volume; device }
