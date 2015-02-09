@@ -71,7 +71,11 @@ let main socket config =
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
       match t with
       | Print _ -> return ()
-      | BatchOfAllocations _ -> return ()
+      | BatchOfAllocations expands ->
+        update_vg
+          (fun vg ->
+            return (`Ok vg)
+          )
       | FreeAllocation (host, allocation) ->
         let q = try Some(List.assoc host from_LVMs) with Not_found -> None in
         let host' = try Some(List.assoc host config.Config.hosts) with Not_found -> None in
