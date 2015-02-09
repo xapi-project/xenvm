@@ -67,7 +67,7 @@ let main socket config =
       Vg_IO.write vg >>|= fun _ ->
       return () in
 
-    let update_lv'' (vg: Lvm.Vg.t) name f =
+    let update_lv (vg: Lvm.Vg.t) name f =
       let open Lvm.Result in
       match List.partition (fun lv -> lv.Lvm.Lv.name = name) vg.Lvm.Vg.lvs with
       | [ lv ], others ->
@@ -93,11 +93,13 @@ let main socket config =
                 |> ok_or_failwith in
               let free = (List.assoc host config.Config.hosts).Config.free in
               (* remove the segments from the free volume *)
-              update_lv'' (vg: Lvm.Vg.t) free
+              update_lv (vg: Lvm.Vg.t) free
                 (fun lv ->
                   let current = Lvm.Lv.to_allocation lv in
                   let allocated = List.fold_left Lvm.Pv.Allocator.merge [] (List.map Lvm.Lv.Segment.to_allocation segments) in
+
                   let reduced = Lvm.Pv.Allocator.sub current allocated in
+
                   let segments = Lvm.Lv.Segment.linear 0L reduced in
                   return { lv with Lvm.Lv.segments }
                 ) |> ok_or_failwith in
