@@ -9,6 +9,7 @@ let (>>*=) m f = match m with
 
 module Disk_mirage_unix = Disk_mirage.Make(Block)(Io_page)
 module Vg_IO = Lvm.Vg.Make(Disk_mirage_unix)
+module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Lvm.Redo.Op)
 
 module Impl = struct
   type 'a t = 'a Lwt.t
@@ -20,6 +21,7 @@ module Impl = struct
   type context = unit
   let myvg = ref None
   let lock = Lwt_mutex.create ()
+  let journal = ref None
 
   let format context ~name ~pvs =
     Vg_IO.format name pvs >>|= fun () ->
@@ -51,7 +53,13 @@ module Impl = struct
         match Lvm.Vg.create vg name size with
         | `Ok (vg,op) ->
           myvg := Some vg;
-          Vg_IO.write vg >>|= fun _ ->
+          (match !journal with
+          | Some j ->
+            J.push j op;
+            Printf.printf "Journalled op\n%!";
+            Lwt.return (`Ok vg)
+          | None ->
+            Vg_IO.write vg) >>|= fun _ ->
           return ()
         | `Error x -> failwith x)
 
@@ -63,6 +71,32 @@ module Impl = struct
           Vg_IO.write vg >>|= fun _ ->
           return ()
         | `Error x -> failwith x)
+
+  let activate context ~name =
+    let open Lvm in
+    operate (fun vg ->
+        let lv = List.find (fun lv -> lv.Lv.name = name) vg.Vg.lvs in
+        let targets = Mapper.to_targets vg lv in
+        Devmapper.create name targets;
+        Lwt.return ())
+
+  let perform vg =
+    let state = ref vg in
+    let perform op =
+      Lvm.Vg.do_op !state op >>*= fun (vg, op) ->
+      Vg_IO.write vg >>|= fun vg ->
+      Printf.printf "Performed op\n%!";
+      state := vg;
+      Lwt.return ()
+    in perform
+
+  let start_journal context ~path =
+    let mypath = Printf.sprintf "%s" path in
+    match !myvg with
+    | Some vg ->
+      J.start mypath (perform vg) >>= fun j -> journal := Some j; Lwt.return ()
+    | None -> 
+      raise Xenvm_interface.Uninitialised
 
 end
 

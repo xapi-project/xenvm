@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 5a284c2c5a40c6fde3cf37188cdb5658)
+# DO NOT EDIT (digest: e0d9b014eb0331153a711ab232528b39)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -29,6 +29,7 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: pkg_io-page
 <xenvmd/xenvmd.{native,byte}>: pkg_io-page.unix
 <xenvmd/xenvmd.{native,byte}>: pkg_lvm
+<xenvmd/xenvmd.{native,byte}>: pkg_lvm.mapper
 <xenvmd/xenvmd.{native,byte}>: pkg_lvm.mirage
 <xenvmd/xenvmd.{native,byte}>: pkg_lwt
 <xenvmd/xenvmd.{native,byte}>: pkg_lwt.unix
@@ -47,6 +48,7 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: pkg_io-page
 <xenvmd/*.ml{,i,y}>: pkg_io-page.unix
 <xenvmd/*.ml{,i,y}>: pkg_lvm
+<xenvmd/*.ml{,i,y}>: pkg_lvm.mapper
 <xenvmd/*.ml{,i,y}>: pkg_lvm.mirage
 <xenvmd/*.ml{,i,y}>: pkg_lwt
 <xenvmd/*.ml{,i,y}>: pkg_lwt.unix
@@ -86,6 +88,7 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_io-page
 <local-allocator.{native,byte}>: pkg_io-page.unix
 <local-allocator.{native,byte}>: pkg_lvm
+<local-allocator.{native,byte}>: pkg_lvm.mirage
 <local-allocator.{native,byte}>: pkg_lwt
 <local-allocator.{native,byte}>: pkg_lwt.unix
 <local-allocator.{native,byte}>: pkg_mirage-block-unix
