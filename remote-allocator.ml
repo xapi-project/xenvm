@@ -36,6 +36,10 @@ module Op = struct
   include T
 end
 
+let (>>|=) m f = m >>= function
+  | `Error e -> fail (Failure e)
+  | `Ok x -> f x
+
 let main socket config =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
@@ -54,6 +58,14 @@ let main socket config =
     ) config.Config.hosts
     >>= fun from_LVMs ->
 
+    let update_vg f =
+      let module Disk = Disk_mirage.Make(Block)(Io_page) in
+      let module Vg_IO = Lvm.Vg.Make(Disk) in
+      Vg_IO.read [ config.Config.device ] >>|= fun vg ->
+      f vg >>|= fun vg ->
+      Vg_IO.write vg >>|= fun _ ->
+      return () in
+
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
@@ -61,12 +73,23 @@ let main socket config =
       | Print _ -> return ()
       | BatchOfAllocations _ -> return ()
       | FreeAllocation (host, allocation) ->
-        begin match try Some(List.assoc host from_LVMs) with Not_found -> None with
-        | Some from_lvm ->
+        let q = try Some(List.assoc host from_LVMs) with Not_found -> None in
+        let host' = try Some(List.assoc host config.Config.hosts) with Not_found -> None in
+        begin match q, host' with
+        | Some from_lvm, Some { free }  ->
+          update_vg
+            (fun vg ->
+               match List.partition (fun lv -> lv.Lvm.Lv.name=free) vg.lvs with
+               | [ lv ], others ->
+                 return (`Ok { vg with Lvm.Vg.lvs = lv :: others })
+               | _, _ ->
+                 return (`Error (Printf.sprintf "Failed to find volume %s" free))
+            )
+          >>= fun () ->
           FromLVM.push from_lvm allocation
           >>= fun pos ->
           FromLVM.advance from_lvm pos
-        | None ->
+        | _, _ ->
           info "unable to push block update to host %s because it has disappeared" host;
           return () 
         end in
