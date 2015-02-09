@@ -81,7 +81,12 @@ let main socket config =
             (fun vg ->
                match List.partition (fun lv -> lv.Lvm.Lv.name=free) vg.lvs with
                | [ lv ], others ->
-                 return (`Ok { vg with Lvm.Vg.lvs = lv :: others })
+                 let size = Lvm.Lv.size_in_extents lv in
+                 let segments = Lvm.Lv.Segment.linear size allocation in
+                 begin match Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(free, { lvex_segments = segments }))) with
+                 | `Ok (vg, _) -> return (`Ok vg)
+                 | `Error x -> return (`Error x)
+                 end
                | _, _ ->
                  return (`Error (Printf.sprintf "Failed to find volume %s" free))
             )
