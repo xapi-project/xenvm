@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: e0d9b014eb0331153a711ab232528b39)
+# DO NOT EDIT (digest: bb90e08e2280e1cc59c5af5c4c6e5eb5)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -88,6 +88,7 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_io-page
 <local-allocator.{native,byte}>: pkg_io-page.unix
 <local-allocator.{native,byte}>: pkg_lvm
+<local-allocator.{native,byte}>: pkg_lvm.mapper
 <local-allocator.{native,byte}>: pkg_lvm.mirage
 <local-allocator.{native,byte}>: pkg_lwt
 <local-allocator.{native,byte}>: pkg_lwt.unix
@@ -96,6 +97,7 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_sexplib.syntax
 <local-allocator.{native,byte}>: pkg_shared-block-ring.unix
 <local-allocator.{native,byte}>: pkg_threads
+<*.ml{,i,y}>: pkg_lvm.mapper
 <local-allocator.{native,byte}>: custom
 # Executable remote-allocator
 <remote-allocator.{native,byte}>: pkg_cmdliner
