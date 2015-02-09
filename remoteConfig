@@ -1,7 +1,7 @@
 (
  (host_allocation_quantum 128)
  (host_low_water_mark 8)
- (master_journal masterJournal)
+ (master_journal /dev/mapper/djstest-masterJournal)
  (vg djstest)
  (device /dev/loop0)
   (hosts (
