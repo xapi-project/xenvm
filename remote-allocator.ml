@@ -67,16 +67,6 @@ let main socket config =
       Vg_IO.write vg >>|= fun _ ->
       return () in
 
-    let update_lv (vg: Lvm.Vg.t) name f =
-      let open Lvm.Result in
-      match List.partition (fun lv -> lv.Lvm.Lv.name = name) vg.Lvm.Vg.lvs with
-      | [ lv ], others ->
-        f lv
-        >>= fun lv' ->
-        (* NB this doesn't update free space *)
-        return { vg with Lvm.Vg.lvs = lv' :: others }
-      | _, _ -> `Error (Printf.sprintf "Failed to isolate LV with name %s" name) in
-
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
@@ -92,17 +82,10 @@ let main socket config =
                 Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(volume, { lvex_segments = segments })))
                 |> ok_or_failwith in
               let free = (List.assoc host config.Config.hosts).Config.free in
-              (* remove the segments from the free volume *)
-              update_lv (vg: Lvm.Vg.t) free
-                (fun lv ->
-                  let current = Lvm.Lv.to_allocation lv in
-                  let allocated = List.fold_left Lvm.Pv.Allocator.merge [] (List.map Lvm.Lv.Segment.to_allocation segments) in
-
-                  let reduced = Lvm.Pv.Allocator.sub current allocated in
-
-                  let segments = Lvm.Lv.Segment.linear 0L reduced in
-                  return { lv with Lvm.Lv.segments }
-                ) |> ok_or_failwith in
+              let vg, _ =
+                Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(free, { lvc_segments = segments })))
+                |> ok_or_failwith in
+              vg in
             return (`Ok (List.fold_left expand vg expands))
           )
       | FreeAllocation (host, allocation) ->
