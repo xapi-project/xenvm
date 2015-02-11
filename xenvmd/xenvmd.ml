@@ -9,7 +9,7 @@ let (>>*=) m f = match m with
 
 module Disk_mirage_unix = Disk_mirage.Make(Block)(Io_page)
 module Vg_IO = Lvm.Vg.Make(Disk_mirage_unix)
-module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Lvm.Redo.Op)
+module J = Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Lvm.Redo.Op)
 
 module Impl = struct
   type 'a t = 'a Lwt.t
@@ -80,21 +80,28 @@ module Impl = struct
         Devmapper.create name targets;
         Lwt.return ())
 
-  let perform vg =
+  let perform_and_commit vg =
     let state = ref vg in
     let perform op =
       Lvm.Vg.do_op !state op >>*= fun (vg, op) ->
-      Vg_IO.write vg >>|= fun vg ->
       Printf.printf "Performed op\n%!";
       state := vg;
       Lwt.return ()
-    in perform
+    in 
+    let commit () =
+      Printf.printf "About to commit\n%!";
+      Vg_IO.write !state >>|= fun vg ->
+      Printf.printf "Committed ops\n%!";
+      Lwt_unix.sleep 5.0 >>= fun () -> 
+      Lwt.return ()
+    in (perform, commit)
 
   let start_journal context ~path =
     let mypath = Printf.sprintf "%s" path in
     match !myvg with
     | Some vg ->
-      J.start mypath (perform vg) >>= fun j -> journal := Some j; Lwt.return ()
+      let (perform, commit) = perform_and_commit vg in
+      J.start mypath perform ~commit >>= fun j -> journal := Some j; Lwt.return ()
     | None -> 
       raise Xenvm_interface.Uninitialised
 
