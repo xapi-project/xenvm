@@ -104,7 +104,6 @@ let extend_volume vg lv extents =
   let to_sector pv segment = Int64.(add pv.pe_start (mul segment vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
   let next_sector = sizeof lv in
-  let next_segment = Int64.div next_sector vg.extent_size in
   let _, segments, targets =
     let open Devmapper in
     List.fold_left
@@ -130,13 +129,6 @@ let extend_volume vg lv extents =
           next_sector, segments, targets
       ) (next_sector, [], []) extents in
    segments, targets
-
-module Allocator = Lvm.Allocator.Make(struct
-  open Devmapper
-  type t = Location.device with sexp
-  let compare (a: t) (b: t) = compare a b
-  let to_string t = Sexplib.Sexp.to_string (sexp_of_t t)
-end)
 
 let rec try_forever msg f =
   f ()
@@ -256,8 +248,6 @@ let main config socket journal freePool fromLVM toLVM =
           (fun () ->
             FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib)
           ) >>= fun extents ->
-        let size_sectors = sizeof data_volume in
-        let size_extents = Int64.div size_sectors vg.extent_size in
         let segments, targets = extend_volume vg data_volume extents in
         let _, volume = Mapper.vg_lv_of_name device in
         let volume = { ExpandVolume.volume; segments } in
