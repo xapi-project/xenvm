@@ -1,5 +1,6 @@
 (
  (socket socket)
+ (port 8081)
  (allocation_quantum 16)
  (localJournal localJournal)
  (freePool djstest-free)
