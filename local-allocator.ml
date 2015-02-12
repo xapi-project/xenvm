@@ -199,6 +199,7 @@ let main config socket journal freePool fromLVM toLVM =
       loop_forever () in
     let (_: unit Lwt.t) = receive_free_blocks_forever () in
 
+    (* This is the idempotent part which will be done at-least-once *)
     let perform t =
       let open Op in
       sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
@@ -230,35 +231,47 @@ let main config socket journal freePool fromLVM toLVM =
     J.start device perform
     >>= fun j ->
 
+    (* Called to extend a single device. This function decides what needs to be
+       done, pushes the operation to the journal and waits for it to complete.
+       The idempotent perform function is exected at least once. We need to 
+       make the whole thing a critical section to avoid double-allocating the same
+       blocks to 2 different LVs. *)
+    let handler =
+      let m = Lwt_mutex.create () in
+      fun device ->
+        Lwt_mutex.with_lock m
+          (fun () ->
+            ( match Devmapper.stat device with
+              | None ->
+                (* Log this kind of error. This tapdisk may block but at least
+                   others will keep going *)
+                error "Couldn't find device mapper device: %s" device;
+                return ()
+              | Some data_volume ->
+                try_forever
+                  (Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum)
+                  (fun () -> FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib))
+                >>= fun extents ->
+                let segments, targets = extend_volume vg data_volume extents in
+                let _, volume = Mapper.vg_lv_of_name device in
+                let volume = { ExpandVolume.volume; segments } in
+                let device = { ExpandDevice.extents; device; targets } in
+                J.push j { Op.volume; device }
+                >>= fun wait ->
+                (* The operation is now in the journal *)
+                wait ()
+                (* The operation is now complete *)
+            )
+          ) in
+
     let ls = Devmapper.ls () in
     debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls);
 
     let rec loop () =
       Lwt_io.read_line Lwt_io.stdin
       >>= fun device ->
-      ( match Devmapper.stat device with
-      | None ->
-        (* Log this kind of error. This tapdisk may block but at least
-           others will keep going *)
-        error "Couldn't find device mapper device: %s" device;
-        return ()
-      | Some data_volume ->
-        try_forever
-          (Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum)
-          (fun () ->
-            FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib)
-          ) >>= fun extents ->
-        let segments, targets = extend_volume vg data_volume extents in
-        let _, volume = Mapper.vg_lv_of_name device in
-        let volume = { ExpandVolume.volume; segments } in
-        let device = { ExpandDevice.extents; device; targets } in
-        J.push j { Op.volume; device }
-        >>= fun wait ->
-        (* The operation is now in the journal *)
-        wait ()
-        (* The operation is now complete *)
-        (* XXX: need ot wait to prevent double-allocation *) 
-      ) >>= fun () ->
+      handler device
+      >>= fun () ->
       loop () in
     loop () in
   try
