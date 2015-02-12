@@ -9,7 +9,7 @@ let (>>*=) m f = match m with
 
 module Disk_mirage_unix = Disk_mirage.Make(Block)(Io_page)
 module Vg_IO = Lvm.Vg.Make(Disk_mirage_unix)
-module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Lvm.Redo.Op)
+module J = Shared_block.Journal.Make(Block)(Lvm.Redo.Op)
 
 module Impl = struct
   type 'a t = 'a Lwt.t
@@ -94,7 +94,13 @@ module Impl = struct
     let mypath = Printf.sprintf "%s" path in
     match !myvg with
     | Some vg ->
-      J.start mypath (perform vg) >>= fun j -> journal := Some j; Lwt.return ()
+      begin Block.connect mypath
+      >>= function
+      | `Ok device ->
+        J.start device (perform vg) >>= fun j -> journal := Some j; Lwt.return ()
+      | `Error _ ->
+        failwith (Printf.sprintf "failed to start journal on %s" path)
+      end
     | None -> 
       raise Xenvm_interface.Uninitialised
 

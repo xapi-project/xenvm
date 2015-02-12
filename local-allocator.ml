@@ -229,8 +229,13 @@ let main config socket journal freePool fromLVM toLVM =
       print_endline "Resume local dm device";
       return () in
 
-    let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
-    J.start config.Config.localJournal perform
+    let module J = Shared_block.Journal.Make(Block)(Op) in
+    ( Block.connect config.Config.localJournal
+      >>= function
+      | `Ok x -> return x
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open localJournal device: %s" config.Config.localJournal))
+    ) >>= fun device ->
+    J.start device perform
     >>= fun j ->
 
     let ls = Devmapper.ls () in
@@ -258,6 +263,10 @@ let main config socket journal freePool fromLVM toLVM =
         let volume = { ExpandVolume.volume; segments } in
         let device = { ExpandDevice.extents; device; targets } in
         J.push j { Op.volume; device }
+        >>= fun wait ->
+        (* The operation is now in the journal *)
+        wait ()
+        (* The operation is now complete *)
         (* XXX: need ot wait to prevent double-allocation *) 
       ) >>= fun () ->
       loop () in

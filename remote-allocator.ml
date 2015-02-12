@@ -115,8 +115,13 @@ let main socket config =
           return () 
         end in
 
-    let module J = Shared_block.Journal.Make(Block_ring_unix.Producer)(Block_ring_unix.Consumer)(Op) in
-    J.start config.Config.master_journal perform
+    let module J = Shared_block.Journal.Make(Block)(Op) in
+    ( Block.connect config.Config.master_journal
+      >>= function
+      | `Ok x -> return x
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open the masterJournal: %s" config.Config.master_journal))
+    ) >>= fun device ->
+    J.start device perform
     >>= fun j ->
 
     let top_up_free_volumes () =
@@ -147,6 +152,10 @@ let main socket config =
                  return ()
                | `Ok allocated_extents ->
                  J.push j (Op.FreeAllocation (host, allocated_extents))
+                 >>= fun wait ->
+                 (* The operation is now in the journal *)
+                 wait ()
+                 (* The operation has been performed *)
                end
              end else return ()
            | None ->
@@ -176,13 +185,16 @@ let main socket config =
         main_loop ()
       end else begin
         J.push j (Op.BatchOfAllocations (List.concat (List.map (fun (host, _, _, bu) -> List.map (fun x -> host, x) bu) work)))
-        >>= fun () -> 
-        (* write the work to a journal *)
+        >>= fun wait ->
+        (* The operation is in the journal *)
         Lwt_list.iter_p
           (fun (_, t, pos, _) ->
             ToLVM.advance t pos
           ) work
         >>= fun () ->
+        wait ()
+        >>= fun () ->
+        (* The operation is now complete *)
         main_loop ()
       end in
     main_loop () in
