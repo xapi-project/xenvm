@@ -131,7 +131,8 @@ let start_server port () =
   let mode = `TCP (`Port port) in
   Server.create ~mode config
 
-let run port =
+let run port daemon =
+  if daemon then Lwt_daemon.daemonize ();
   (* Listen for regular API calls *)
   Lwt_main.run (start_server port ())
 
@@ -150,13 +151,17 @@ let port =
   let doc = "TCP port of xenvmd server" in
   Arg.(value & opt int 4000 & info [ "port" ] ~docv:"PORT" ~doc)
 
+let daemon =
+  let doc = "Detach from the terminal and run as a daemon" in
+  Arg.(value & flag & info ["daemon"] ~docv:"DAEMON" ~doc)
+
 let cmd = 
   let doc = "Start a XenVM daemon" in
   let man = [
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.(pure run $ port),
+  Term.(pure run $ port $ daemon),
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
