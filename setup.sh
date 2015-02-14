@@ -2,8 +2,7 @@
 rm -f bigdisk
 dd if=/dev/zero of=bigdisk bs=1 seek=1G count=0
 losetup /dev/loop0 bigdisk
-./xenvmd.native&
-sleep 1s # bind to socket
+./xenvmd.native --daemon
 ./xenvm.native format /dev/loop0 --vg djstest --host 127.0.0.1
 ./xenvm.native open /dev/loop0 --host 127.0.0.1
 LVS="free live masterJournal toLVM fromLVM"
