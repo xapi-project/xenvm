@@ -3,16 +3,16 @@ rm -f bigdisk
 dd if=/dev/zero of=bigdisk bs=1 seek=1G count=0
 losetup /dev/loop0 bigdisk
 ./xenvmd.native --daemon
-./xenvm.native format /dev/loop0 --vg djstest --host 127.0.0.1
-./xenvm.native open /dev/loop0 --host 127.0.0.1
+./xenvm.native format /dev/loop0 --vg djstest
+./xenvm.native open /dev/loop0
 LVS="free live masterJournal toLVM fromLVM"
 for i in ${LVS}; do
   echo Creating $i
-  ./xenvm.native create --lv $i --host 127.0.0.1
+  ./xenvm.native create --lv $i
 done
 for i in ${LVS}; do
   echo Activating $i
-  ./xenvm.native activate --lv $i --host 127.0.0.1
+  ./xenvm.native activate --lv $i
 done
 
 dd if=/dev/zero of=localJournal bs=1M count=1

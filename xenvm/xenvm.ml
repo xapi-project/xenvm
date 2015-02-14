@@ -181,7 +181,7 @@ let port =
 
 let host = 
   let doc = "Hostname of xenvmd server" in
-  Arg.(value & opt (some string) (Some "localhost") & info [ "host" ] ~docv:"HOST" ~doc)
+  Arg.(value & opt (some string) (Some "127.0.0.1") & info [ "host" ] ~docv:"HOST" ~doc)
 
 let filenames =
   let doc = "Path to the files" in
