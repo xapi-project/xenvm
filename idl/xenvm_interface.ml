@@ -10,4 +10,4 @@ external get : unit -> Vg_wrapper.t = ""
 external create : name:string -> size:int64 -> unit = ""
 external rename : oldname:string -> newname:string -> unit = ""
 external start_journal : path:string -> unit = ""
-
+external shutdown : unit -> unit = ""

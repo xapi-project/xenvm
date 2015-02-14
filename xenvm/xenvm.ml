@@ -150,6 +150,10 @@ let start_journal config filename =
   Lwt_main.run
     (Client.start_journal filename)
 
+let shutdown config =
+  Lwt_main.run
+    (Client.shutdown ())
+
 let help config =
   Printf.printf "help - %s %s %d\n" config.config (match config.host with Some s -> s | None -> "<unset>") (match config.port with Some d -> d | None -> -1)
 
@@ -261,6 +265,15 @@ let start_journal_cmd =
   Term.(pure start_journal $ copts_t $ filename),
   Term.info "start_journal" ~sdocs:copts_sect ~doc ~man
 
+let shutdown_cmd =
+  let doc = "Shut the daemon down cleanly" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Flushes the redo log and shuts down, leaving the system in a consistent state.";
+  ] in
+  Term.(pure shutdown $ copts_t),
+  Term.info "shutdown" ~sdocs:copts_sect ~doc ~man
+
 let default_cmd =
   let doc = "A fast, journalled LVM-compatible volume manager" in
   let man = [] in
@@ -268,7 +281,7 @@ let default_cmd =
 
 
       
-let cmds = [lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd; start_journal_cmd]
+let cmds = [lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd; start_journal_cmd; shutdown_cmd]
 
 let () = match Term.eval_choice default_cmd cmds with
   | `Error _ -> exit 1 | _ -> exit 0

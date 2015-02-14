@@ -104,14 +104,21 @@ module Impl = struct
     | None -> 
       raise Xenvm_interface.Uninitialised
 
+  let shutdown context () =
+    ( match !journal with
+      | Some j ->
+        J.shutdown j
+      | None ->
+        return ()
+    ) >>= fun () ->
+    let (_: unit Lwt.t) =
+      Lwt_unix.sleep 1.
+      >>= fun () ->
+      exit 0 in
+    return ()
 end
 
 module XenvmServer = Xenvm_interface.ServerM(Impl)
-
-let rpc_fn call =
-  let context = () in
-  XenvmServer.process context call
-
 
 open Cohttp_lwt_unix
 
