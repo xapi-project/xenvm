@@ -1,8 +1,9 @@
-dmsetup remove djstest-live
-dmsetup remove djstest-free
-dmsetup remove djstest-masterJournal
-dmsetup remove djstest-toLVM
-dmsetup remove djstest-fromLVM
+LVS="free live masterJournal toLVM fromLVM"
+for i in ${LVS}; do
+  echo Removing $i
+  rm -f ./djstest-$i
+done
+dmsetup remove_all
 dd if=/dev/zero of=/dev/loop0 bs=1M count=128
 ./xenvm.native shutdown
 killall xenvmd.native

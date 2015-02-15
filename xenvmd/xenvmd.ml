@@ -72,13 +72,12 @@ module Impl = struct
           return ()
         | `Error x -> failwith x)
 
-  let activate context ~name =
+  let get_lv context ~name =
     let open Lvm in
     operate (fun vg ->
         let lv = List.find (fun lv -> lv.Lv.name = name) vg.Vg.lvs in
-        let targets = Mapper.to_targets vg lv in
-        Devmapper.create name targets;
-        Lwt.return ())
+        return ({ vg with Vg.lvs = [] }, lv)
+    )
 
   let perform vg =
     let state = ref vg in

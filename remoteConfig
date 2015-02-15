@@ -1,13 +1,13 @@
 (
  (host_allocation_quantum 128)
  (host_low_water_mark 8)
- (master_journal /dev/mapper/djstest-masterJournal)
+ (master_journal ./djstest-masterJournal)
  (vg djstest)
  (device /dev/loop0)
   (hosts (
     (host1 (
-      (to_lvm /dev/mapper/djstest-toLVM) 
-      (from_lvm /dev/mapper/djstest-fromLVM)
+      (to_lvm ./djstest-toLVM) 
+      (from_lvm ./djstest-fromLVM)
       (free free)
     ))
   ))

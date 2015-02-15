@@ -142,9 +142,15 @@ let create config name size =
     (let size_in_bytes = Int64.mul 1048576L size in
      Client.create name size_in_bytes)
 
-let activate config lvname =
+let activate config lvname path =
   Lwt_main.run
-    (Client.activate ~name:lvname)
+    (Client.get_lv ~name:lvname
+     >>= fun (vg, lv) ->
+     let targets = Mapper.to_targets vg lv in
+     let name = Mapper.name_of vg lv in
+     Devmapper.create name targets;
+     Devmapper.mknod name path 0o0600;
+     return ())
 
 let start_journal config filename =
   Lwt_main.run
@@ -189,7 +195,7 @@ let filenames =
 
 let filename =
   let doc = "Path to the files" in
-  Arg.(required & pos 0 (some file) None & info [] ~docv:"FILENAMES" ~doc)
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"FILENAME" ~doc)
 
 let vgname =
   let doc = "Name of the volume group" in
@@ -253,7 +259,10 @@ let activate_cmd =
     `S "DESCRIPTION";
     `P "Activates a logical volume";
   ] in
-  Term.(pure activate $ copts_t $ lvname),
+  let path =
+    let doc = "Path to the new device node" in
+    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH" ~doc) in
+  Term.(pure activate $ copts_t $ lvname $ path),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
 
 let start_journal_cmd =
