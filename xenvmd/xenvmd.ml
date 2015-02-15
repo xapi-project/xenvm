@@ -24,7 +24,7 @@ module Impl = struct
   let journal = ref None
 
   let format context ~name ~pvs =
-    Vg_IO.format name pvs >>|= fun () ->
+    Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
     return ()
 
   let vgopen context ~devices =
