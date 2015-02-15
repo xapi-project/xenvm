@@ -16,8 +16,9 @@ for i in ${LVS}; do
   ./xenvm.native activate --lv $i `pwd`/djstest-$i
 done
 
-dd if=/dev/zero of=localJournal bs=1M count=1
-dd if=/dev/zero of=djstest-LVMjournal bs=1M count=1
+dd if=/dev/zero of=localJournal bs=1M count=4
+rm -f djstest-LVMjournal
+dd if=/dev/urandom of=djstest-LVMjournal bs=1M count=4
 ./xenvm.native start_journal `pwd`/djstest-LVMjournal
 ./xenvm.native benchmark
 
