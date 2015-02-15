@@ -1,4 +1,4 @@
-LVS="free live masterJournal toLVM fromLVM"
+LVS="free live masterJournal toLVM fromLVM LVMjournal"
 for i in ${LVS}; do
   echo Removing $i
   rm -f ./djstest-$i
