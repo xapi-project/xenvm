@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: bb90e08e2280e1cc59c5af5c4c6e5eb5)
+# DO NOT EDIT (digest: 3a195c018dcfd9ca8cf28dc4ac87d694)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -64,7 +64,9 @@ true: annot, bin_annot
 # Executable xenvm
 <xenvm/xenvm.{native,byte}>: pkg_cmdliner
 <xenvm/xenvm.{native,byte}>: pkg_cohttp.lwt
+<xenvm/xenvm.{native,byte}>: pkg_devmapper
 <xenvm/xenvm.{native,byte}>: pkg_lvm
+<xenvm/xenvm.{native,byte}>: pkg_lvm.mapper
 <xenvm/xenvm.{native,byte}>: pkg_lwt
 <xenvm/xenvm.{native,byte}>: pkg_lwt.unix
 <xenvm/xenvm.{native,byte}>: pkg_rpclib
@@ -73,7 +75,9 @@ true: annot, bin_annot
 <xenvm/xenvm.{native,byte}>: use_xenvmidl
 <xenvm/*.ml{,i,y}>: pkg_cmdliner
 <xenvm/*.ml{,i,y}>: pkg_cohttp.lwt
+<xenvm/*.ml{,i,y}>: pkg_devmapper
 <xenvm/*.ml{,i,y}>: pkg_lvm
+<xenvm/*.ml{,i,y}>: pkg_lvm.mapper
 <xenvm/*.ml{,i,y}>: pkg_lwt
 <xenvm/*.ml{,i,y}>: pkg_lwt.unix
 <xenvm/*.ml{,i,y}>: pkg_rpclib
