@@ -160,6 +160,24 @@ let shutdown config =
   Lwt_main.run
     (Client.shutdown ())
 
+let benchmark config =
+  let t =
+    let mib = Int64.mul 1048576L 4L in
+    let n = 1000 in
+    let start = Unix.gettimeofday () in
+    let rec fori f = function
+    | 0 -> return ()
+    | n ->
+      f n
+      >>= fun () ->
+      fori f (n - 1) in
+    fori (fun i -> Client.create (Printf.sprintf "test-lv-%d" i) mib) n
+    >>= fun () ->
+    let time = Unix.gettimeofday () -. start in
+    Printf.printf "%d creates in %.1f s\n" n time;
+    return () in
+  Lwt_main.run t
+
 let help config =
   Printf.printf "help - %s %s %d\n" config.config (match config.host with Some s -> s | None -> "<unset>") (match config.port with Some d -> d | None -> -1)
 
@@ -283,14 +301,24 @@ let shutdown_cmd =
   Term.(pure shutdown $ copts_t),
   Term.info "shutdown" ~sdocs:copts_sect ~doc ~man
 
+let benchmark_cmd =
+  let doc = "Perform some microbenchmarks" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Perform some microbenchmarks and print the results.";
+  ] in
+  Term.(pure benchmark $ copts_t),
+  Term.info "benchmark" ~sdocs:copts_sect ~doc ~man
+
 let default_cmd =
   let doc = "A fast, journalled LVM-compatible volume manager" in
   let man = [] in
   Term.(pure help $ copts_t), info
-
-
       
-let cmds = [lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd; start_journal_cmd; shutdown_cmd]
+let cmds = [
+  lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd;
+  start_journal_cmd; shutdown_cmd; benchmark_cmd;
+]
 
 let () = match Term.eval_choice default_cmd cmds with
   | `Error _ -> exit 1 | _ -> exit 0

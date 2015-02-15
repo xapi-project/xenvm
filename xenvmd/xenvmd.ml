@@ -56,7 +56,6 @@ module Impl = struct
           (match !journal with
           | Some j ->
             J.push j op;
-            Printf.printf "Journalled op\n%!";
             Lwt.return (`Ok vg)
           | None ->
             Vg_IO.write vg) >>|= fun _ ->
@@ -133,9 +132,7 @@ let handler ~info (ch,conn) req body =
 let start_server port () =
   Printf.printf "Listening for HTTP request on: %d\n" port;
   let info = Printf.sprintf "Served by Cohttp/Lwt listening on port %d" port in
-  let conn_closed (ch,conn) =
-    Printf.printf "connection %s closed\n%!"
-      (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch)) in
+  let conn_closed (ch,conn) = () in
   let callback = handler ~info in
   let config = Server.make ~callback ~conn_closed () in
   let mode = `TCP (`Port port) in
