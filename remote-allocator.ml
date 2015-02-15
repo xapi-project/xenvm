@@ -114,7 +114,7 @@ let main socket config =
           info "unable to push block update to host %s because it has disappeared" host;
           return () 
         end in
-
+  let perform = Lwt_list.iter_s perform in
     let module J = Shared_block.Journal.Make(Block)(Op) in
     ( Block.connect config.Config.master_journal
       >>= function

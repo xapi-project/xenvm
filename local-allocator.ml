@@ -201,27 +201,29 @@ let main config socket journal freePool fromLVM toLVM =
     let (_: unit Lwt.t) = receive_free_blocks_forever () in
 
     (* This is the idempotent part which will be done at-least-once *)
-    let perform t =
+    let perform ops =
       let open Op in
-      sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-      ToLVM.push tolvm t.volume
-      >>= fun position ->
-      try_forever
-        (Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device)
-        (fun () -> stat t.device.ExpandDevice.device)
-      >>= fun to_device ->
-      FreePool.remove t.device.ExpandDevice.extents
-      >>= fun () ->
-      (* Append the physical blocks to toLV *)
-      let to_targets = to_device.Devmapper.targets @ t.device.ExpandDevice.targets in
-      Devmapper.suspend t.device.ExpandDevice.device;
-      print_endline "Suspend local dm device";
-      Devmapper.reload t.device.ExpandDevice.device to_targets;
-      ToLVM.advance tolvm position
-      >>= fun () ->
-      Devmapper.resume t.device.ExpandDevice.device;
-      print_endline "Resume local dm device";
-      return () in
+      Lwt_list.iter_s (fun t ->
+        sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
+        ToLVM.push tolvm t.volume
+        >>= fun position ->
+        try_forever
+          (Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device)
+          (fun () -> stat t.device.ExpandDevice.device)
+        >>= fun to_device ->
+        FreePool.remove t.device.ExpandDevice.extents
+        >>= fun () ->
+        (* Append the physical blocks to toLV *)
+        let to_targets = to_device.Devmapper.targets @ t.device.ExpandDevice.targets in
+        Devmapper.suspend t.device.ExpandDevice.device;
+        print_endline "Suspend local dm device";
+        Devmapper.reload t.device.ExpandDevice.device to_targets;
+        ToLVM.advance tolvm position
+        >>= fun () ->
+        Devmapper.resume t.device.ExpandDevice.device;
+        print_endline "Resume local dm device";
+        return ()
+      ) ops in
 
     let module J = Shared_block.Journal.Make(Block)(Op) in
     ( Block.connect config.Config.localJournal

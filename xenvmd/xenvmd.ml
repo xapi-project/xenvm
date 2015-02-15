@@ -81,10 +81,14 @@ module Impl = struct
 
   let perform vg =
     let state = ref vg in
-    let perform op =
-      Lvm.Vg.do_op !state op >>*= fun (vg, op) ->
+    let perform ops =
+      Lwt_list.fold_left_s (fun vg op ->
+        Lvm.Vg.do_op vg op >>*= fun (vg, _) ->
+        return vg
+      ) !state ops
+      >>= fun vg ->
       Vg_IO.write vg >>|= fun vg ->
-      Printf.printf "Performed op\n%!";
+      Printf.printf "Performed %d ops\n%!" (List.length ops);
       state := vg;
       Lwt.return ()
     in perform
