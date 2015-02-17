@@ -1,0 +1,20 @@
+opam-version: "1"
+maintainer: "dave.scott@citrix.com"
+tags: [
+  "org:xapi-project"
+]
+build: [
+  [make "all"]
+  [make "install"]
+]
+remove: [
+  [make "uninstall"]
+]
+depends: [
+  "cstruct" {>= "0.7.1"}
+  "lwt"
+  "ocamlfind"
+  "shared-block-ring"
+  "devmapper"
+  "cmdliner"
+]
