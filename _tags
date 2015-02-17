@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 3a195c018dcfd9ca8cf28dc4ac87d694)
+# DO NOT EDIT (digest: 719e0b4ba0e13f3019770b3f841198fe)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -87,6 +87,7 @@ true: annot, bin_annot
 <xenvm/xenvm.{native,byte}>: custom
 # Executable local-allocator
 <local-allocator.{native,byte}>: pkg_cmdliner
+<local-allocator.{native,byte}>: pkg_cohttp.lwt
 <local-allocator.{native,byte}>: pkg_cstruct
 <local-allocator.{native,byte}>: pkg_devmapper
 <local-allocator.{native,byte}>: pkg_io-page
@@ -98,10 +99,17 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_lwt.unix
 <local-allocator.{native,byte}>: pkg_mirage-block-unix
 <local-allocator.{native,byte}>: pkg_oUnit
+<local-allocator.{native,byte}>: pkg_rpclib
+<local-allocator.{native,byte}>: pkg_rpclib.syntax
 <local-allocator.{native,byte}>: pkg_sexplib.syntax
 <local-allocator.{native,byte}>: pkg_shared-block-ring.unix
 <local-allocator.{native,byte}>: pkg_threads
+<local-allocator.{native,byte}>: use_xenvmidl
+<*.ml{,i,y}>: pkg_cohttp.lwt
 <*.ml{,i,y}>: pkg_lvm.mapper
+<*.ml{,i,y}>: pkg_rpclib
+<*.ml{,i,y}>: pkg_rpclib.syntax
+<*.ml{,i,y}>: use_xenvmidl
 <local-allocator.{native,byte}>: custom
 # Executable remote-allocator
 <remote-allocator.{native,byte}>: pkg_cmdliner

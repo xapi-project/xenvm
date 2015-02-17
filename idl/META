@@ -1,0 +1,12 @@
+# OASIS_START
+# DO NOT EDIT (digest: b2837ae80939dc7073d496721eb047e8)
+version = "0.1"
+description = "Simple thin LVHD tools"
+requires = "rpclib rpclib.syntax lvm cohttp.lwt threads"
+archive(byte) = "xenvmidl.cma"
+archive(byte, plugin) = "xenvmidl.cma"
+archive(native) = "xenvmidl.cmxa"
+archive(native, plugin) = "xenvmidl.cmxs"
+exists_if = "xenvmidl.cma"
+# OASIS_STOP
+
