@@ -7,6 +7,8 @@ module Config = struct
   type t = {
     socket: string; (* listen on this socket *)
     port: int; (* listen on this port *)
+    remoteHost: string; (* IP address of the remote *)
+    remotePort: int; (* port of the remote server *)
     allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
     localJournal: string; (* path to the host local journal *)
     devices: string list; (* devices containing the PVs *)
@@ -198,6 +200,14 @@ let main config socket journal freePool fromLVM toLVM =
         >>= fun () ->
         loop_forever () in
       loop_forever () in
+
+    (* We can either cache the free blocks locally, or simply ask the remote
+       to tell us on startup: *)
+    let open Xenvm_client in
+    Rpc.uri := Printf.sprintf "http://%s:%d/" config.Config.remoteHost config.Config.remotePort;
+    Client.get_lv ~name:config.Config.freePool
+    >>= fun (_, lv) ->
+    FreePool.add (Lvm.Lv.to_allocation lv);
     let (_: unit Lwt.t) = receive_free_blocks_forever () in
 
     (* This is the idempotent part which will be done at-least-once *)

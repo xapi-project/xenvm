@@ -1,9 +1,11 @@
 (
  (socket socket)
  (port 8081)
+ (remoteHost 127.0.0.1)
+ (remotePort 4000)
  (allocation_quantum 16)
  (localJournal localJournal)
- (freePool djstest-free)
+ (freePool free)
  (devices (/dev/loop0))
  (toLVM ./djstest-toLVM)
  (fromLVM ./djstest-fromLVM)
