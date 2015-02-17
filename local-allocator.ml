@@ -160,7 +160,7 @@ let main config socket journal freePool fromLVM toLVM =
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
 
   let t =
-    Device.read_sector_size (List.hd config.Config.devices)
+    Device.read_sector_size config.Config.devices
     >>= fun sector_size ->
 
     query_lvm config

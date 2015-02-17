@@ -14,7 +14,7 @@ module Config = struct
     host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)
     host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
     vg: string; (* name of the volume group *)
-    device: string; (* physical device containing the volume group *)
+    devices: string list; (* physical device containing the volume group *)
     hosts: (string * host) list; (* host id -> rings *)
     master_journal: string; (* path to the SRmaster journal *)
   } with sexp
@@ -45,7 +45,7 @@ let main socket config =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
   let t =
-    Device.read_sector_size config.Config.device
+    Device.read_sector_size config.Config.devices
     >>= fun sector_size ->
 
     let to_LVMs = List.map (fun (host, { Config.to_lvm }) ->
@@ -62,7 +62,7 @@ let main socket config =
     let update_vg f =
       let module Disk = Disk_mirage.Make(Block)(Io_page) in
       let module Vg_IO = Lvm.Vg.Make(Disk) in
-      Vg_IO.read [ config.Config.device ] >>|= fun vg ->
+      Vg_IO.read config.Config.devices >>|= fun vg ->
       f vg >>|= fun vg ->
       Vg_IO.write vg >>|= fun _ ->
       return () in
@@ -127,7 +127,7 @@ let main socket config =
     let top_up_free_volumes () =
       let module Disk = Disk_mirage.Make(Block)(Io_page) in
       let module Vg_IO = Lvm.Vg.Make(Disk) in
-      Vg_IO.read [ config.Config.device ]
+      Vg_IO.read config.Config.devices
       >>= function
       | `Error e ->
         error "Ignoring error reading LVM metadata: %s" e;

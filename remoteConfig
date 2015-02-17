@@ -3,7 +3,7 @@
  (host_low_water_mark 8)
  (master_journal ./djstest-masterJournal)
  (vg djstest)
- (device /dev/loop0)
+ (devices (/dev/loop0))
   (hosts (
     (host1 (
       (to_lvm ./djstest-toLVM) 
