@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 719e0b4ba0e13f3019770b3f841198fe)
+# DO NOT EDIT (digest: 0b59f547a639b5caf47bfe2a883e12c1)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -105,41 +105,25 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_shared-block-ring.unix
 <local-allocator.{native,byte}>: pkg_threads
 <local-allocator.{native,byte}>: use_xenvmidl
-<*.ml{,i,y}>: pkg_cohttp.lwt
-<*.ml{,i,y}>: pkg_lvm.mapper
-<*.ml{,i,y}>: pkg_rpclib
-<*.ml{,i,y}>: pkg_rpclib.syntax
-<*.ml{,i,y}>: use_xenvmidl
-<local-allocator.{native,byte}>: custom
-# Executable remote-allocator
-<remote-allocator.{native,byte}>: pkg_cmdliner
-<remote-allocator.{native,byte}>: pkg_cstruct
-<remote-allocator.{native,byte}>: pkg_devmapper
-<remote-allocator.{native,byte}>: pkg_io-page
-<remote-allocator.{native,byte}>: pkg_io-page.unix
-<remote-allocator.{native,byte}>: pkg_lvm
-<remote-allocator.{native,byte}>: pkg_lvm.mirage
-<remote-allocator.{native,byte}>: pkg_lwt
-<remote-allocator.{native,byte}>: pkg_lwt.unix
-<remote-allocator.{native,byte}>: pkg_mirage-block-unix
-<remote-allocator.{native,byte}>: pkg_oUnit
-<remote-allocator.{native,byte}>: pkg_sexplib.syntax
-<remote-allocator.{native,byte}>: pkg_shared-block-ring.unix
-<remote-allocator.{native,byte}>: pkg_threads
 <*.ml{,i,y}>: pkg_cmdliner
+<*.ml{,i,y}>: pkg_cohttp.lwt
 <*.ml{,i,y}>: pkg_cstruct
 <*.ml{,i,y}>: pkg_devmapper
 <*.ml{,i,y}>: pkg_io-page
 <*.ml{,i,y}>: pkg_io-page.unix
 <*.ml{,i,y}>: pkg_lvm
+<*.ml{,i,y}>: pkg_lvm.mapper
 <*.ml{,i,y}>: pkg_lvm.mirage
 <*.ml{,i,y}>: pkg_lwt
 <*.ml{,i,y}>: pkg_lwt.unix
 <*.ml{,i,y}>: pkg_mirage-block-unix
 <*.ml{,i,y}>: pkg_oUnit
+<*.ml{,i,y}>: pkg_rpclib
+<*.ml{,i,y}>: pkg_rpclib.syntax
 <*.ml{,i,y}>: pkg_sexplib.syntax
 <*.ml{,i,y}>: pkg_shared-block-ring.unix
 <*.ml{,i,y}>: pkg_threads
-<remote-allocator.{native,byte}>: custom
+<*.ml{,i,y}>: use_xenvmidl
+<local-allocator.{native,byte}>: custom
 # OASIS_STOP
 <idl/xenvm_interface.ml>: pkg_rpclib.idl

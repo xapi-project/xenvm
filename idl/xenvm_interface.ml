@@ -16,3 +16,11 @@ external create : name:string -> size:int64 -> unit = ""
 external rename : oldname:string -> newname:string -> unit = ""
 external start_journal : path:string -> unit = ""
 external shutdown : unit -> unit = ""
+
+type host = {
+  name: string;
+  toLVM: string; (* LVM updates coming from a host *)
+  fromLVM: string; (* LVM updates sent to a host *)
+  freeLV: string; (* name of the host's free block LV *)
+}
+external register: host -> unit = ""
