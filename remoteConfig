@@ -2,7 +2,6 @@
  (listenPort 4000)
  (host_allocation_quantum 128)
  (host_low_water_mark 8)
- (master_journal /home/vagrant/djs55/thin-lvhd-tools/djstest-masterJournal)
  (vg djstest)
  (devices (/dev/loop0))
 )

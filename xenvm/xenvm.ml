@@ -113,9 +113,11 @@ let activate config lvname path =
      Devmapper.mknod name path 0o0600;
      return ())
 
-let start_journal config filename =
-  Lwt_main.run
-    (Client.start_journal filename)
+let set_redo_log config filename =
+  Lwt_main.run (Client.set_redo_log filename)
+
+let set_journal config filename =
+  Lwt_main.run (Client.set_journal filename)
 
 let register config host =
   Lwt_main.run (Client.register host)
@@ -266,14 +268,23 @@ let activate_cmd =
   Term.(pure activate $ copts_t $ lvname $ path),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
 
-let start_journal_cmd =
-  let doc = "Start updating the metadata using a journal rather than synchronously" in
+let set_redo_log_cmd =
+  let doc = "Start updating the metadata using a redo log rather than synchronously" in
   let man = [
     `S "DESCRIPTION";
-    `P "Starts the journal on the named device";
+    `P "Starts the redo log on the named device";
   ] in
-  Term.(pure start_journal $ copts_t $ filename),
-  Term.info "start_journal" ~sdocs:copts_sect ~doc ~man
+  Term.(pure set_redo_log $ copts_t $ filename),
+  Term.info "set_redo_log" ~sdocs:copts_sect ~doc ~man
+
+let set_journal_cmd =
+  let doc = "Set where we journal our free block allocations" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Maintains a journal of free block allocations on the named device. This must be done before a host is registered.";
+  ] in
+  Term.(pure set_journal $ copts_t $ filename),
+  Term.info "set_journal" ~sdocs:copts_sect ~doc ~man
 
 let register_cmd =
   let doc = "Register a host with the daemon" in
@@ -309,7 +320,7 @@ let default_cmd =
       
 let cmds = [
   lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd;
-  start_journal_cmd; shutdown_cmd; register_cmd; benchmark_cmd;
+  set_redo_log_cmd; set_journal_cmd; shutdown_cmd; register_cmd; benchmark_cmd;
 ]
 
 let () = match Term.eval_choice default_cmd cmds with
