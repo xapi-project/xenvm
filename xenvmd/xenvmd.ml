@@ -47,7 +47,7 @@ module VolumeManager = struct
   let read fn =
     Lwt_mutex.with_lock lock (fun () -> 
       match !myvg with
-      | None -> raise Xenvm_interface.Uninitialised
+      | None -> return (`Error Xenvm_interface.Uninitialised)
       | Some vg -> fn vg)
 
   let write fn =
@@ -193,11 +193,9 @@ module FreePool = struct
     Device.read_sector_size config.Config.devices
     >>= fun sector_size ->
 
-    Vg_IO.read config.Config.devices
+    VolumeManager.read (fun x -> return (`Ok x))
     >>= function
-    | `Error e ->
-      error "Ignoring error reading LVM metadata: %s" e;
-      return ()
+    | `Error _ -> return () (* skip if there's no LVM to read *)
     | `Ok x ->
       let extent_size = x.Lvm.Vg.extent_size in (* in sectors *)
       let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
@@ -251,7 +249,11 @@ module Impl = struct
 
   let close context () = VolumeManager.close ()
 
-  let get context () = VolumeManager.read return
+  let get context () =
+    VolumeManager.read (fun x -> return (`Ok x))
+    >>= function
+    | `Error e -> fail e
+    | `Ok x -> return x
 
   let create context ~name ~size = 
     VolumeManager.write (fun vg ->
@@ -267,8 +269,10 @@ module Impl = struct
     let open Lvm in
     VolumeManager.read (fun vg ->
         let lv = List.find (fun lv -> lv.Lv.name = name) vg.Vg.lvs in
-        return ({ vg with Vg.lvs = [] }, lv)
-    )
+        return (`Ok ({ vg with Vg.lvs = [] }, lv))
+    ) >>= function
+    | `Error e -> fail e
+    | `Ok x -> return x
 
   let set_redo_log context ~path = VolumeManager.start path
 
