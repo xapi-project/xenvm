@@ -235,7 +235,7 @@ let main config socket journal freePool fromLVM toLVM =
         return ()
       ) ops in
 
-    let module J = Shared_block.Journal.Make(Block)(Op) in
+    let module J = Shared_block.Journal.Make(Log)(Block)(Op) in
     ( Block.connect config.Config.localJournal
       >>= function
       | `Ok x -> return x

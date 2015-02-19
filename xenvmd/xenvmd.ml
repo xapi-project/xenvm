@@ -19,6 +19,12 @@ module Config = struct
   } with sexp
 end
 
+module ErrorLogOnly = struct
+  let debug fmt = Printf.ksprintf (fun _ -> ()) fmt
+  let info  fmt = Printf.ksprintf (fun _ -> ()) fmt
+  let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
+end
+
 module ToLVM = Block_queue.Popper(ExpandVolume)
 module FromLVM = Block_queue.Pusher(FreeAllocation)
 
@@ -26,7 +32,7 @@ module Disk_mirage_unix = Disk_mirage.Make(Block)(Io_page)
 module Vg_IO = Lvm.Vg.Make(Disk_mirage_unix)
 
 module VolumeManager = struct
-  module J = Shared_block.Journal.Make(Block)(Lvm.Redo.Op)
+  module J = Shared_block.Journal.Make(ErrorLogOnly)(Block)(Lvm.Redo.Op)
 
   let myvg = ref None
   let lock = Lwt_mutex.create ()
@@ -166,7 +172,7 @@ module FreePool = struct
 
   let perform = Lwt_list.iter_s perform
 
-  module J = Shared_block.Journal.Make(Block)(Op)
+  module J = Shared_block.Journal.Make(Log)(Block)(Op)
 
   let journal = ref None
 
