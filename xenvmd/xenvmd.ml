@@ -35,11 +35,11 @@ module VolumeManager = struct
   let vgopen ~devices =
     match !myvg with 
     | Some _ -> 
-      raise Xenvm_interface.AlreadyOpen
+      return `AlreadyOpen
     | None ->
       Vg_IO.read devices >>|= fun vg ->
       myvg := Some vg;
-      return ()
+      return (`Ok ())
 
   let close () =
     myvg := None
@@ -245,7 +245,11 @@ module Impl = struct
     Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
     return ()
     
-  let vgopen context ~devices = VolumeManager.vgopen ~devices
+  let vgopen context ~devices =
+    VolumeManager.vgopen ~devices
+    >>= function
+    | `AlreadyOpen -> fail Xenvm_interface.AlreadyOpen
+    | `Ok () -> return ()
 
   let close context () = VolumeManager.close ()
 
