@@ -28,8 +28,7 @@ end
 module ToLVM = Block_queue.Popper(ExpandVolume)
 module FromLVM = Block_queue.Pusher(FreeAllocation)
 
-module Disk_mirage_unix = Disk_mirage.Make(Block)(Io_page)
-module Vg_IO = Lvm.Vg.Make(Disk_mirage_unix)
+module Vg_IO = Lvm.Vg.Make(Block)
 
 module VolumeManager = struct
   module J = Shared_block.Journal.Make(ErrorLogOnly)(Block)(Lvm.Redo.Op)

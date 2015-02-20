@@ -31,8 +31,7 @@ type vg = {
 (* The minimum amount of info about a VG we need ot know *)
 
 let query_lvm config =
-  let module Disk = Disk_mirage.Make(Block)(Io_page) in
-  let module Vg_IO = Lvm.Vg.Make(Disk) in
+  let module Vg_IO = Lvm.Vg.Make(Block) in
   match config.Config.devices with
   | [] ->
     fail (Failure "I require at least one physical device")

@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 0b59f547a639b5caf47bfe2a883e12c1)
+# DO NOT EDIT (digest: 53695190db9de65c80f3c40332c14796)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -30,7 +30,6 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: pkg_io-page.unix
 <xenvmd/xenvmd.{native,byte}>: pkg_lvm
 <xenvmd/xenvmd.{native,byte}>: pkg_lvm.mapper
-<xenvmd/xenvmd.{native,byte}>: pkg_lvm.mirage
 <xenvmd/xenvmd.{native,byte}>: pkg_lwt
 <xenvmd/xenvmd.{native,byte}>: pkg_lwt.unix
 <xenvmd/xenvmd.{native,byte}>: pkg_mirage-block-unix
@@ -49,7 +48,6 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: pkg_io-page.unix
 <xenvmd/*.ml{,i,y}>: pkg_lvm
 <xenvmd/*.ml{,i,y}>: pkg_lvm.mapper
-<xenvmd/*.ml{,i,y}>: pkg_lvm.mirage
 <xenvmd/*.ml{,i,y}>: pkg_lwt
 <xenvmd/*.ml{,i,y}>: pkg_lwt.unix
 <xenvmd/*.ml{,i,y}>: pkg_mirage-block-unix
@@ -65,6 +63,7 @@ true: annot, bin_annot
 <xenvm/xenvm.{native,byte}>: pkg_cmdliner
 <xenvm/xenvm.{native,byte}>: pkg_cohttp.lwt
 <xenvm/xenvm.{native,byte}>: pkg_devmapper
+<xenvm/xenvm.{native,byte}>: pkg_io-page.unix
 <xenvm/xenvm.{native,byte}>: pkg_lvm
 <xenvm/xenvm.{native,byte}>: pkg_lvm.mapper
 <xenvm/xenvm.{native,byte}>: pkg_lwt
@@ -76,6 +75,7 @@ true: annot, bin_annot
 <xenvm/*.ml{,i,y}>: pkg_cmdliner
 <xenvm/*.ml{,i,y}>: pkg_cohttp.lwt
 <xenvm/*.ml{,i,y}>: pkg_devmapper
+<xenvm/*.ml{,i,y}>: pkg_io-page.unix
 <xenvm/*.ml{,i,y}>: pkg_lvm
 <xenvm/*.ml{,i,y}>: pkg_lvm.mapper
 <xenvm/*.ml{,i,y}>: pkg_lwt
@@ -94,7 +94,6 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_io-page.unix
 <local-allocator.{native,byte}>: pkg_lvm
 <local-allocator.{native,byte}>: pkg_lvm.mapper
-<local-allocator.{native,byte}>: pkg_lvm.mirage
 <local-allocator.{native,byte}>: pkg_lwt
 <local-allocator.{native,byte}>: pkg_lwt.unix
 <local-allocator.{native,byte}>: pkg_mirage-block-unix
@@ -113,7 +112,6 @@ true: annot, bin_annot
 <*.ml{,i,y}>: pkg_io-page.unix
 <*.ml{,i,y}>: pkg_lvm
 <*.ml{,i,y}>: pkg_lvm.mapper
-<*.ml{,i,y}>: pkg_lvm.mirage
 <*.ml{,i,y}>: pkg_lwt
 <*.ml{,i,y}>: pkg_lwt.unix
 <*.ml{,i,y}>: pkg_mirage-block-unix
