@@ -3,7 +3,6 @@
 exception Uninitialised
 exception AlreadyOpen
 
-external format : name:string -> pvs:(string * string) list -> unit = ""
 external vgopen : devices:string list -> unit = ""
 
 external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""

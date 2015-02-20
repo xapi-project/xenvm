@@ -43,6 +43,14 @@ module VolumeManager = struct
     | Some _ -> 
       return `AlreadyOpen
     | None ->
+      Lwt_list.map_s
+        (fun filename ->
+          Block.connect filename
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
+          | `Ok x -> return x
+        ) devices'
+      >>= fun devices' ->
       Vg_IO.read devices' >>|= fun vg ->
       myvg := Some vg;
       devices := devices';
@@ -249,10 +257,6 @@ module Impl = struct
 
   type context = unit
 
-  let format context ~name ~pvs =
-    Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
-    return ()
-    
   let vgopen context ~devices =
     VolumeManager.vgopen ~devices
     >>= function

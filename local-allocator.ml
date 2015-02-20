@@ -30,23 +30,34 @@ type vg = {
 }
 (* The minimum amount of info about a VG we need ot know *)
 
+let with_block filename f =
+  let open Lwt in
+  Block.connect filename
+  >>= function
+  | `Error _ -> fail (Failure (Printf.sprintf "Unable to read %s" filename))
+  | `Ok x ->
+    Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
+
 let query_lvm config =
   let module Vg_IO = Lvm.Vg.Make(Block) in
   match config.Config.devices with
   | [] ->
     fail (Failure "I require at least one physical device")
   | device :: _ ->
-    Vg_IO.read [ device ]
-    >>= function
-    | `Error e ->
-      error "Fatal error reading LVM metadata: %s" e;
-      fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
-    | `Ok x ->
-      let extent_size = x.Lvm.Vg.extent_size in
-      let pvs = List.map (fun pv ->
-        pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device }
-      ) x.Lvm.Vg.pvs in
-      return { extent_size; pvs }
+    with_block device
+      (fun x ->
+        Vg_IO.read [ x ]
+        >>= function
+        | `Error e ->
+          error "Fatal error reading LVM metadata: %s" e;
+          fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
+        | `Ok x ->
+          let extent_size = x.Lvm.Vg.extent_size in
+          let pvs = List.map (fun pv ->
+            pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device }
+          ) x.Lvm.Vg.pvs in
+          return { extent_size; pvs }
+      )
 
 module ToLVM = Block_queue.Pusher(ExpandVolume)
 module FromLVM = Block_queue.Popper(FreeAllocation)

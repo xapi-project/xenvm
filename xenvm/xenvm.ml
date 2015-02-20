@@ -2,6 +2,10 @@ open Cohttp_lwt_unix
 open Lwt
 open Lvm
 
+let (>>|=) m f = m >>= function
+  | `Error e -> fail (Failure e)
+  | `Ok x -> f x
+
 type copts_t = {
   host : string option;
   port : int option;
@@ -87,10 +91,20 @@ let lvs config =
      Lwt.return ())
 
 let format config name filenames =
-  Lwt_main.run 
-    (
-      let pvs = List.mapi (fun i filename -> (filename,Printf.sprintf "pv%d" i)) filenames in
-      Client.format ~name ~pvs)
+    let t =
+      let module Vg_IO = Vg.Make(Block) in
+      Lwt_list.map_s
+        (fun filename ->
+          Block.connect filename
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
+          | `Ok x -> return x
+        ) filenames
+      >>= fun blocks ->
+      let pvs = List.mapi (fun i block -> (block,Printf.sprintf "pv%d" i)) blocks in
+      Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
+      return () in
+  Lwt_main.run t
 
 let vgopen config filenames =
   Lwt_main.run
