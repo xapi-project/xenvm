@@ -44,7 +44,7 @@ let query_lvm config =
     | `Ok x ->
       let extent_size = x.Lvm.Vg.extent_size in
       let pvs = List.map (fun pv ->
-        pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device = pv.Lvm.Pv.real_device }
+        pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device }
       ) x.Lvm.Vg.pvs in
       return { extent_size; pvs }
 

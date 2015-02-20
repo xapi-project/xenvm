@@ -33,17 +33,19 @@ module Vg_IO = Lvm.Vg.Make(Block)
 module VolumeManager = struct
   module J = Shared_block.Journal.Make(ErrorLogOnly)(Block)(Lvm.Redo.Op)
 
+  let devices = ref []
   let myvg = ref None
   let lock = Lwt_mutex.create ()
   let journal = ref None
 
-  let vgopen ~devices =
+  let vgopen ~devices:devices' =
     match !myvg with 
     | Some _ -> 
       return `AlreadyOpen
     | None ->
-      Vg_IO.read devices >>|= fun vg ->
+      Vg_IO.read devices' >>|= fun vg ->
       myvg := Some vg;
+      devices := devices';
       return (`Ok ())
 
   let close () =
@@ -68,10 +70,10 @@ module VolumeManager = struct
         (match !journal with
         | Some j ->
           J.push j op
-          >>= fun () ->
+          >>= fun _ ->
           Lwt.return (`Ok vg)
         | None ->
-          Vg_IO.write vg) >>|= fun _ ->
+          Vg_IO.write !devices vg) >>|= fun _ ->
         return ()
     )
                
@@ -83,7 +85,7 @@ module VolumeManager = struct
         return vg
       ) !state ops
       >>= fun vg ->
-      Vg_IO.write vg >>|= fun vg ->
+      Vg_IO.write !devices vg >>|= fun vg ->
       Printf.printf "Performed %d ops\n%!" (List.length ops);
       state := vg;
       Lwt.return ()

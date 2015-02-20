@@ -13,7 +13,7 @@ done
 
 for i in ${LVS}; do
   echo Activating $i
-  ./xenvm.native activate --lv $i `pwd`/djstest-$i
+  ./xenvm.native activate --lv $i `pwd`/djstest-$i /dev/loop0
 done
 
 dd if=/dev/zero of=localJournal bs=1M count=4

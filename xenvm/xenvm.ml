@@ -43,8 +43,6 @@ let table_of_pv_header prefix pvh = add_prefix prefix [
 let table_of_pv pv = add_prefix pv.Pv.name [
   [ "name"; pv.Pv.name; ];
   [ "id"; Uuid.to_string pv.Pv.id; ];
-  [ "stored_device"; pv.Pv.stored_device ];
-  [ "real_device"; pv.Pv.real_device ];
   [ "status"; String.concat ", " (List.map Pv.Status.to_string pv.Pv.status) ];
   [ "size_in_sectors"; Int64.to_string pv.Pv.size_in_sectors ];
   [ "pe_start"; Int64.to_string pv.Pv.pe_start ];
@@ -103,11 +101,15 @@ let create config name size =
     (let size_in_bytes = Int64.mul 1048576L size in
      Client.create name size_in_bytes)
 
-let activate config lvname path =
+let activate config lvname path pv =
   Lwt_main.run
     (Client.get_lv ~name:lvname
      >>= fun (vg, lv) ->
-     let targets = Mapper.to_targets vg lv in
+     (* To compute the targets, I need to be able to map PV ids
+        onto local block devices. *)
+     Mapper.read [ pv ]
+     >>= fun devices ->
+     let targets = Mapper.to_targets devices vg lv in
      let name = Mapper.name_of vg lv in
      Devmapper.create name targets;
      Devmapper.mknod name path 0o0600;
@@ -265,7 +267,10 @@ let activate_cmd =
   let path =
     let doc = "Path to the new device node" in
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH" ~doc) in
-  Term.(pure activate $ copts_t $ lvname $ path),
+  let physical =
+    let doc = "Path to the (single) physical PV" in
+    Arg.(required & pos 1 (some string) None & info [] ~docv:"PV" ~doc) in
+  Term.(pure activate $ copts_t $ lvname $ path $ physical),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
 
 let set_redo_log_cmd =
