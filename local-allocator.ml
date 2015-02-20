@@ -26,7 +26,7 @@ type pv = {
 
 type vg = {
   extent_size: int64;
-  pvs: (string * pv) list;
+  pvs: (Lvm.Pv.Name.t * pv) list;
 }
 (* The minimum amount of info about a VG we need ot know *)
 
@@ -138,7 +138,8 @@ let extend_volume vg lv extents =
           segment :: segments,
           target :: targets
         with Not_found ->
-          error "PV with name %s not found in volume group; where did this allocation come from?" pvname;
+          error "PV with name %s not found in volume group; where did this allocation come from?"
+            (Lvm.Pv.Name.to_string pvname);
           next_sector, segments, targets
       ) (next_sector, [], []) extents in
    segments, targets

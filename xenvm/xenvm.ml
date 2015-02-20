@@ -44,14 +44,14 @@ let table_of_pv_header prefix pvh = add_prefix prefix [
   [ "metadata_areas"; string_of_int (List.length pvh.Label.Pv_header.metadata_areas) ];
 ]
 
-let table_of_pv pv = add_prefix pv.Pv.name [
-  [ "name"; pv.Pv.name; ];
+let table_of_pv pv = add_prefix (Pv.Name.to_string pv.Pv.name) [
+  [ "name"; Pv.Name.to_string pv.Pv.name; ];
   [ "id"; Uuid.to_string pv.Pv.id; ];
   [ "status"; String.concat ", " (List.map Pv.Status.to_string pv.Pv.status) ];
   [ "size_in_sectors"; Int64.to_string pv.Pv.size_in_sectors ];
   [ "pe_start"; Int64.to_string pv.Pv.pe_start ];
   [ "pe_count"; Int64.to_string pv.Pv.pe_count; ]
-] @ (table_of_pv_header (pv.Pv.name ^ "/label") pv.Pv.label.Label.pv_header)
+] @ (table_of_pv_header (Pv.Name.to_string pv.Pv.name ^ "/label") pv.Pv.label.Label.pv_header)
 
 let table_of_lv lv = add_prefix lv.Lv.name [
   [ "name"; lv.Lv.name; ];
@@ -101,7 +101,12 @@ let format config name filenames =
           | `Ok x -> return x
         ) filenames
       >>= fun blocks ->
-      let pvs = List.mapi (fun i block -> (block,Printf.sprintf "pv%d" i)) blocks in
+      let pvs = List.mapi (fun i block ->
+        let name = match Pv.Name.of_string (Printf.sprintf "pv%d" i) with
+        | `Ok x -> x
+        | `Error x -> failwith x in
+        (block,name)
+      ) blocks in
       Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
       return () in
   Lwt_main.run t
