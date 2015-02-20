@@ -67,7 +67,8 @@ module VolumeManager = struct
         myvg := Some vg;
         (match !journal with
         | Some j ->
-          J.push j op;
+          J.push j op
+          >>= fun () ->
           Lwt.return (`Ok vg)
         | None ->
           Vg_IO.write vg) >>|= fun _ ->
