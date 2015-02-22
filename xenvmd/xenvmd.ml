@@ -34,7 +34,8 @@ module VolumeManager = struct
   module J = Shared_block.Journal.Make(ErrorLogOnly)(Block)(Lvm.Redo.Op)
 
   let devices = ref []
-  let myvg = ref None
+  let metadata = ref None
+  let myvg = ref None (* one shot communication *)
   let lock = Lwt_mutex.create ()
   let journal = ref None
 
@@ -53,47 +54,44 @@ module VolumeManager = struct
       >>= fun devices' ->
       Vg_IO.read devices' >>|= fun vg ->
       myvg := Some vg;
+      metadata := Some (Vg_IO.metadata_of vg);
       devices := devices';
       return (`Ok ())
 
   let close () =
-    myvg := None
+    myvg := None;
+    metadata := None
 
   let read fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !myvg with
+      match !metadata with
       | None -> return (`Error Xenvm_interface.Uninitialised)
-      | Some vg -> fn vg)
+      | Some metadata -> fn metadata)
 
   let write fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !myvg with
-      | None -> raise Xenvm_interface.Uninitialised
-      | Some vg ->
-        ( match fn vg with
+      match !metadata, !myvg with
+      | Some md, Some vg ->
+        ( match fn md with
           | `Error e -> fail (Failure e)
           | `Ok x -> Lwt.return x )
-        >>= fun (vg, op) ->
-        myvg := Some vg;
-        (match !journal with
-        | Some j ->
-          J.push j op
-          >>= fun _ ->
-          Lwt.return (`Ok vg)
-        | None ->
-          Vg_IO.write !devices vg) >>|= fun _ ->
+        >>= fun (md, op) ->
+        metadata := Some md;
+        ( match !journal with
+          | Some j ->
+            J.push j op
+            >>= fun _ ->
+            Lwt.return (`Ok vg)
+          | None ->
+            Vg_IO.update vg [ op ]) >>|= fun _ ->
         return ()
+      | _, _ -> raise Xenvm_interface.Uninitialised
     )
                
   let perform vg =
     let state = ref vg in
     let perform ops =
-      Lwt_list.fold_left_s (fun vg op ->
-        Lvm.Vg.do_op vg op >>*= fun (vg, _) ->
-        return vg
-      ) !state ops
-      >>= fun vg ->
-      Vg_IO.write !devices vg >>|= fun vg ->
+      Vg_IO.update vg ops >>|= fun vg ->
       Printf.printf "Performed %d ops\n%!" (List.length ops);
       state := vg;
       Lwt.return ()

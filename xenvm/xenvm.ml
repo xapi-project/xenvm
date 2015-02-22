@@ -105,7 +105,7 @@ let format config name filenames =
         let name = match Pv.Name.of_string (Printf.sprintf "pv%d" i) with
         | `Ok x -> x
         | `Error x -> failwith x in
-        (block,name)
+        (name,block)
       ) blocks in
       Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
       return () in

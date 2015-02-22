@@ -52,6 +52,7 @@ let query_lvm config =
           error "Fatal error reading LVM metadata: %s" e;
           fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
         | `Ok x ->
+          let x = Vg_IO.metadata_of x in
           let extent_size = x.Lvm.Vg.extent_size in
           let pvs = List.map (fun pv ->
             pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device }
