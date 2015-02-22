@@ -31,7 +31,7 @@ module FromLVM = Block_queue.Pusher(FreeAllocation)
 module Vg_IO = Lvm.Vg.Make(Block)
 
 module VolumeManager = struct
-  module J = Shared_block.Journal.Make(ErrorLogOnly)(Block)(Lvm.Redo.Op)
+  module J = Shared_block.Journal.Make(ErrorLogOnly)(Vg_IO.Volume)(Lvm.Redo.Op)
 
   let devices = ref []
   let metadata = ref None
@@ -81,9 +81,12 @@ module VolumeManager = struct
           | Some j ->
             J.push j op
             >>= fun _ ->
-            Lwt.return (`Ok vg)
+            Lwt.return (`Ok ())
           | None ->
-            Vg_IO.update vg [ op ]) >>|= fun _ ->
+            Vg_IO.update vg [ op ]
+            >>|= fun vg ->
+            myvg := Some vg;
+            Lwt.return (`Ok ()) ) >>|= fun () -> 
         return ()
       | _, _ -> raise Xenvm_interface.Uninitialised
     )
@@ -94,18 +97,19 @@ module VolumeManager = struct
       Vg_IO.update vg ops >>|= fun vg ->
       Printf.printf "Performed %d ops\n%!" (List.length ops);
       state := vg;
+      myvg := Some vg;
       Lwt.return ()
     in perform
 
-  let start path =
+  let start name =
     match !myvg with
     | Some vg ->
-      begin Block.connect path
+      begin Vg_IO.Volume.(connect { vg; name })
       >>= function
       | `Ok device ->
         J.start device (perform vg) >>= fun j -> journal := Some j; Lwt.return ()
       | `Error _ ->
-        failwith (Printf.sprintf "failed to start journal on %s" path)
+        failwith (Printf.sprintf "failed to start journal on %s" name)
       end
     | None -> 
       raise Xenvm_interface.Uninitialised
@@ -288,7 +292,7 @@ module Impl = struct
     | `Error e -> fail e
     | `Ok x -> return x
 
-  let set_redo_log context ~path = VolumeManager.start path
+  let set_redo_log context ~name = VolumeManager.start name
 
   let set_journal context ~path = FreePool.start path
 

@@ -19,7 +19,7 @@ done
 dd if=/dev/zero of=localJournal bs=1M count=4
 rm -f djstest-LVMjournal
 dd if=/dev/urandom of=djstest-LVMjournal bs=1M count=4
-./xenvm.native set_redo_log `pwd`/djstest-LVMjournal
+./xenvm.native set_redo_log --lv LVMjournal
 ./xenvm.native set_journal `pwd`/djstest-operationJournal
 ./xenvm.native benchmark
 

@@ -296,9 +296,9 @@ let set_redo_log_cmd =
   let doc = "Start updating the metadata using a redo log rather than synchronously" in
   let man = [
     `S "DESCRIPTION";
-    `P "Starts the redo log on the named device";
+    `P "Starts the redo log on the named LV";
   ] in
-  Term.(pure set_redo_log $ copts_t $ filename),
+  Term.(pure set_redo_log $ copts_t $ lvname),
   Term.info "set_redo_log" ~sdocs:copts_sect ~doc ~man
 
 let set_journal_cmd =
