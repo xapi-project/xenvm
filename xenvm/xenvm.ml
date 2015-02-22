@@ -307,7 +307,7 @@ let set_journal_cmd =
     `S "DESCRIPTION";
     `P "Maintains a journal of free block allocations on the named device. This must be done before a host is registered.";
   ] in
-  Term.(pure set_journal $ copts_t $ filename),
+  Term.(pure set_journal $ copts_t $ lvname),
   Term.info "set_journal" ~sdocs:copts_sect ~doc ~man
 
 let register_cmd =

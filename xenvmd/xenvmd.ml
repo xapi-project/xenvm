@@ -184,21 +184,25 @@ module FreePool = struct
 
   let perform = Lwt_list.iter_s perform
 
-  module J = Shared_block.Journal.Make(Log)(Block)(Op)
+  module J = Shared_block.Journal.Make(Log)(Vg_IO.Volume)(Op)
 
   let journal = ref None
 
-  let start journal_path =
-    debug "Opening '%s' to use as a freePool journal" journal_path;
-    ( Block.connect journal_path
-      >>= function
-      | `Ok x -> return x
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open '%s' as a freePool journal" journal_path))
-    ) >>= fun device ->
-    J.start device perform
-    >>= fun j' ->
-    journal := Some j';
-    return ()
+  let start name =
+    match !VolumeManager.myvg with
+    | Some vg ->
+      debug "Opening LV '%s' to use as a freePool journal" name;
+      ( Vg_IO.Volume.connect { vg; name }
+        >>= function
+        | `Ok x -> return x
+        | `Error _ -> fail (Failure (Printf.sprintf "Failed to open '%s' as a freePool journal" name))
+      ) >>= fun device ->
+      J.start device perform
+      >>= fun j' ->
+      journal := Some j';
+      return ()
+    | None ->
+      raise Xenvm_interface.Uninitialised
 
   let shutdown () =
     match !journal with
@@ -294,7 +298,7 @@ module Impl = struct
 
   let set_redo_log context ~name = VolumeManager.start name
 
-  let set_journal context ~path = FreePool.start path
+  let set_journal context ~name = FreePool.start name
 
   let shutdown context () =
     VolumeManager.shutdown ()

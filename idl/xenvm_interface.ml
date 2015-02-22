@@ -19,8 +19,8 @@ external set_redo_log : name:string -> unit = ""
     Metadata changes will be appended to the log in O(1) time, rather than
     O(N) for a full write (where 'N' refers to the number of LVs) *)
 
-external set_journal : path:string -> unit = ""
-(** [set_journal path] uses [path] as an operation journal to ensure
+external set_journal : name:string -> unit = ""
+(** [set_journal name] uses LV [name] as an operation journal to ensure
     key operations (such as free block allocations) are performed
     at-least-once. *)
 
