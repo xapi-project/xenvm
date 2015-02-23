@@ -31,8 +31,10 @@ let fatal_error_t msg =
   error "%s" msg;
   fail (Failure msg)
 
+module Vg_IO = Lvm.Vg.Make(Block)
+
 module ToLVM = struct
-  module R = Shared_block.Ring.Make(Block)(ExpandVolume)
+  module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () = R.Producer.create ~disk () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
   | `Ok x -> return x
@@ -54,7 +56,7 @@ module ToLVM = struct
   | `Ok x -> return x
 end
 module FromLVM = struct
-  module R = Shared_block.Ring.Make(Block)(FreeAllocation)
+  module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () = R.Producer.create ~disk () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
   | `Ok x -> return x
@@ -73,8 +75,6 @@ module FromLVM = struct
   | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM producer pointer: %s" x)
   | `Ok x -> return x
 end
-
-module Vg_IO = Lvm.Vg.Make(Block)
 
 module VolumeManager = struct
   module J = Shared_block.Journal.Make(ErrorLogOnly)(Vg_IO.Volume)(Lvm.Redo.Op)
@@ -171,30 +171,34 @@ module VolumeManager = struct
   let from_LVMs = ref []
   let free_LVs = ref []
 
-  let register host =
-    let open Xenvm_interface in
-    info "Registering host %s" host.name;
-    Block.connect host.toLVM
-    >>= function
-    | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.toLVM))
-    | `Ok disk ->
-    ToLVM.create ~disk ()
-    >>= fun () ->
-    ToLVM.attach ~disk ()
-    >>= fun to_LVM ->
+  let register host = match !myvg with
+    | Some vg -> begin
+      let open Xenvm_interface in
+      info "Registering host %s" host.name;
+      Vg_IO.Volume.connect { vg; name = host.toLVM }
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.toLVM))
+      | `Ok disk ->
+      ToLVM.create ~disk ()
+      >>= fun () ->
+      ToLVM.attach ~disk ()
+      >>= fun to_LVM ->
     
-    Block.connect host.fromLVM
-    >>= function
-    | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.fromLVM))
-    | `Ok disk ->
-    FromLVM.create ~disk ()
-    >>= fun () ->
-    FromLVM.attach ~disk ()
-    >>= fun from_LVM ->
-    to_LVMs := (host.name, to_LVM) :: !to_LVMs;
-    from_LVMs := (host.name, from_LVM) :: !from_LVMs;
-    free_LVs := (host.name, host.freeLV) :: !free_LVs;
-    return ()
+      Vg_IO.Volume.connect { vg; name = host.fromLVM }
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.fromLVM))
+      | `Ok disk ->
+      FromLVM.create ~disk ()
+      >>= fun () ->
+      FromLVM.attach ~disk ()
+      >>= fun from_LVM ->
+      to_LVMs := (host.name, to_LVM) :: !to_LVMs;
+      from_LVMs := (host.name, from_LVM) :: !from_LVMs;
+      free_LVs := (host.name, host.freeLV) :: !free_LVs;
+      return ()
+    end
+    | None -> 
+      raise Xenvm_interface.Uninitialised
 end
 
 module FreePool = struct
