@@ -25,10 +25,56 @@ module ErrorLogOnly = struct
   let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 end
 
-module ToLVM = Block_queue.Popper(ExpandVolume)
-module FromLVM = Block_queue.Pusher(FreeAllocation)
+(* This error must cause the system to stop for manual maintenance.
+   Perhaps we could scope this later and take down only a single connection? *)
+let fatal_error_t msg =
+  error "%s" msg;
+  fail (Failure msg)
 
 module Vg_IO = Lvm.Vg.Make(Block)
+
+module ToLVM = struct
+  module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
+  let create ~disk () = R.Producer.create ~disk () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
+  | `Ok x -> return x
+  let rec attach ~disk () = R.Consumer.attach ~disk () >>= function
+  | `Error _ ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    attach ~disk ()
+  | `Ok x -> return x
+  let rec pop t =
+    R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
+    >>= function
+    | `Error msg -> fatal_error_t msg
+    | `Ok (position, rev_items) ->
+      let items = List.rev rev_items in
+      return (position, items)
+  let advance t position = R.Consumer.advance ~t ~position () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM consumer pointer: %s" x)
+  | `Ok x -> return x
+end
+module FromLVM = struct
+  module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
+  let create ~disk () = R.Producer.create ~disk () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
+  | `Ok x -> return x
+  let attach ~disk () = R.Producer.attach ~disk () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the FromLVM producer queue: %s" x)
+  | `Ok x -> return x
+  let rec push t item = R.Producer.push ~t ~item () >>= function
+  | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
+  | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
+  | `Retry ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    push t item
+  | `Ok x -> return x
+  let advance t position = R.Producer.advance ~t ~position () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM producer pointer: %s" x)
+  | `Ok x -> return x
+end
 
 module VolumeManager = struct
   module J = Shared_block.Journal.Make(ErrorLogOnly)(Vg_IO.Volume)(Lvm.Redo.Op)
@@ -125,17 +171,34 @@ module VolumeManager = struct
   let from_LVMs = ref []
   let free_LVs = ref []
 
-  let register host =
-    let open Xenvm_interface in
-    info "Registering host %s" host.name;
-    ToLVM.start host.toLVM
-    >>= fun to_LVM ->
-    FromLVM.start host.fromLVM
-    >>= fun from_LVM ->
-    to_LVMs := (host.name, to_LVM) :: !to_LVMs;
-    from_LVMs := (host.name, from_LVM) :: !from_LVMs;
-    free_LVs := (host.name, host.freeLV) :: !free_LVs;
-    return ()
+  let register host = match !myvg with
+    | Some vg -> begin
+      let open Xenvm_interface in
+      info "Registering host %s" host.name;
+      Vg_IO.Volume.connect { vg; name = host.toLVM }
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.toLVM))
+      | `Ok disk ->
+      ToLVM.create ~disk ()
+      >>= fun () ->
+      ToLVM.attach ~disk ()
+      >>= fun to_LVM ->
+    
+      Vg_IO.Volume.connect { vg; name = host.fromLVM }
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.fromLVM))
+      | `Ok disk ->
+      FromLVM.create ~disk ()
+      >>= fun () ->
+      FromLVM.attach ~disk ()
+      >>= fun from_LVM ->
+      to_LVMs := (host.name, to_LVM) :: !to_LVMs;
+      from_LVMs := (host.name, from_LVM) :: !from_LVMs;
+      free_LVs := (host.name, host.freeLV) :: !free_LVs;
+      return ()
+    end
+    | None -> 
+      raise Xenvm_interface.Uninitialised
 end
 
 module FreePool = struct

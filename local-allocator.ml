@@ -1,6 +1,5 @@
 open Lwt
 open Sexplib.Std
-open Block_ring_unix
 open Log
 
 module Config = struct
@@ -60,8 +59,55 @@ let query_lvm config =
           return { extent_size; pvs }
       )
 
-module ToLVM = Block_queue.Pusher(ExpandVolume)
-module FromLVM = Block_queue.Popper(FreeAllocation)
+(* This error must cause the system to stop for manual maintenance.
+   Perhaps we could scope this later and take down only a single connection? *)
+let fatal_error_t msg =
+  error "%s" msg;
+  fail (Failure msg)
+
+module FromLVM = struct
+  module R = Shared_block.Ring.Make(Block)(FreeAllocation)
+  let create ~disk () = R.Producer.create ~disk () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
+  | `Ok x -> return x
+  let rec attach ~disk () = R.Consumer.attach ~disk () >>= function
+  | `Error _ ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    attach ~disk ()
+  | `Ok x -> return x
+  let rec pop t =
+    R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
+    >>= function
+    | `Error msg -> fatal_error_t msg
+    | `Ok (position, rev_items) ->
+      let items = List.rev rev_items in
+      return (position, items)
+  | `Ok x -> return x
+  let advance t position = R.Consumer.advance ~t ~position () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM consumer pointer: %s" x)
+  | `Ok x -> return x
+end
+module ToLVM = struct
+  module R = Shared_block.Ring.Make(Block)(ExpandVolume)
+  let create ~disk () = R.Producer.create ~disk () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
+  | `Ok x -> return x
+  let attach ~disk () = R.Producer.attach ~disk () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the FromLVM producer queue: %s" x)
+  | `Ok x -> return x
+  let rec push t item = R.Producer.push ~t ~item () >>= function
+  | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
+  | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
+  | `Retry ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    push t item
+  | `Ok x -> return x
+  let advance t position = R.Producer.advance ~t ~position () >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM producer pointer: %s" x)
+  | `Ok x -> return x
+end
 
 module FreePool = struct
   (** Record the free block list in a file *)
@@ -180,7 +226,11 @@ let main config socket journal freePool fromLVM toLVM =
     query_lvm config
     >>= fun vg ->
 
-    ToLVM.start config.Config.toLVM
+    Block.connect config.Config.toLVM
+    >>= function
+    | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.toLVM))
+    | `Ok disk ->
+    ToLVM.attach ~disk ()
     >>= fun tolvm ->
 
     let extent_size = vg.extent_size in (* in sectors *)
@@ -191,7 +241,11 @@ let main config socket journal freePool fromLVM toLVM =
 
     let receive_free_blocks_forever () =
       debug "Receiving free blocks from the SRmaster forever";
-      FromLVM.start config.Config.fromLVM
+      Block.connect config.Config.fromLVM
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.fromLVM))
+      | `Ok disk ->
+      FromLVM.attach ~disk ()
       >>= fun from_lvm -> (* blocks for a while *)
       let rec loop_forever () =
         FromLVM.pop from_lvm

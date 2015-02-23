@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 53695190db9de65c80f3c40332c14796)
+# DO NOT EDIT (digest: 9527a343626b99ae64785668c361d954)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -37,7 +37,7 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: pkg_rpclib
 <xenvmd/xenvmd.{native,byte}>: pkg_rpclib.syntax
 <xenvmd/xenvmd.{native,byte}>: pkg_sexplib.syntax
-<xenvmd/xenvmd.{native,byte}>: pkg_shared-block-ring.unix
+<xenvmd/xenvmd.{native,byte}>: pkg_shared-block-ring
 <xenvmd/xenvmd.{native,byte}>: pkg_threads
 <xenvmd/xenvmd.{native,byte}>: use_xenvmidl
 <xenvmd/*.ml{,i,y}>: pkg_cmdliner
@@ -55,7 +55,7 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: pkg_rpclib
 <xenvmd/*.ml{,i,y}>: pkg_rpclib.syntax
 <xenvmd/*.ml{,i,y}>: pkg_sexplib.syntax
-<xenvmd/*.ml{,i,y}>: pkg_shared-block-ring.unix
+<xenvmd/*.ml{,i,y}>: pkg_shared-block-ring
 <xenvmd/*.ml{,i,y}>: pkg_threads
 <xenvmd/*.ml{,i,y}>: use_xenvmidl
 <xenvmd/xenvmd.{native,byte}>: custom
@@ -101,7 +101,7 @@ true: annot, bin_annot
 <local-allocator.{native,byte}>: pkg_rpclib
 <local-allocator.{native,byte}>: pkg_rpclib.syntax
 <local-allocator.{native,byte}>: pkg_sexplib.syntax
-<local-allocator.{native,byte}>: pkg_shared-block-ring.unix
+<local-allocator.{native,byte}>: pkg_shared-block-ring
 <local-allocator.{native,byte}>: pkg_threads
 <local-allocator.{native,byte}>: use_xenvmidl
 <*.ml{,i,y}>: pkg_cmdliner
@@ -119,7 +119,7 @@ true: annot, bin_annot
 <*.ml{,i,y}>: pkg_rpclib
 <*.ml{,i,y}>: pkg_rpclib.syntax
 <*.ml{,i,y}>: pkg_sexplib.syntax
-<*.ml{,i,y}>: pkg_shared-block-ring.unix
+<*.ml{,i,y}>: pkg_shared-block-ring
 <*.ml{,i,y}>: pkg_threads
 <*.ml{,i,y}>: use_xenvmidl
 <local-allocator.{native,byte}>: custom

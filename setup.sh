@@ -23,7 +23,7 @@ dd if=/dev/urandom of=djstest-LVMjournal bs=1M count=4
 ./xenvm.native set_journal --lv operationJournal
 ./xenvm.native benchmark
 
-./xenvm.native register --free free --from `pwd`/djstest-fromLVM --to `pwd`/djstest-toLVM
+./xenvm.native register --free free --from fromLVM --to toLVM
 
 echo Run 'sudo ./local-allocator.native' and type 'djstest-live' to request an allocation
 echo Run './cleanup.sh' to remove all volumes and devices
