@@ -1,16 +1,11 @@
 open Cohttp_lwt_unix
 open Lwt
 open Lvm
+open Xenvm_common
 
 let (>>|=) m f = m >>= function
   | `Error e -> fail (Failure e)
   | `Ok x -> f x
-
-type copts_t = {
-  host : string option;
-  port : int option;
-  config : string; 
-}
 
 let padto blank n s =
   let result = String.make n blank in
@@ -73,16 +68,6 @@ let table_of_vg vg =
 ] @ pvs @ lvs @ [
   [ "free_space"; Int64.to_string (Pv.Allocator.size vg.Vg.free_space) ];
 ]
-
-module Client = Xenvm_client.Client
-
-let set_uri copts =
-  match copts.host, copts.port with
-  | Some h, Some p -> 
-    Xenvm_client.Rpc.uri := Printf.sprintf "http://%s:%d/" h p;
-    copts
-  | _, _ -> 
-    failwith "Unset host"
 
 let lvs config =
   Lwt_main.run 
@@ -180,7 +165,7 @@ let info =
   ] in
   Term.info "xenvm" ~version:"0.1-alpha" ~doc ~man
 
-let copts config host port = let copts = {host; port; config} in set_uri copts
+let copts config host port = let copts = {Xenvm_common.host; port; config} in set_uri_from_copts copts
 
 let config =
   let doc = "Path to the config file" in
@@ -345,6 +330,7 @@ let default_cmd =
 let cmds = [
   lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd;
   set_redo_log_cmd; set_journal_cmd; shutdown_cmd; register_cmd; benchmark_cmd;
+  Lvmcompat.lvcreate_cmd
 ]
 
 let () = match Term.eval_choice default_cmd cmds with
