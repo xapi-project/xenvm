@@ -1,9 +1,7 @@
 (* XenVM LVM type thing *)
 
-exception Uninitialised
-exception AlreadyOpen
-
-external vgopen : devices:string list -> unit = ""
+let _redo_log_name = "xenvm_redo_log"
+let _journal_name = "xenvm_journal"
 
 external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""
 (** [get_lv lv] returns all the information you need to be able to map
@@ -13,16 +11,6 @@ external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""
 external get : unit -> Vg_wrapper.t = ""
 external create : name:string -> size:int64 -> unit = ""
 external rename : oldname:string -> newname:string -> unit = ""
-
-external set_redo_log : name:string -> unit = ""
-(** [set_redo_log name] uses LV [name] as a redo log for the LVM metadata.
-    Metadata changes will be appended to the log in O(1) time, rather than
-    O(N) for a full write (where 'N' refers to the number of LVs) *)
-
-external set_journal : name:string -> unit = ""
-(** [set_journal name] uses LV [name] as an operation journal to ensure
-    key operations (such as free block allocations) are performed
-    at-least-once. *)
 
 external shutdown : unit -> unit = ""
 
