@@ -78,6 +78,9 @@ let lvs config =
 let format config name filenames =
     let t =
       let module Vg_IO = Vg.Make(Block) in
+      let open Xenvm_interface in
+      (* 4 MiB per volume *)
+      let size = Int64.(mul 4L (mul 1024L 1024L)) in
       Lwt_list.map_s
         (fun filename ->
           Block.connect filename
@@ -93,12 +96,18 @@ let format config name filenames =
         (name,block)
       ) blocks in
       Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
+      Vg_IO.read (List.map snd pvs)
+      >>|= fun vg ->
+      (return (Vg.create (Vg_IO.metadata_of vg) _redo_log_name size))
+      >>|= fun (_, op) ->
+      Vg_IO.update vg [ op ]
+      >>|= fun vg ->
+      (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size))
+      >>|= fun (_, op) ->
+      Vg_IO.update vg [ op ]
+      >>|= fun _ ->
       return () in
   Lwt_main.run t
-
-let vgopen config filenames =
-  Lwt_main.run
-    (Client.vgopen ~devices:filenames)
 
 let create config name size =
   Lwt_main.run
@@ -118,12 +127,6 @@ let activate config lvname path pv =
      Devmapper.create name targets;
      Devmapper.mknod name path 0o0600;
      return ())
-
-let set_redo_log config filename =
-  Lwt_main.run (Client.set_redo_log filename)
-
-let set_journal config filename =
-  Lwt_main.run (Client.set_journal filename)
 
 let register config host =
   Lwt_main.run (Client.register host)
@@ -253,15 +256,6 @@ let create_cmd =
   Term.(pure create $ copts_t $ lvname $ size),
   Term.info "create" ~sdocs:copts_sect ~doc ~man
 
-let open_cmd =
-  let doc = "Open the VG specified in the devices" in
-  let man = [
-    `S "DESCRIPTION";
-    `P "Places volume group metadata into the file specified"
-  ] in
-  Term.(pure vgopen $ copts_t $ filenames),
-  Term.info "open" ~sdocs:copts_sect ~doc ~man
-
 let activate_cmd = 
   let doc = "Activate a logical volume on the host on which the daemon is running" in
   let man = [
@@ -276,24 +270,6 @@ let activate_cmd =
     Arg.(required & pos 1 (some string) None & info [] ~docv:"PV" ~doc) in
   Term.(pure activate $ copts_t $ lvname $ path $ physical),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
-
-let set_redo_log_cmd =
-  let doc = "Start updating the metadata using a redo log rather than synchronously" in
-  let man = [
-    `S "DESCRIPTION";
-    `P "Starts the redo log on the named LV";
-  ] in
-  Term.(pure set_redo_log $ copts_t $ lvname),
-  Term.info "set_redo_log" ~sdocs:copts_sect ~doc ~man
-
-let set_journal_cmd =
-  let doc = "Set where we journal our free block allocations" in
-  let man = [
-    `S "DESCRIPTION";
-    `P "Maintains a journal of free block allocations on the named device. This must be done before a host is registered.";
-  ] in
-  Term.(pure set_journal $ copts_t $ lvname),
-  Term.info "set_journal" ~sdocs:copts_sect ~doc ~man
 
 let register_cmd =
   let doc = "Register a host with the daemon" in
@@ -328,8 +304,8 @@ let default_cmd =
   Term.(pure help $ copts_t), info
       
 let cmds = [
-  lvs_cmd; format_cmd; open_cmd; create_cmd; activate_cmd;
-  set_redo_log_cmd; set_journal_cmd; shutdown_cmd; register_cmd; benchmark_cmd;
+  lvs_cmd; format_cmd; create_cmd; activate_cmd;
+  shutdown_cmd; register_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]
 

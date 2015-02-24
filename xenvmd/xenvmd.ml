@@ -81,71 +81,64 @@ module VolumeManager = struct
 
   let devices = ref []
   let metadata = ref None
-  let myvg = ref None (* one shot communication *)
+  let myvg = ref None
+  let wait_for_flush_t = ref (fun () -> return ())
   let lock = Lwt_mutex.create ()
   let journal = ref None
 
   let vgopen ~devices:devices' =
-    match !myvg with 
-    | Some _ -> 
-      return `AlreadyOpen
-    | None ->
-      Lwt_list.map_s
-        (fun filename ->
-          Block.connect filename
-          >>= function
-          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
-          | `Ok x -> return x
-        ) devices'
-      >>= fun devices' ->
-      Vg_IO.read devices' >>|= fun vg ->
-      myvg := Some vg;
-      metadata := Some (Vg_IO.metadata_of vg);
-      devices := devices';
-      return (`Ok ())
-
-  let close () =
-    myvg := None;
-    metadata := None
+    Lwt_list.map_s
+      (fun filename ->
+      Block.connect filename
+        >>= function
+        | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
+        | `Ok x -> return x
+      ) devices'
+    >>= fun devices' ->
+    Vg_IO.read devices' >>|= fun vg ->
+    myvg := Some vg;
+    metadata := Some (Vg_IO.metadata_of vg);
+    devices := devices';
+    return ()
 
   let read fn =
     Lwt_mutex.with_lock lock (fun () -> 
       match !metadata with
-      | None -> return (`Error Xenvm_interface.Uninitialised)
+      | None -> assert false
       | Some metadata -> fn metadata)
 
   let write fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !metadata, !myvg with
-      | Some md, Some vg ->
+      match !metadata, !journal with
+      | Some md, Some j ->
         ( match fn md with
           | `Error e -> fail (Failure e)
           | `Ok x -> Lwt.return x )
         >>= fun (md, op) ->
         metadata := Some md;
-        ( match !journal with
-          | Some j ->
-            J.push j op
-            >>= fun _ ->
-            Lwt.return (`Ok ())
-          | None ->
-            Vg_IO.update vg [ op ]
-            >>|= fun vg ->
-            myvg := Some vg;
-            Lwt.return (`Ok ()) ) >>|= fun () -> 
-        return ()
-      | _, _ -> raise Xenvm_interface.Uninitialised
+        J.push j op
+        >>= fun waiter ->
+        wait_for_flush_t := waiter;
+        Lwt.return ()
+      | _, _ -> assert false
     )
-               
-  let perform vg =
-    let state = ref vg in
-    let perform ops =
-      Vg_IO.update vg ops >>|= fun vg ->
-      Printf.printf "Performed %d ops\n%!" (List.length ops);
-      state := vg;
-      myvg := Some vg;
+
+  let last_flush = ref 0.
+  let perform ops =
+    if ops = []
+    then return ()
+    else match !myvg with
+    | None -> assert false
+    | Some vg ->
+      Vg_IO.update vg ops >>|= fun vg' ->
+      debug "Performed %d ops" (List.length ops);
+      (* Encourage batching of metadata writes by sleeping *)
+      let now = Unix.gettimeofday () in
+      Lwt_unix.sleep (max 0. (5. -. (now -. !last_flush)))
+      >>= fun () ->
+      last_flush := now;
+      myvg := Some vg';
       Lwt.return ()
-    in perform
 
   let start name =
     match !myvg with
@@ -153,12 +146,12 @@ module VolumeManager = struct
       begin Vg_IO.Volume.(connect { vg; name })
       >>= function
       | `Ok device ->
-        J.start device (perform vg) >>= fun j -> journal := Some j; Lwt.return ()
+        J.start device perform >>= fun j -> journal := Some j; Lwt.return ()
       | `Error _ ->
         failwith (Printf.sprintf "failed to start journal on %s" name)
       end
-    | None -> 
-      raise Xenvm_interface.Uninitialised
+    | None ->
+      assert false
 
   let shutdown () =
     match !journal with
@@ -171,7 +164,12 @@ module VolumeManager = struct
   let from_LVMs = ref []
   let free_LVs = ref []
 
-  let register host = match !myvg with
+  let register host =
+    (* XXX: we have an out-of-sync pair 'myvg' and 'metadata' which means we
+       have to wait for 'myvg' to be flushed. This can be removed if the redo log
+       is pushed into the library. *)
+    (!wait_for_flush_t) () >>= fun () ->
+    match !myvg with
     | Some vg -> begin
       let open Xenvm_interface in
       info "Registering host %s" host.name;
@@ -197,8 +195,8 @@ module VolumeManager = struct
       free_LVs := (host.name, host.freeLV) :: !free_LVs;
       return ()
     end
-    | None -> 
-      raise Xenvm_interface.Uninitialised
+    | None ->
+      assert false
 end
 
 module FreePool = struct
@@ -251,8 +249,7 @@ module FreePool = struct
 
   let journal = ref None
 
-  let start name =
-    match !VolumeManager.myvg with
+  let start name = match !VolumeManager.myvg with
     | Some vg ->
       debug "Opening LV '%s' to use as a freePool journal" name;
       ( Vg_IO.Volume.connect { vg; name }
@@ -265,7 +262,7 @@ module FreePool = struct
       journal := Some j';
       return ()
     | None ->
-      raise Xenvm_interface.Uninitialised
+      assert false
 
   let shutdown () =
     match !journal with
@@ -326,14 +323,6 @@ module Impl = struct
 
   type context = unit
 
-  let vgopen context ~devices =
-    VolumeManager.vgopen ~devices
-    >>= function
-    | `AlreadyOpen -> fail Xenvm_interface.AlreadyOpen
-    | `Ok () -> return ()
-
-  let close context () = VolumeManager.close ()
-
   let get context () =
     VolumeManager.read (fun x -> return (`Ok x))
     >>= function
@@ -358,10 +347,6 @@ module Impl = struct
     ) >>= function
     | `Error e -> fail e
     | `Ok x -> return x
-
-  let set_redo_log context ~name = VolumeManager.start name
-
-  let set_journal context ~name = FreePool.start name
 
   let shutdown context () =
     VolumeManager.shutdown ()
@@ -389,9 +374,16 @@ let handler ~info (ch,conn) req body =
 let run port config daemon =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> x } in
-  debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
   if daemon then Lwt_daemon.daemonize ();
   let t =
+    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+    VolumeManager.vgopen ~devices:config.Config.devices
+    >>= fun () ->
+    VolumeManager.start Xenvm_interface._redo_log_name
+    >>= fun () ->
+    FreePool.start Xenvm_interface._journal_name
+    >>= fun () ->
+
     let rec service_queues () =
       (* 1. Do any of the host free LVs need topping up? *)
       FreePool.top_up_free_volumes config
