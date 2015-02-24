@@ -82,6 +82,7 @@ module VolumeManager = struct
   let devices = ref []
   let metadata = ref None
   let myvg = ref None
+  let wait_for_flush_t = ref (fun () -> return ())
   let lock = Lwt_mutex.create ()
   let journal = ref None
 
@@ -116,19 +117,23 @@ module VolumeManager = struct
         >>= fun (md, op) ->
         metadata := Some md;
         J.push j op
-        >>= fun _ ->
+        >>= fun waiter ->
+        wait_for_flush_t := waiter;
         Lwt.return ()
       | _, _ -> assert false
     )
-               
+
+  let last_flush = ref 0.
   let perform ops = match !myvg with
     | None -> assert false
     | Some vg ->
       Vg_IO.update vg ops >>|= fun vg' ->
       debug "Performed %d ops" (List.length ops);
       (* Encourage batching of metadata writes by sleeping *)
-      Lwt_unix.sleep 5.
+      let now = Unix.gettimeofday () in
+      Lwt_unix.sleep (max 0. (5. -. (now -. !last_flush)))
       >>= fun () ->
+      last_flush := now;
       myvg := Some vg';
       Lwt.return ()
 
@@ -156,7 +161,12 @@ module VolumeManager = struct
   let from_LVMs = ref []
   let free_LVs = ref []
 
-  let register host = match !myvg with
+  let register host =
+    (* XXX: we have an out-of-sync pair 'myvg' and 'metadata' which means we
+       have to wait for 'myvg' to be flushed. This can be removed if the redo log
+       is pushed into the library. *)
+    (!wait_for_flush_t) () >>= fun () ->
+    match !myvg with
     | Some vg -> begin
       let open Xenvm_interface in
       info "Registering host %s" host.name;
