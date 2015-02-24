@@ -124,7 +124,10 @@ module VolumeManager = struct
     )
 
   let last_flush = ref 0.
-  let perform ops = match !myvg with
+  let perform ops =
+    if ops = []
+    then return ()
+    else match !myvg with
     | None -> assert false
     | Some vg ->
       Vg_IO.update vg ops >>|= fun vg' ->
