@@ -164,39 +164,78 @@ module VolumeManager = struct
   let from_LVMs = ref []
   let free_LVs = ref []
 
-  let register host =
-    (* XXX: we have an out-of-sync pair 'myvg' and 'metadata' which means we
-       have to wait for 'myvg' to be flushed. This can be removed if the redo log
-       is pushed into the library. *)
-    (!wait_for_flush_t) () >>= fun () ->
-    match !myvg with
-    | Some vg -> begin
-      let open Xenvm_interface in
-      info "Registering host %s" host.name;
-      Vg_IO.Volume.connect { vg; name = host.toLVM }
+  (* Conventional names of the metadata volumes *)
+  let toLVM host = host ^ "-toLVM"
+  let fromLVM host = host ^ "-fromLVM"
+  let freeLVM host = host ^ "-free"
+
+  module Host = struct
+    let create name =
+      let size = Int64.(mul 4L (mul 1024L 1024L)) in
+      let toLVM = toLVM name in
+      let fromLVM = fromLVM name in
+      let freeLVM = freeLVM name in
+      write (fun vg ->
+        Lvm.Vg.create vg toLVM size
+      ) >>= fun () ->
+      write (fun vg ->
+        Lvm.Vg.create vg fromLVM size
+      ) >>= fun () ->
+      write (fun vg ->
+        Lvm.Vg.create vg freeLVM size
+      ) >>= fun () ->
+      (!wait_for_flush_t) () >>= fun () ->
+      ( match !myvg with
+        | None -> assert false
+        | Some vg -> return vg )
+      >>= fun vg ->
+      Vg_IO.Volume.connect { vg; name = toLVM }
       >>= function
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.toLVM))
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
       ToLVM.create ~disk ()
       >>= fun () ->
-      ToLVM.attach ~disk ()
-      >>= fun to_LVM ->
-    
-      Vg_IO.Volume.connect { vg; name = host.fromLVM }
+      Vg_IO.Volume.disconnect disk
+      >>= fun () ->
+      Vg_IO.Volume.connect { vg; name = fromLVM }
       >>= function
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" host.fromLVM))
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
       FromLVM.create ~disk ()
       >>= fun () ->
+      Vg_IO.Volume.disconnect disk
+  
+    let register name =
+      (* XXX: we have an out-of-sync pair 'myvg' and 'metadata' which means we
+         have to wait for 'myvg' to be flushed. This can be removed if the redo log
+         is pushed into the library. *)
+      (!wait_for_flush_t) () >>= fun () ->
+      ( match !myvg with
+        | None -> assert false
+        | Some vg -> return vg )
+      >>= fun vg ->
+      info "Registering host %s" name;
+      let toLVM = toLVM name in
+      let fromLVM = fromLVM name in
+      let freeLVM = freeLVM name in
+      Vg_IO.Volume.connect { vg; name = toLVM }
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
+      | `Ok disk ->
+      ToLVM.attach ~disk ()
+      >>= fun to_LVM ->
+    
+      Vg_IO.Volume.connect { vg; name = fromLVM }
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
+      | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_LVM ->
-      to_LVMs := (host.name, to_LVM) :: !to_LVMs;
-      from_LVMs := (host.name, from_LVM) :: !from_LVMs;
-      free_LVs := (host.name, host.freeLV) :: !free_LVs;
+      to_LVMs := (name, to_LVM) :: !to_LVMs;
+      from_LVMs := (name, from_LVM) :: !from_LVMs;
+      free_LVs := (name, freeLVM) :: !free_LVs;
       return ()
-    end
-    | None ->
-      assert false
+  end
 end
 
 module FreePool = struct
@@ -359,7 +398,11 @@ module Impl = struct
       exit 0 in
     return ()
 
-  let register context host = VolumeManager.register host
+  module Host = struct
+    let create context ~name = VolumeManager.Host.create name
+    let register context ~name = VolumeManager.Host.register name
+  end
+
 end
 
 module XenvmServer = Xenvm_interface.ServerM(Impl)

@@ -1,6 +1,6 @@
 ./xenvm.native shutdown
 killall xenvmd.native
-LVS="free live masterJournal toLVM fromLVM LVMjournal"
+LVS="host1-free live masterJournal host1-toLVM host1-fromLVM LVMjournal"
 for i in ${LVS}; do
   echo Removing $i
   rm -f ./djstest-$i

@@ -14,10 +14,13 @@ external rename : oldname:string -> newname:string -> unit = ""
 
 external shutdown : unit -> unit = ""
 
-type host = {
-  name: string;
-  toLVM: string; (* LVM updates coming from a host *)
-  fromLVM: string; (* LVM updates sent to a host *)
-  freeLV: string; (* name of the host's free block LV *)
-}
-external register: host -> unit = ""
+module Host = struct
+
+  external create: name:string -> unit = ""
+  (** [create host] creates and initialises the metadata volumes
+      for a host with name [host] *)
+
+  external register: name:string -> unit = ""
+  (** [register host] attaches to existing metadata volumes and
+      process them. *)
+end
