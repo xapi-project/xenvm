@@ -5,9 +5,9 @@
  (remotePort 4000)
  (allocation_quantum 16)
  (localJournal localJournal)
- (freePool free)
+ (freePool host1-free)
  (devices (/dev/loop0))
- (toLVM ./djstest-toLVM)
- (fromLVM ./djstest-fromLVM)
+ (toLVM ./djstest-host1-toLVM)
+ (fromLVM ./djstest-host1-fromLVM)
 )
 

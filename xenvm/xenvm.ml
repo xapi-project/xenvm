@@ -128,8 +128,10 @@ let activate config lvname path pv =
      Devmapper.mknod name path 0o0600;
      return ())
 
-let register config host =
-  Lwt_main.run (Client.register host)
+let host_create config host =
+  Lwt_main.run (Client.Host.create host)
+let host_register config host =
+  Lwt_main.run (Client.Host.register host)
 
 let shutdown config =
   Lwt_main.run
@@ -182,6 +184,10 @@ let host =
   let doc = "Hostname of xenvmd server" in
   Arg.(value & opt (some string) (Some "127.0.0.1") & info [ "host" ] ~docv:"HOST" ~doc)
 
+let hostname =
+  let doc = "Unique name of client host" in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"HOSTNAME" ~doc)
+
 let filenames =
   let doc = "Path to the files" in
   Arg.(non_empty & pos_all file [] & info [] ~docv:"FILENAMES" ~doc)
@@ -208,25 +214,6 @@ let copts_sect = "COMMON OPTIONS"
 let copts_t =
   let docs = copts_sect in
   Term.(pure copts $ config $ host $ port)
-
-let host_t =
-  let hostname =
-    let doc = "Name of the host" in
-    Arg.(value & opt string "host" & info [ "name" ] ~docv:"NAME" ~doc) in
-  let fromLVM =
-    let doc = "Name of the queue containing updates from LVM (i.e. new free block allocations)" in
-    Arg.(value & opt string "fromLVM" & info [ "from" ] ~docv:"FROM" ~doc) in
-  let toLVM =
-    let doc = "Name of the queue containing updates sent to LVM (i.e. new block allocations for a user LV)" in
-    Arg.(value & opt string "toLVM" & info [ "to" ] ~docv:"TO" ~doc) in
-  let freeLV =
-    let doc = "Name of the LV containing the host's free blocks" in
-    Arg.(value & opt string "free" & info [ "free" ] ~docv:"FREE" ~doc) in
-  let make name fromLVM toLVM freeLV =
-    let open Xenvm_interface in
-    { name; fromLVM; toLVM; freeLV } in
-  Term.(pure make $ hostname $ fromLVM $ toLVM $ freeLV)
-
 
 let lvs_cmd =
   let doc = "List the logical volumes in the VG" in
@@ -271,14 +258,23 @@ let activate_cmd =
   Term.(pure activate $ copts_t $ lvname $ path $ physical),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
 
-let register_cmd =
+let host_register_cmd =
   let doc = "Register a host with the daemon" in
   let man = [
     `S "DESCRIPTION";
     `P "Register a host with the daemon. The daemon will start servicing block updates from the shared queues.";
   ] in
-  Term.(pure register $ copts_t $ host_t),
-  Term.info "register" ~sdocs:copts_sect ~doc ~man
+  Term.(pure host_register $ copts_t $ hostname),
+  Term.info "host-register" ~sdocs:copts_sect ~doc ~man
+
+let host_create_cmd =
+  let doc = "Initialise a host's metadata volumes" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Creates the metadata volumes needed for a host to connect and make disk updates.";
+  ] in
+  Term.(pure host_create $ copts_t $ hostname),
+  Term.info "host-create" ~sdocs:copts_sect ~doc ~man
 
 let shutdown_cmd =
   let doc = "Shut the daemon down cleanly" in
@@ -305,7 +301,7 @@ let default_cmd =
       
 let cmds = [
   lvs_cmd; format_cmd; create_cmd; activate_cmd;
-  shutdown_cmd; register_cmd; benchmark_cmd;
+  shutdown_cmd; host_create_cmd; host_register_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]
 
