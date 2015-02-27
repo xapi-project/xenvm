@@ -12,7 +12,7 @@ dd if=/dev/zero of=localJournal bs=1M count=4
 ./xenvm.native benchmark
 
 ./xenvm.native host-create host1
-./xenvm.native host-register host1
+./xenvm.native host-connect host1
 
 LVS="host1-free host1-toLVM host1-fromLVM"
 for i in ${LVS}; do

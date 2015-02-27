@@ -130,8 +130,12 @@ let activate config lvname path pv =
 
 let host_create config host =
   Lwt_main.run (Client.Host.create host)
-let host_register config host =
-  Lwt_main.run (Client.Host.register host)
+let host_connect config host =
+  Lwt_main.run (Client.Host.connect host)
+let host_disconnect config host =
+  Lwt_main.run (Client.Host.disconnect host)
+let host_destroy config host =
+  Lwt_main.run (Client.Host.destroy host)
 
 let shutdown config =
   Lwt_main.run
@@ -257,14 +261,23 @@ let activate_cmd =
   Term.(pure activate $ copts_t $ lvname $ path $ physical),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
 
-let host_register_cmd =
-  let doc = "Register a host with the daemon" in
+let host_connect_cmd =
+  let doc = "Connect to a host" in
   let man = [
     `S "DESCRIPTION";
     `P "Register a host with the daemon. The daemon will start servicing block updates from the shared queues.";
   ] in
-  Term.(pure host_register $ copts_t $ hostname),
-  Term.info "host-register" ~sdocs:copts_sect ~doc ~man
+  Term.(pure host_connect $ copts_t $ hostname),
+  Term.info "host-connect" ~sdocs:copts_sect ~doc ~man
+
+let host_disconnect_cmd =
+  let doc = "Disconnect to a host" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Dergister a host with the daemon. The daemon will suspend the block queues and stop listening to requests.";
+  ] in
+  Term.(pure host_disconnect $ copts_t $ hostname),
+  Term.info "host-disconnect" ~sdocs:copts_sect ~doc ~man
 
 let host_create_cmd =
   let doc = "Initialise a host's metadata volumes" in
@@ -274,6 +287,15 @@ let host_create_cmd =
   ] in
   Term.(pure host_create $ copts_t $ hostname),
   Term.info "host-create" ~sdocs:copts_sect ~doc ~man
+
+let host_destroy_cmd =
+  let doc = "Disconnects and destroy a host's metadata volumes" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Disconnects the metadata volumes cleanly and destroys them.";
+  ] in
+  Term.(pure host_destroy $ copts_t $ hostname),
+  Term.info "host-destroy" ~sdocs:copts_sect ~doc ~man
 
 let shutdown_cmd =
   let doc = "Shut the daemon down cleanly" in
@@ -298,7 +320,8 @@ let default_cmd =
       
 let cmds = [
   lvs_cmd; format_cmd; create_cmd; activate_cmd;
-  shutdown_cmd; host_create_cmd; host_register_cmd; benchmark_cmd;
+  shutdown_cmd; host_create_cmd; host_destroy_cmd;
+  host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]
 

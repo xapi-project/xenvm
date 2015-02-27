@@ -20,7 +20,15 @@ module Host = struct
   (** [create host] creates and initialises the metadata volumes
       for a host with name [host] *)
 
-  external register: name:string -> unit = ""
-  (** [register host] attaches to existing metadata volumes and
+  external connect: name:string -> unit = ""
+  (** [connect host] connects to existing metadata volumes and
       process them. *)
+
+  external disconnect: name:string -> unit = ""
+  (** [disconnect host] disconnects from metadata volumes and
+      stops processing them. *)
+
+  external destroy: name:string -> unit = ""
+  (** [destroy host] removes the metadata volumes for a host with
+      name [host] *)
 end
