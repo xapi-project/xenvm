@@ -31,6 +31,10 @@ let fatal_error_t msg =
   error "%s" msg;
   fail (Failure msg)
 
+let fatal_error msg m = m >>= function
+  | `Error _ -> fatal_error_t msg
+  | `Ok x -> return x
+
 module Vg_IO = Lvm.Vg.Make(Block)
 
 module ToLVM = struct
@@ -62,6 +66,9 @@ module FromLVM = struct
   | `Ok x -> return x
   let attach ~disk () = R.Producer.attach ~disk () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the FromLVM producer queue: %s" x)
+  | `Ok x -> return x
+  let state t = R.Producer.state t >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error querying FromLVM state: %s" x)
   | `Ok x -> return x
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
@@ -310,6 +317,46 @@ module FreePool = struct
     | None ->
       return ()
 
+  let resend_free_volumes config =
+    Device.read_sector_size config.Config.devices
+    >>= fun sector_size ->
+
+    fatal_error "resend_free_volumes unable to read LVM metadata"
+      ( VolumeManager.read (fun x -> return (`Ok x)) )
+    >>= fun lvm ->
+
+    let extent_size = lvm.Lvm.Vg.extent_size in (* in sectors *)
+    let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
+    Lwt_list.iter_s
+      (fun (host, free) ->
+        (* XXX: need to lock the host somehow. Ideally we would still service
+           other queues while one host is locked. *)
+        let from_lvm = List.assoc host !VolumeManager.from_LVMs in
+        FromLVM.state from_lvm
+        >>= function
+        | `Running -> return ()
+        | `Suspended ->
+          let rec wait () =
+            FromLVM.state from_lvm
+            >>= function
+            | `Suspended ->
+              Lwt_unix.sleep 5.
+              >>= fun () ->
+              wait ()
+            | `Running -> return () in
+          wait ()
+          >>= fun () ->
+          fatal_error "resend_free_volumes"
+            ( match try Some(List.find (fun lv -> lv.Lvm.Lv.name = free) lvm.Lvm.Vg.lvs)
+                    with _ -> None with
+              | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
+              | None -> return (`Error (Printf.sprintf "Failed to find LV %s" free)) )
+          >>= fun allocation ->
+          FromLVM.push from_lvm allocation
+          >>= fun pos ->
+          FromLVM.advance from_lvm pos
+      ) !VolumeManager.free_LVs
+
   let top_up_free_volumes config =
     Device.read_sector_size config.Config.devices
     >>= fun sector_size ->
@@ -428,6 +475,9 @@ let run port config daemon =
     >>= fun () ->
 
     let rec service_queues () =
+      (* 0. Have any local allocators restarted? *)
+      FreePool.resend_free_volumes config
+      >>= fun () ->
       (* 1. Do any of the host free LVs need topping up? *)
       FreePool.top_up_free_volumes config
       >>= fun () ->
