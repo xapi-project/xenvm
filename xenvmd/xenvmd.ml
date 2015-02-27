@@ -216,7 +216,7 @@ module VolumeManager = struct
       >>= fun () ->
       Vg_IO.Volume.disconnect disk
   
-    let register name =
+    let connect name =
       (* XXX: we have an out-of-sync pair 'myvg' and 'metadata' which means we
          have to wait for 'myvg' to be flushed. This can be removed if the redo log
          is pushed into the library. *)
@@ -449,7 +449,7 @@ module Impl = struct
 
   module Host = struct
     let create context ~name = VolumeManager.Host.create name
-    let register context ~name = VolumeManager.Host.register name
+    let connect context ~name = VolumeManager.Host.connect name
   end
 
 end

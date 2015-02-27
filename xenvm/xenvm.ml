@@ -130,8 +130,8 @@ let activate config lvname path pv =
 
 let host_create config host =
   Lwt_main.run (Client.Host.create host)
-let host_register config host =
-  Lwt_main.run (Client.Host.register host)
+let host_connect config host =
+  Lwt_main.run (Client.Host.connect host)
 
 let shutdown config =
   Lwt_main.run
@@ -257,14 +257,14 @@ let activate_cmd =
   Term.(pure activate $ copts_t $ lvname $ path $ physical),
   Term.info "activate" ~sdocs:copts_sect ~doc ~man
 
-let host_register_cmd =
-  let doc = "Register a host with the daemon" in
+let host_connect_cmd =
+  let doc = "Connect to a host" in
   let man = [
     `S "DESCRIPTION";
     `P "Register a host with the daemon. The daemon will start servicing block updates from the shared queues.";
   ] in
-  Term.(pure host_register $ copts_t $ hostname),
-  Term.info "host-register" ~sdocs:copts_sect ~doc ~man
+  Term.(pure host_connect $ copts_t $ hostname),
+  Term.info "host-connect" ~sdocs:copts_sect ~doc ~man
 
 let host_create_cmd =
   let doc = "Initialise a host's metadata volumes" in
@@ -298,7 +298,7 @@ let default_cmd =
       
 let cmds = [
   lvs_cmd; format_cmd; create_cmd; activate_cmd;
-  shutdown_cmd; host_create_cmd; host_register_cmd; benchmark_cmd;
+  shutdown_cmd; host_create_cmd; host_connect_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]
 
