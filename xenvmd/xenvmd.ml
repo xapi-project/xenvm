@@ -280,15 +280,35 @@ module VolumeManager = struct
       return ()
 
     let disconnect name =
-      let to_lvm = List.assoc name !to_LVMs in
-      debug "Suspending ToLVM queue for %s" name;
-      ToLVM.suspend to_lvm
+      if not(List.mem_assoc name !to_LVMs)
+      then return () (* already disconnected *)
+      else
+        let to_lvm = List.assoc name !to_LVMs in
+        debug "Suspending ToLVM queue for %s" name;
+        ToLVM.suspend to_lvm
+        >>= fun () ->
+        debug "ToLVM queue for %s has been suspended" name;
+        to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
+        from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
+        free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
+        return ()
+
+    let destroy name =
+      disconnect name
       >>= fun () ->
-      debug "ToLVM queue for %s has been suspended" name;
-      to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
-      from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
-      free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
-      return ()
+      let toLVM = toLVM name in
+      let fromLVM = fromLVM name in
+      let freeLVM = freeLVM name in
+      write (fun vg ->
+        Lvm.Vg.remove vg toLVM
+      ) >>= fun () ->
+      write (fun vg ->
+        Lvm.Vg.remove vg fromLVM
+      ) >>= fun () ->
+      write (fun vg ->
+        Lvm.Vg.remove vg freeLVM
+      )
+
   end
 end
 
@@ -494,6 +514,7 @@ module Impl = struct
     let create context ~name = VolumeManager.Host.create name
     let connect context ~name = VolumeManager.Host.connect name
     let disconnect context ~name = VolumeManager.Host.disconnect name
+    let destroy context ~name = VolumeManager.Host.destroy name
   end
 
 end

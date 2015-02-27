@@ -134,6 +134,8 @@ let host_connect config host =
   Lwt_main.run (Client.Host.connect host)
 let host_disconnect config host =
   Lwt_main.run (Client.Host.disconnect host)
+let host_destroy config host =
+  Lwt_main.run (Client.Host.destroy host)
 
 let shutdown config =
   Lwt_main.run
@@ -286,6 +288,15 @@ let host_create_cmd =
   Term.(pure host_create $ copts_t $ hostname),
   Term.info "host-create" ~sdocs:copts_sect ~doc ~man
 
+let host_destroy_cmd =
+  let doc = "Disconnects and destroy a host's metadata volumes" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Disconnects the metadata volumes cleanly and destroys them.";
+  ] in
+  Term.(pure host_destroy $ copts_t $ hostname),
+  Term.info "host-destroy" ~sdocs:copts_sect ~doc ~man
+
 let shutdown_cmd =
   let doc = "Shut the daemon down cleanly" in
   let man = [
@@ -309,8 +320,8 @@ let default_cmd =
       
 let cmds = [
   lvs_cmd; format_cmd; create_cmd; activate_cmd;
-  shutdown_cmd; host_create_cmd; host_connect_cmd;
-  host_disconnect_cmd; benchmark_cmd;
+  shutdown_cmd; host_create_cmd; host_destroy_cmd;
+  host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]
 
