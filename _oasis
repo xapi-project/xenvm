@@ -8,6 +8,8 @@ Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
 Library xenvmidl
+  ByteOpt:            -warn-error +a
+  NativeOpt:          -warn-error +a
   CompiledObject:     best
   Path:               idl
   Findlibname:        xenvmidl
@@ -15,6 +17,8 @@ Library xenvmidl
   BuildDepends:       rpclib, rpclib.syntax, lvm, cohttp.lwt, threads
 
 Executable "xenvmd"
+  ByteOpt:            -warn-error +a
+  NativeOpt:          -warn-error +a
   CompiledObject:     best
   Path:               xenvmd
   MainIs:             xenvmd.ml
@@ -23,6 +27,8 @@ Executable "xenvmd"
   BuildDepends:       lwt, lwt.unix, mirage-block-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring
 
 Executable "xenvm"
+  ByteOpt:            -warn-error +a
+  NativeOpt:          -warn-error +a
   CompiledObject:     best
   Path:               xenvm
   MainIs:             xenvm.ml
@@ -31,6 +37,8 @@ Executable "xenvm"
   BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix
 
 Executable "local_allocator"
+  ByteOpt:            -warn-error +a
+  NativeOpt:          -warn-error +a
   CompiledObject:     best
   Path:               .
   MainIs:             local_allocator.ml
