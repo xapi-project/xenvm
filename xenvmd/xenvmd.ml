@@ -77,6 +77,10 @@ module FromLVM = struct
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
+  | `Suspend ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    push t item
   | `Ok x -> return x
   let advance t position = R.Producer.advance ~t ~position () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM producer pointer: %s" x)
@@ -196,7 +200,7 @@ module VolumeManager = struct
         | None -> assert false
         | Some vg -> return vg )
       >>= fun vg ->
-      Vg_IO.Volume.connect { vg; name = toLVM }
+      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = toLVM }
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
@@ -204,7 +208,7 @@ module VolumeManager = struct
       >>= fun () ->
       Vg_IO.Volume.disconnect disk
       >>= fun () ->
-      Vg_IO.Volume.connect { vg; name = fromLVM }
+      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = fromLVM }
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
@@ -225,14 +229,14 @@ module VolumeManager = struct
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
       let freeLVM = freeLVM name in
-      Vg_IO.Volume.connect { vg; name = toLVM }
+      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = toLVM }
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
       ToLVM.attach ~disk ()
       >>= fun to_LVM ->
     
-      Vg_IO.Volume.connect { vg; name = fromLVM }
+      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = fromLVM }
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
@@ -272,7 +276,7 @@ module FreePool = struct
       | Some from_lvm, Some free  ->
         VolumeManager.write
           (fun vg ->
-             match List.partition (fun lv -> lv.Lvm.Lv.name=free) vg.lvs with
+             match List.partition (fun lv -> lv.Lvm.Lv.name=free) vg.Lvm.Vg.lvs with
              | [ lv ], others ->
                let size = Lvm.Lv.size_in_extents lv in
                let segments = Lvm.Lv.Segment.linear size allocation in
@@ -298,7 +302,7 @@ module FreePool = struct
   let start name = match !VolumeManager.myvg with
     | Some vg ->
       debug "Opening LV '%s' to use as a freePool journal" name;
-      ( Vg_IO.Volume.connect { vg; name }
+      ( Vg_IO.Volume.connect { Vg_IO.Volume.vg; name }
         >>= function
         | `Ok x -> return x
         | `Error _ -> fail (Failure (Printf.sprintf "Failed to open '%s' as a freePool journal" name))
@@ -325,8 +329,6 @@ module FreePool = struct
       ( VolumeManager.read (fun x -> return (`Ok x)) )
     >>= fun lvm ->
 
-    let extent_size = lvm.Lvm.Vg.extent_size in (* in sectors *)
-    let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
     Lwt_list.iter_s
       (fun (host, free) ->
         (* XXX: need to lock the host somehow. Ideally we would still service

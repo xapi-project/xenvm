@@ -212,7 +212,6 @@ let size =
 let copts_sect = "COMMON OPTIONS"
 
 let copts_t =
-  let docs = copts_sect in
   Term.(pure copts $ config $ host $ port)
 
 let lvs_cmd =
@@ -295,8 +294,6 @@ let benchmark_cmd =
   Term.info "benchmark" ~sdocs:copts_sect ~doc ~man
 
 let default_cmd =
-  let doc = "A fast, journalled LVM-compatible volume manager" in
-  let man = [] in
   Term.(pure help $ copts_t), info
       
 let cmds = [
