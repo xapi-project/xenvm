@@ -70,7 +70,7 @@ let fatal_error msg m = m >>= function
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Block)(FreeAllocation)
   let create ~disk () = R.Producer.create ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
+  | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
   | `Ok x -> return x
   let rec attach ~disk () = R.Consumer.attach ~disk () >>= function
   | `Error _ ->
@@ -116,27 +116,30 @@ module FromLVM = struct
       let items = List.rev rev_items in
       return (position, items)
   let advance t position = R.Consumer.advance ~t ~position () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM consumer pointer: %s" x)
+  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM consumer pointer: %s" x)
   | `Ok x -> return x
 end
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Block)(ExpandVolume)
   let create ~disk () = R.Producer.create ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
+  | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
   | `Ok x -> return x
   let attach ~disk () = R.Producer.attach ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the FromLVM producer queue: %s" x)
+  | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the ToLVM producer queue: %s" x)
+  | `Ok x -> return x
+  let state t = R.Producer.state t >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error querying ToLVM state: %s" x)
   | `Ok x -> return x
   let rec push t item = R.Producer.push ~t ~item () >>= function
-  | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
-  | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
+  | `TooBig -> fatal_error_t "Item is too large to be pushed to the ToLVM queue"
+  | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the ToLVM queue: %s" x)
   | `Retry | `Suspend ->
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
   | `Ok x -> return x
   let advance t position = R.Producer.advance ~t ~position () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM producer pointer: %s" x)
+  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM producer pointer: %s" x)
   | `Ok x -> return x
 end
 
@@ -270,6 +273,17 @@ let main config socket journal freePool fromLVM toLVM =
     info "Device %s has %d byte sectors" (List.hd config.Config.devices) sector_size;
     info "The Volume Group has %Ld sector (%Ld MiB) extents" extent_size extent_size_mib;
 
+    let rec wait_for_shutdown_forever () =
+      ToLVM.state tolvm
+      >>= function
+      | `Suspended ->
+        info "The ToLVM queue has been suspended. We will acknowledge and exit";
+        exit 0
+      | `Running ->
+        Lwt_unix.sleep 5.
+        >>= fun () ->
+        wait_for_shutdown_forever () in
+
     let receive_free_blocks_forever () =
       debug "Receiving free blocks from the SRmaster forever";
       Block.connect config.Config.fromLVM
@@ -317,6 +331,7 @@ let main config socket journal freePool fromLVM toLVM =
       loop_forever () in
 
     let (_: unit Lwt.t) = receive_free_blocks_forever () in
+    let (_: unit Lwt.t) = wait_for_shutdown_forever () in
 
     (* This is the idempotent part which will be done at-least-once *)
     let perform ops =

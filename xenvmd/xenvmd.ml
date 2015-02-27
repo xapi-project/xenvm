@@ -48,6 +48,36 @@ module ToLVM = struct
     >>= fun () ->
     attach ~disk ()
   | `Ok x -> return x
+  let rec suspend t =
+    R.Consumer.suspend t
+    >>= function
+    | `Error msg -> fatal_error_t msg
+    | `Retry ->
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      suspend t
+    | `Ok () ->
+      let rec wait () =
+        fatal_error "reading state of ToLVM" (R.Consumer.state t)
+        >>= function
+        | `Suspended -> return ()
+        | `Running -> wait () in
+      wait ()
+  let rec resume t =
+    R.Consumer.resume t
+    >>= function
+    | `Error msg -> fatal_error_t msg
+    | `Retry ->
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      resume t
+    | `Ok () ->
+      let rec wait () =
+        fatal_error "reading state of ToLVM" (R.Consumer.state t)
+        >>= function
+        | `Suspended -> wait ()
+        | `Running -> return () in
+      wait ()
   let rec pop t =
     R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
     >>= function
@@ -235,7 +265,9 @@ module VolumeManager = struct
       | `Ok disk ->
       ToLVM.attach ~disk ()
       >>= fun to_LVM ->
-    
+      ToLVM.resume to_LVM
+      >>= fun () ->
+
       Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = fromLVM }
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
@@ -245,6 +277,17 @@ module VolumeManager = struct
       to_LVMs := (name, to_LVM) :: !to_LVMs;
       from_LVMs := (name, from_LVM) :: !from_LVMs;
       free_LVs := (name, freeLVM) :: !free_LVs;
+      return ()
+
+    let disconnect name =
+      let to_lvm = List.assoc name !to_LVMs in
+      debug "Suspending ToLVM queue for %s" name;
+      ToLVM.suspend to_lvm
+      >>= fun () ->
+      debug "ToLVM queue for %s has been suspended" name;
+      to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
+      from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
+      free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
       return ()
   end
 end
@@ -450,6 +493,7 @@ module Impl = struct
   module Host = struct
     let create context ~name = VolumeManager.Host.create name
     let connect context ~name = VolumeManager.Host.connect name
+    let disconnect context ~name = VolumeManager.Host.disconnect name
   end
 
 end

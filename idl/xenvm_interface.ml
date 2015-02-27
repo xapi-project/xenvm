@@ -23,4 +23,8 @@ module Host = struct
   external connect: name:string -> unit = ""
   (** [connect host] connects to existing metadata volumes and
       process them. *)
+
+  external disconnect: name:string -> unit = ""
+  (** [disconnect host] disconnects from metadata volumes and
+      stops processing them. *)
 end

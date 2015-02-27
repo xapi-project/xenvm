@@ -132,6 +132,8 @@ let host_create config host =
   Lwt_main.run (Client.Host.create host)
 let host_connect config host =
   Lwt_main.run (Client.Host.connect host)
+let host_disconnect config host =
+  Lwt_main.run (Client.Host.disconnect host)
 
 let shutdown config =
   Lwt_main.run
@@ -266,6 +268,15 @@ let host_connect_cmd =
   Term.(pure host_connect $ copts_t $ hostname),
   Term.info "host-connect" ~sdocs:copts_sect ~doc ~man
 
+let host_disconnect_cmd =
+  let doc = "Disconnect to a host" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Dergister a host with the daemon. The daemon will suspend the block queues and stop listening to requests.";
+  ] in
+  Term.(pure host_disconnect $ copts_t $ hostname),
+  Term.info "host-disconnect" ~sdocs:copts_sect ~doc ~man
+
 let host_create_cmd =
   let doc = "Initialise a host's metadata volumes" in
   let man = [
@@ -298,7 +309,8 @@ let default_cmd =
       
 let cmds = [
   lvs_cmd; format_cmd; create_cmd; activate_cmd;
-  shutdown_cmd; host_create_cmd; host_connect_cmd; benchmark_cmd;
+  shutdown_cmd; host_create_cmd; host_connect_cmd;
+  host_disconnect_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]
 
