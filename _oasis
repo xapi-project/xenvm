@@ -30,10 +30,10 @@ Executable "xenvm"
   Install:            false
   BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix
 
-Executable "local-allocator"
+Executable "local_allocator"
   CompiledObject:     best
   Path:               .
-  MainIs:             local-allocator.ml
+  MainIs:             local_allocator.ml
   Custom:             true
   Install:            false
   BuildDepends:       lwt, lwt.unix, mirage-block-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring
