@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 9527a343626b99ae64785668c361d954)
+# DO NOT EDIT (digest: c17f235c7d2da1ca81c6eb35abe2338d)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -16,12 +16,20 @@ true: annot, bin_annot
 "_darcs": not_hygienic
 # Library xenvmidl
 "idl/xenvmidl.cmxs": use_xenvmidl
+<idl/xenvmidl.{cma,cmxa}>: oasis_library_xenvmidl_byte
+<idl/*.ml{,i,y}>: oasis_library_xenvmidl_byte
+<idl/xenvmidl.{cma,cmxa}>: oasis_library_xenvmidl_native
+<idl/*.ml{,i,y}>: oasis_library_xenvmidl_native
 <idl/*.ml{,i,y}>: pkg_cohttp.lwt
 <idl/*.ml{,i,y}>: pkg_lvm
 <idl/*.ml{,i,y}>: pkg_rpclib
 <idl/*.ml{,i,y}>: pkg_rpclib.syntax
 <idl/*.ml{,i,y}>: pkg_threads
 # Executable xenvmd
+<xenvmd/xenvmd.{native,byte}>: oasis_executable_xenvmd_byte
+<xenvmd/*.ml{,i,y}>: oasis_executable_xenvmd_byte
+<xenvmd/xenvmd.{native,byte}>: oasis_executable_xenvmd_native
+<xenvmd/*.ml{,i,y}>: oasis_executable_xenvmd_native
 <xenvmd/xenvmd.{native,byte}>: pkg_cmdliner
 <xenvmd/xenvmd.{native,byte}>: pkg_cohttp.lwt
 <xenvmd/xenvmd.{native,byte}>: pkg_cstruct
@@ -60,6 +68,10 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: use_xenvmidl
 <xenvmd/xenvmd.{native,byte}>: custom
 # Executable xenvm
+<xenvm/xenvm.{native,byte}>: oasis_executable_xenvm_byte
+<xenvm/*.ml{,i,y}>: oasis_executable_xenvm_byte
+<xenvm/xenvm.{native,byte}>: oasis_executable_xenvm_native
+<xenvm/*.ml{,i,y}>: oasis_executable_xenvm_native
 <xenvm/xenvm.{native,byte}>: pkg_cmdliner
 <xenvm/xenvm.{native,byte}>: pkg_cohttp.lwt
 <xenvm/xenvm.{native,byte}>: pkg_devmapper
@@ -85,25 +97,29 @@ true: annot, bin_annot
 <xenvm/*.ml{,i,y}>: pkg_threads
 <xenvm/*.ml{,i,y}>: use_xenvmidl
 <xenvm/xenvm.{native,byte}>: custom
-# Executable local-allocator
-<local-allocator.{native,byte}>: pkg_cmdliner
-<local-allocator.{native,byte}>: pkg_cohttp.lwt
-<local-allocator.{native,byte}>: pkg_cstruct
-<local-allocator.{native,byte}>: pkg_devmapper
-<local-allocator.{native,byte}>: pkg_io-page
-<local-allocator.{native,byte}>: pkg_io-page.unix
-<local-allocator.{native,byte}>: pkg_lvm
-<local-allocator.{native,byte}>: pkg_lvm.mapper
-<local-allocator.{native,byte}>: pkg_lwt
-<local-allocator.{native,byte}>: pkg_lwt.unix
-<local-allocator.{native,byte}>: pkg_mirage-block-unix
-<local-allocator.{native,byte}>: pkg_oUnit
-<local-allocator.{native,byte}>: pkg_rpclib
-<local-allocator.{native,byte}>: pkg_rpclib.syntax
-<local-allocator.{native,byte}>: pkg_sexplib.syntax
-<local-allocator.{native,byte}>: pkg_shared-block-ring
-<local-allocator.{native,byte}>: pkg_threads
-<local-allocator.{native,byte}>: use_xenvmidl
+# Executable local_allocator
+<local_allocator.{native,byte}>: oasis_executable_local_allocator_byte
+<*.ml{,i,y}>: oasis_executable_local_allocator_byte
+<local_allocator.{native,byte}>: oasis_executable_local_allocator_native
+<*.ml{,i,y}>: oasis_executable_local_allocator_native
+<local_allocator.{native,byte}>: pkg_cmdliner
+<local_allocator.{native,byte}>: pkg_cohttp.lwt
+<local_allocator.{native,byte}>: pkg_cstruct
+<local_allocator.{native,byte}>: pkg_devmapper
+<local_allocator.{native,byte}>: pkg_io-page
+<local_allocator.{native,byte}>: pkg_io-page.unix
+<local_allocator.{native,byte}>: pkg_lvm
+<local_allocator.{native,byte}>: pkg_lvm.mapper
+<local_allocator.{native,byte}>: pkg_lwt
+<local_allocator.{native,byte}>: pkg_lwt.unix
+<local_allocator.{native,byte}>: pkg_mirage-block-unix
+<local_allocator.{native,byte}>: pkg_oUnit
+<local_allocator.{native,byte}>: pkg_rpclib
+<local_allocator.{native,byte}>: pkg_rpclib.syntax
+<local_allocator.{native,byte}>: pkg_sexplib.syntax
+<local_allocator.{native,byte}>: pkg_shared-block-ring
+<local_allocator.{native,byte}>: pkg_threads
+<local_allocator.{native,byte}>: use_xenvmidl
 <*.ml{,i,y}>: pkg_cmdliner
 <*.ml{,i,y}>: pkg_cohttp.lwt
 <*.ml{,i,y}>: pkg_cstruct
@@ -122,6 +138,6 @@ true: annot, bin_annot
 <*.ml{,i,y}>: pkg_shared-block-ring
 <*.ml{,i,y}>: pkg_threads
 <*.ml{,i,y}>: use_xenvmidl
-<local-allocator.{native,byte}>: custom
+<local_allocator.{native,byte}>: custom
 # OASIS_STOP
 <idl/xenvm_interface.ml>: pkg_rpclib.idl
