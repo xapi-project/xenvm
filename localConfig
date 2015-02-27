@@ -1,8 +1,6 @@
 (
  (socket socket)
  (port 8081)
- (remoteHost 127.0.0.1)
- (remotePort 4000)
  (allocation_quantum 16)
  (localJournal localJournal)
  (freePool host1-free)

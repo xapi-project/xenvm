@@ -6,8 +6,6 @@ module Config = struct
   type t = {
     socket: string; (* listen on this socket *)
     port: int; (* listen on this port *)
-    remoteHost: string; (* IP address of the remote *)
-    remotePort: int; (* port of the remote server *)
     allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
     localJournal: string; (* path to the host local journal *)
     devices: string list; (* devices containing the PVs *)
@@ -76,6 +74,24 @@ module FromLVM = struct
     >>= fun () ->
     attach ~disk ()
   | `Ok x -> return x
+  let rec suspend t =
+    R.Consumer.suspend t
+    >>= function
+    | `Error msg -> fatal_error_t msg
+    | `Retry ->
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      suspend t
+    | `Ok () -> return ()
+  let rec resume t =
+    R.Consumer.resume t
+    >>= function
+    | `Error msg -> fatal_error_t msg
+    | `Retry ->
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      resume t
+    | `Ok () -> return ()
   let rec pop t =
     R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
     >>= function
@@ -83,7 +99,6 @@ module FromLVM = struct
     | `Ok (position, rev_items) ->
       let items = List.rev rev_items in
       return (position, items)
-  | `Ok x -> return x
   let advance t position = R.Consumer.advance ~t ~position () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM consumer pointer: %s" x)
   | `Ok x -> return x
@@ -99,7 +114,7 @@ module ToLVM = struct
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
   | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
-  | `Retry ->
+  | `Retry | `Suspend ->
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -247,6 +262,21 @@ let main config socket journal freePool fromLVM toLVM =
       | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_lvm -> (* blocks for a while *)
+
+      (* Suspend and resume the queue: the producer will resend us all
+         the free blocks on resume. *)
+      FromLVM.suspend from_lvm
+      >>= fun () ->
+      (* Drop all queue entries to free space. They'll be duplicates
+         of the large request we expect on resume. *)
+      FromLVM.pop from_lvm
+      >>= fun (pos, _) ->
+      FromLVM.advance from_lvm pos
+      >>= fun () ->
+      (* Resume the queue and we're good to go! *)
+      FromLVM.resume from_lvm
+      >>= fun () ->
+
       let rec loop_forever () =
         FromLVM.pop from_lvm
         >>= fun (pos, ts) ->
@@ -267,13 +297,6 @@ let main config socket journal freePool fromLVM toLVM =
         loop_forever () in
       loop_forever () in
 
-    (* We can either cache the free blocks locally, or simply ask the remote
-       to tell us on startup: *)
-    let open Xenvm_client in
-    Rpc.uri := Printf.sprintf "http://%s:%d/" config.Config.remoteHost config.Config.remotePort;
-    Client.get_lv ~name:config.Config.freePool
-    >>= fun (_, lv) ->
-    FreePool.add (Lvm.Lv.to_allocation lv);
     let (_: unit Lwt.t) = receive_free_blocks_forever () in
 
     (* This is the idempotent part which will be done at-least-once *)
