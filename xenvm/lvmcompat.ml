@@ -42,6 +42,7 @@ let lvcreate uri lv_name real_size percent_size tags vg_name =
   let size = match real_size, percent_size with
     | Some x, None -> parse_size_string x
     | None, Some y -> parse_percent_size_string y
+    | Some _, Some _ -> failwith "Please don't give two sizes!"
     | None, None -> failwith "Need a size!" in
   let open Xenvm_common in
   Lwt_main.run (

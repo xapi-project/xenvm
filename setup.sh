@@ -20,5 +20,5 @@ for i in ${LVS}; do
   ./xenvm.native activate --lv $i `pwd`/djstest-$i /dev/loop0
 done
 
-echo Run 'sudo ./local-allocator.native' and type 'djstest-live' to request an allocation
+echo Run 'sudo ./local_allocator.native' and type 'djstest-live' to request an allocation
 echo Run './cleanup.sh' to remove all volumes and devices

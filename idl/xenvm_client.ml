@@ -24,7 +24,6 @@ module Rpc = struct
            return (`Error e))
         >>= function
         | `Ok (resp, body) ->
-          let status = Response.status resp in
           Cohttp_lwt_body.to_string body >>= fun body ->
           return (Jsonrpc.response_of_string body)
         | `Retry e ->
