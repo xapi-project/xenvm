@@ -63,6 +63,10 @@ let fatal_error_t msg =
   error "%s" msg;
   fail (Failure msg)
 
+let fatal_error msg m = m >>= function
+  | `Error _ -> fatal_error_t msg
+  | `Ok x -> return x
+
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Block)(FreeAllocation)
   let create ~disk () = R.Producer.create ~disk () >>= function
@@ -82,7 +86,13 @@ module FromLVM = struct
       Lwt_unix.sleep 5.
       >>= fun () ->
       suspend t
-    | `Ok () -> return ()
+    | `Ok () ->
+      let rec wait () =
+        fatal_error "reading state of FromLVM" (R.Consumer.state t)
+        >>= function
+        | `Suspended -> return ()
+        | `Running -> wait () in
+      wait ()
   let rec resume t =
     R.Consumer.resume t
     >>= function
@@ -91,7 +101,13 @@ module FromLVM = struct
       Lwt_unix.sleep 5.
       >>= fun () ->
       resume t
-    | `Ok () -> return ()
+    | `Ok () ->
+      let rec wait () =
+        fatal_error "reading state of FromLVM" (R.Consumer.state t)
+        >>= function
+        | `Suspended -> wait ()
+        | `Running -> return () in
+      wait ()
   let rec pop t =
     R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
     >>= function
@@ -265,14 +281,17 @@ let main config socket journal freePool fromLVM toLVM =
 
       (* Suspend and resume the queue: the producer will resend us all
          the free blocks on resume. *)
+      debug "Suspending FromLVM queue";
       FromLVM.suspend from_lvm
       >>= fun () ->
       (* Drop all queue entries to free space. They'll be duplicates
          of the large request we expect on resume. *)
+      debug "Dropping FromLVM allocations";
       FromLVM.pop from_lvm
       >>= fun (pos, _) ->
       FromLVM.advance from_lvm pos
       >>= fun () ->
+      debug "Resuming FromLVM queue";
       (* Resume the queue and we're good to go! *)
       FromLVM.resume from_lvm
       >>= fun () ->
