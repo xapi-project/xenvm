@@ -39,18 +39,16 @@ module Vg_IO = Lvm.Vg.Make(Block)
 
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
-  let create ~disk () = R.Producer.create ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
-  | `Ok x -> return x
+  let create ~disk () =
+    fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
   let rec attach ~disk () = R.Consumer.attach ~disk () >>= function
   | `Error _ ->
     Lwt_unix.sleep 5.
     >>= fun () ->
     attach ~disk ()
   | `Ok x -> return x
-  let state t = R.Consumer.state t >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error querying ToLVM state: %s" x)
-  | `Ok x -> return x
+  let state t =
+    fatal_error "querying ToLVM state" (R.Consumer.state t)
   let rec suspend t =
     R.Consumer.suspend t
     >>= function
@@ -82,27 +80,21 @@ module ToLVM = struct
         | `Running -> return () in
       wait ()
   let rec pop t =
-    R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
-    >>= function
-    | `Error msg -> fatal_error_t msg
-    | `Ok (position, rev_items) ->
+    fatal_error "ToLVM.pop"
+      (R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ())
+    >>= fun (position, rev_items) ->
       let items = List.rev rev_items in
       return (position, items)
-  let advance t position = R.Consumer.advance ~t ~position () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM consumer pointer: %s" x)
-  | `Ok x -> return x
+  let advance t position =
+    fatal_error "toLVM.advance" (R.Consumer.advance ~t ~position ())
 end
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
-  let create ~disk () = R.Producer.create ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
-  | `Ok x -> return x
-  let attach ~disk () = R.Producer.attach ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the FromLVM producer queue: %s" x)
-  | `Ok x -> return x
-  let state t = R.Producer.state t >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error querying FromLVM state: %s" x)
-  | `Ok x -> return x
+  let create ~disk () =
+    fatal_error "FromLVM.create" (R.Producer.create ~disk ())
+  let attach ~disk () =
+    fatal_error "FromLVM.attach" (R.Producer.attach ~disk ())
+  let state t = fatal_error "FromLVM.state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
   | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
@@ -115,9 +107,8 @@ module FromLVM = struct
     >>= fun () ->
     push t item
   | `Ok x -> return x
-  let advance t position = R.Producer.advance ~t ~position () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM producer pointer: %s" x)
-  | `Ok x -> return x
+  let advance t position =
+    fatal_error "FromLVM.advance" (R.Producer.advance ~t ~position ())
 end
 
 module VolumeManager = struct
@@ -133,10 +124,7 @@ module VolumeManager = struct
   let vgopen ~devices:devices' =
     Lwt_list.map_s
       (fun filename ->
-      Block.connect filename
-        >>= function
-        | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
-        | `Ok x -> return x
+        fatal_error ("open " ^ filename) (Block.connect filename)
       ) devices'
     >>= fun devices' ->
     Vg_IO.read devices' >>|= fun vg ->
@@ -420,11 +408,8 @@ module FreePool = struct
   let start name = match !VolumeManager.myvg with
     | Some vg ->
       debug "Opening LV '%s' to use as a freePool journal" name;
-      ( Vg_IO.Volume.connect { Vg_IO.Volume.vg; name }
-        >>= function
-        | `Ok x -> return x
-        | `Error _ -> fail (Failure (Printf.sprintf "Failed to open '%s' as a freePool journal" name))
-      ) >>= fun device ->
+      fatal_error ("open " ^ name) ( Vg_IO.Volume.connect { Vg_IO.Volume.vg; name })
+      >>= fun device ->
       J.start device perform
       >>= fun j' ->
       journal := Some j';
@@ -530,11 +515,8 @@ module Impl = struct
   type context = unit
 
   let get context () =
-    VolumeManager.read (fun x -> return (`Ok x))
-    >>= function
-    | `Error e -> fail e
-    | `Ok x -> return x
-
+    fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
+  
   let create context ~name ~size = 
     VolumeManager.write (fun vg ->
       Lvm.Vg.create vg name size
@@ -547,12 +529,11 @@ module Impl = struct
 
   let get_lv context ~name =
     let open Lvm in
-    VolumeManager.read (fun vg ->
+    fatal_error "get_lv"
+      (VolumeManager.read (fun vg ->
         let lv = List.find (fun lv -> lv.Lv.name = name) vg.Vg.lvs in
         return (`Ok ({ vg with Vg.lvs = [] }, lv))
-    ) >>= function
-    | `Error e -> fail e
-    | `Ok x -> return x
+      ))
 
   let shutdown context () =
     VolumeManager.shutdown ()
