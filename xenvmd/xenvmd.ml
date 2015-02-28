@@ -48,6 +48,9 @@ module ToLVM = struct
     >>= fun () ->
     attach ~disk ()
   | `Ok x -> return x
+  let state t = R.Consumer.state t >>= function
+  | `Error x -> fatal_error_t (Printf.sprintf "Error querying ToLVM state: %s" x)
+  | `Ok x -> return x
   let rec suspend t =
     R.Consumer.suspend t
     >>= function
@@ -194,13 +197,6 @@ module VolumeManager = struct
     | None ->
       assert false
 
-  let shutdown () =
-    match !journal with
-    | Some j ->
-      J.shutdown j
-    | None ->
-      return ()
-
   let to_LVMs = ref []
   let from_LVMs = ref []
   let free_LVs = ref []
@@ -308,8 +304,44 @@ module VolumeManager = struct
       write (fun vg ->
         Lvm.Vg.remove vg freeLVM
       )
-
+  
+  let all () =
+      Lwt_list.map_s
+        (fun (name, _) ->
+          let lv = toLVM name in
+          let t = List.assoc name !to_LVMs in
+          ( ToLVM.state t >>= function
+            | `Suspended -> return true
+            | `Running -> return false ) >>= fun suspended ->
+          let toLVM = { Xenvm_interface.lv; suspended } in
+          let lv = fromLVM name in
+          let t = List.assoc name !from_LVMs in
+          ( FromLVM.state t >>= function
+            | `Suspended -> return true
+            | `Running -> return false ) >>= fun suspended ->
+          let fromLVM = { Xenvm_interface.lv; suspended } in
+          read (fun vg ->
+            try
+              let lv = List.find (fun lv -> lv.Lvm.Lv.name = freeLVM name) vg.Lvm.Vg.lvs in
+              return (Lvm.Lv.size_in_extents lv)
+            with Not_found -> return 0L
+          ) >>= fun freeExtents ->
+          return { Xenvm_interface.name; fromLVM; toLVM; freeExtents }
+        ) !to_LVMs
   end
+
+  let shutdown () =
+    Lwt_list.iter_s
+      (fun (host, _) ->
+        Host.disconnect host
+      ) !from_LVMs
+    >>= fun () ->
+    match !journal with
+    | Some j ->
+      J.shutdown j
+    | None ->
+      return ()
+
 end
 
 module FreePool = struct
@@ -515,6 +547,7 @@ module Impl = struct
     let connect context ~name = VolumeManager.Host.connect name
     let disconnect context ~name = VolumeManager.Host.disconnect name
     let destroy context ~name = VolumeManager.Host.destroy name
+    let all context () = VolumeManager.Host.all ()
   end
 
 end
