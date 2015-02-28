@@ -275,6 +275,26 @@ module VolumeManager = struct
       free_LVs := (name, freeLVM) :: !free_LVs;
       return ()
 
+    let flush name =
+      if not(List.mem_assoc name !to_LVMs)
+      then return ()
+      else begin
+        let to_lvm = List.assoc name !to_LVMs in
+        ToLVM.pop to_lvm
+        >>= fun (pos, items) ->
+        Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
+          write (fun vg ->
+            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(volume, { lvex_segments = segments })))
+          ) >>= fun () ->
+          write (fun vg ->
+            let free = (List.assoc name !free_LVs) in
+            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(free, { lvc_segments = segments })))
+          )
+        ) items
+        >>= fun () ->
+        ToLVM.advance to_lvm pos
+      end
+  
     let disconnect name =
       if not(List.mem_assoc name !to_LVMs)
       then return () (* already disconnected *)
@@ -283,7 +303,10 @@ module VolumeManager = struct
         debug "Suspending ToLVM queue for %s" name;
         ToLVM.suspend to_lvm
         >>= fun () ->
-        debug "ToLVM queue for %s has been suspended" name;
+        (* There may still be updates in the ToLVM queue *)
+        flush name
+        >>= fun () ->
+        debug "ToLVM queue for %s has been suspended and flushed" name;
         to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
         from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
         free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
@@ -305,7 +328,7 @@ module VolumeManager = struct
         Lvm.Vg.remove vg freeLVM
       )
   
-  let all () =
+    let all () =
       Lwt_list.map_s
         (fun (name, _) ->
           let lv = toLVM name in
@@ -583,40 +606,16 @@ let run port config daemon =
       >>= fun () ->
 
       (* 2. Are there any pending LVM updates from hosts? *)
-      Lwt_list.map_p
-        (fun (host, to_lvm) ->
-          ToLVM.pop to_lvm
-          >>= fun (pos, item) ->
-          return (host, to_lvm, pos, item)
+      Lwt_list.iter_s
+        (fun (host, _) ->
+          VolumeManager.Host.flush host
         ) !VolumeManager.to_LVMs
-      >>= fun work ->
-      let items = List.concat (List.map (fun (_, _, _, bu) -> bu) work) in
-      if items = [] then begin
-        debug "sleeping for 5s";
-        Lwt_unix.sleep 5.
-        >>= fun () ->
-        service_queues ()
-      end else begin
-        let allocations = List.concat (List.map (fun (host, _, _, bu) -> List.map (fun x -> host, x) bu) work) in
-        Lwt_list.iter_s (function (host, { ExpandVolume.volume; segments }) ->
-          VolumeManager.write (fun vg ->
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(volume, { lvex_segments = segments })))
-          ) >>= fun () ->
-          VolumeManager.write (fun vg ->
-            let free = (List.assoc host !VolumeManager.free_LVs) in
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(free, { lvc_segments = segments })))
-          )
-        ) allocations
-        >>= fun () ->
-        (* The operation is in the journal *)
-        Lwt_list.iter_p
-          (fun (_, t, pos, _) ->
-            ToLVM.advance t pos
-          ) work
-        >>= fun () ->
-        (* The operation is now complete *)
-        service_queues ()
-      end in
+      >>= fun () ->
+
+      debug "sleeping for 5s";
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      service_queues () in
 
     let service_http () =
       Printf.printf "Listening for HTTP request on: %d\n" config.Config.listenPort;
