@@ -137,6 +137,24 @@ let host_disconnect config host =
 let host_destroy config host =
   Lwt_main.run (Client.Host.destroy host)
 
+let host_list config =
+  let t =
+    Client.Host.all () >>= fun hosts ->
+    let open Xenvm_interface in
+    let table_of_queue q = [
+      [ "lv"; q.lv ];
+      [ "suspended"; string_of_bool q.suspended ]
+    ] in
+    let table_of_host h =
+      let fromLVM = add_prefix "fromLVM" (table_of_queue h.fromLVM) in
+      let toLVM = add_prefix "toLVM" (table_of_queue h.toLVM) in
+      fromLVM @ toLVM @ [ [ "freeExtents"; Int64.to_string h.freeExtents ] ] in
+    List.map (fun h -> add_prefix h.name (table_of_host h)) hosts
+    |> List.concat
+    |> print_table [ "key"; "value" ];
+    return () in
+  Lwt_main.run t
+
 let shutdown config =
   Lwt_main.run
     (Client.shutdown ())
@@ -297,6 +315,15 @@ let host_destroy_cmd =
   Term.(pure host_destroy $ copts_t $ hostname),
   Term.info "host-destroy" ~sdocs:copts_sect ~doc ~man
 
+let host_list_cmd =
+  let doc = "Lists all known hosts" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Lists all the hosts known to Xenvmd and displays the state of the metadata volumes.";
+  ] in
+  Term.(pure host_list $ copts_t),
+  Term.info "host-list" ~sdocs:copts_sect ~doc ~man
+
 let shutdown_cmd =
   let doc = "Shut the daemon down cleanly" in
   let man = [
@@ -321,6 +348,7 @@ let default_cmd =
 let cmds = [
   lvs_cmd; format_cmd; create_cmd; activate_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
+  host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
   Lvmcompat.lvcreate_cmd
 ]

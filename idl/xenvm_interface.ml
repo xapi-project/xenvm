@@ -14,6 +14,18 @@ external rename : oldname:string -> newname:string -> unit = ""
 
 external shutdown : unit -> unit = ""
 
+type queue = {
+  lv: string;
+  suspended: bool;
+}
+
+type host = {
+  name: string;
+  fromLVM: queue;
+  toLVM: queue;
+  freeExtents: int64;
+}
+
 module Host = struct
 
   external create: name:string -> unit = ""
@@ -31,4 +43,6 @@ module Host = struct
   external destroy: name:string -> unit = ""
   (** [destroy host] removes the metadata volumes for a host with
       name [host] *)
+
+  external all: unit -> host list = ""
 end
