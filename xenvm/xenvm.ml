@@ -77,7 +77,7 @@ let lvs config =
 
 let format config name filenames =
     let t =
-      let module Vg_IO = Vg.Make(Block) in
+      let module Vg_IO = Vg.Make(Log)(Block) in
       let open Xenvm_interface in
       (* 4 MiB per volume *)
       let size = Int64.(mul 4L (mul 1024L 1024L)) in
@@ -96,16 +96,12 @@ let format config name filenames =
         (name,block)
       ) blocks in
       Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
-      Vg_IO.read (List.map snd pvs)
-      >>|= fun vg ->
-      (return (Vg.create (Vg_IO.metadata_of vg) _redo_log_name size))
-      >>|= fun (_, op) ->
-      Vg_IO.update vg [ op ]
+      Vg_IO.connect (List.map snd pvs)
       >>|= fun vg ->
       (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size))
       >>|= fun (_, op) ->
       Vg_IO.update vg [ op ]
-      >>|= fun _ ->
+      >>|= fun () ->
       return () in
   Lwt_main.run t
 

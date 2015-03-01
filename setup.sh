@@ -1,3 +1,4 @@
+set -e
 # Making a 1G disk on /dev/loop0
 rm -f bigdisk
 dd if=/dev/zero of=bigdisk bs=1 seek=16G count=0
