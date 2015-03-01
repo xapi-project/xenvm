@@ -112,7 +112,7 @@ module FromLVM = struct
 end
 
 module VolumeManager = struct
-  let myvg = ref None
+  let myvg, myvg_u = Lwt.task ()
   let lock = Lwt_mutex.create ()
 
   let vgopen ~devices:devices' =
@@ -123,28 +123,25 @@ module VolumeManager = struct
       ) devices'
     >>= fun devices' ->
     Vg_IO.connect devices' >>|= fun vg ->
-    myvg := Some vg;
+    Lwt.wakeup_later myvg_u vg;
     return ()
 
   let read fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !myvg with
-      | None -> assert false
-      | Some myvg -> fn (Vg_IO.metadata_of myvg)
+      myvg >>= fun myvg ->
+      fn (Vg_IO.metadata_of myvg)
     )
 
   let write fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !myvg with
-      | Some myvg ->
-        ( match fn (Vg_IO.metadata_of myvg) with
-          | `Error e -> fail (Failure e)
-          | `Ok x -> Lwt.return x )
-        >>= fun (_, op) ->
-        Vg_IO.update myvg [ op ]
-        >>|= fun () ->
-        Lwt.return ()
-      | _ -> assert false
+      myvg >>= fun myvg ->
+      ( match fn (Vg_IO.metadata_of myvg) with
+        | `Error e -> fail (Failure e)
+        | `Ok x -> Lwt.return x )
+      >>= fun (_, op) ->
+      Vg_IO.update myvg [ op ]
+      >>|= fun () ->
+      Lwt.return ()
     )
 
   let to_LVMs = ref []
@@ -171,10 +168,7 @@ module VolumeManager = struct
       write (fun vg ->
         Lvm.Vg.create vg freeLVM size
       ) >>= fun () ->
-      ( match !myvg with
-        | None -> assert false
-        | Some vg -> return vg )
-      >>= fun vg ->
+      myvg >>= fun vg ->
       ( match Vg_IO.find vg toLVM with
         | Some lv -> return lv
         | None -> assert false ) >>= fun v ->
@@ -198,10 +192,7 @@ module VolumeManager = struct
       Vg_IO.Volume.disconnect disk
   
     let connect name =
-      ( match !myvg with
-        | None -> assert false
-        | Some vg -> return vg )
-      >>= fun vg ->
+      myvg >>= fun vg ->
       info "Registering host %s" name;
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
@@ -367,22 +358,20 @@ module FreePool = struct
 
   let journal = ref None
 
-  let start name = match !VolumeManager.myvg with
-    | Some vg ->
-      debug "Opening LV '%s' to use as a freePool journal" name;
-      ( match Vg_IO.find vg name with
-        | Some lv -> return lv
-        | None -> assert false ) >>= fun v ->
-      ( Vg_IO.Volume.connect v >>= function
-        | `Error _ -> fatal_error_t ("open " ^ name)
-        | `Ok x -> return x )
-      >>= fun device ->
-      J.start device perform
-      >>= fun j' ->
-      journal := Some j';
-      return ()
-    | None ->
-      assert false
+  let start name =
+    VolumeManager.myvg >>= fun vg ->
+    debug "Opening LV '%s' to use as a freePool journal" name;
+    ( match Vg_IO.find vg name with
+      | Some lv -> return lv
+      | None -> assert false ) >>= fun v ->
+    ( Vg_IO.Volume.connect v >>= function
+      | `Error _ -> fatal_error_t ("open " ^ name)
+      | `Ok x -> return x )
+    >>= fun device ->
+    J.start device perform
+    >>= fun j' ->
+    journal := Some j';
+    return ()
 
   let shutdown () =
     match !journal with
