@@ -32,10 +32,10 @@ let fatal_error_t msg =
   fail (Failure msg)
 
 let fatal_error msg m = m >>= function
-  | `Error _ -> fatal_error_t msg
+  | `Error x -> fatal_error_t (msg ^ ": " ^ x)
   | `Ok x -> return x
 
-module Vg_IO = Lvm.Vg.Make(ErrorLogOnly)(Block)
+module Vg_IO = Lvm.Vg.Make(Log)(Block)
 
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
@@ -117,8 +117,9 @@ module VolumeManager = struct
 
   let vgopen ~devices:devices' =
     Lwt_list.map_s
-      (fun filename ->
-        fatal_error ("open " ^ filename) (Block.connect filename)
+      (fun filename -> Block.connect filename >>= function
+        | `Error _ -> fatal_error_t ("open " ^ filename)
+        | `Ok x -> return x
       ) devices'
     >>= fun devices' ->
     Vg_IO.connect devices' >>|= fun vg ->
@@ -372,7 +373,9 @@ module FreePool = struct
       ( match Vg_IO.find vg name with
         | Some lv -> return lv
         | None -> assert false ) >>= fun v ->
-      fatal_error ("open " ^ name) ( Vg_IO.Volume.connect v)
+      ( Vg_IO.Volume.connect v >>= function
+        | `Error _ -> fatal_error_t ("open " ^ name)
+        | `Ok x -> return x )
       >>= fun device ->
       J.start device perform
       >>= fun j' ->
