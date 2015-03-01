@@ -1,6 +1,5 @@
 (* XenVM LVM type thing *)
 
-let _redo_log_name = "xenvm_redo_log"
 let _journal_name = "xenvm_journal"
 
 external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""

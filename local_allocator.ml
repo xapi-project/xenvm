@@ -36,14 +36,14 @@ let with_block filename f =
     Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
 
 let query_lvm config =
-  let module Vg_IO = Lvm.Vg.Make(Block) in
+  let module Vg_IO = Lvm.Vg.Make(Log)(Block) in
   match config.Config.devices with
   | [] ->
     fail (Failure "I require at least one physical device")
   | device :: _ ->
     with_block device
       (fun x ->
-        Vg_IO.read [ x ]
+        Vg_IO.connect [ x ]
         >>= function
         | `Error e ->
           error "Fatal error reading LVM metadata: %s" e;

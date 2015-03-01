@@ -35,7 +35,7 @@ let fatal_error msg m = m >>= function
   | `Error _ -> fatal_error_t msg
   | `Ok x -> return x
 
-module Vg_IO = Lvm.Vg.Make(Block)
+module Vg_IO = Lvm.Vg.Make(ErrorLogOnly)(Block)
 
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
@@ -112,14 +112,8 @@ module FromLVM = struct
 end
 
 module VolumeManager = struct
-  module J = Shared_block.Journal.Make(ErrorLogOnly)(Vg_IO.Volume)(Lvm.Redo.Op)
-
-  let devices = ref []
-  let metadata = ref None
   let myvg = ref None
-  let wait_for_flush_t = ref (fun () -> return ())
   let lock = Lwt_mutex.create ()
-  let journal = ref None
 
   let vgopen ~devices:devices' =
     Lwt_list.map_s
@@ -127,63 +121,30 @@ module VolumeManager = struct
         fatal_error ("open " ^ filename) (Block.connect filename)
       ) devices'
     >>= fun devices' ->
-    Vg_IO.read devices' >>|= fun vg ->
+    Vg_IO.connect devices' >>|= fun vg ->
     myvg := Some vg;
-    metadata := Some (Vg_IO.metadata_of vg);
-    devices := devices';
     return ()
 
   let read fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !metadata with
+      match !myvg with
       | None -> assert false
-      | Some metadata -> fn metadata)
+      | Some myvg -> fn (Vg_IO.metadata_of myvg)
+    )
 
   let write fn =
     Lwt_mutex.with_lock lock (fun () -> 
-      match !metadata, !journal with
-      | Some md, Some j ->
-        ( match fn md with
+      match !myvg with
+      | Some myvg ->
+        ( match fn (Vg_IO.metadata_of myvg) with
           | `Error e -> fail (Failure e)
           | `Ok x -> Lwt.return x )
-        >>= fun (md, op) ->
-        metadata := Some md;
-        J.push j op
-        >>= fun waiter ->
-        wait_for_flush_t := waiter;
+        >>= fun (_, op) ->
+        Vg_IO.update myvg [ op ]
+        >>|= fun () ->
         Lwt.return ()
-      | _, _ -> assert false
+      | _ -> assert false
     )
-
-  let last_flush = ref 0.
-  let perform ops =
-    if ops = []
-    then return ()
-    else match !myvg with
-    | None -> assert false
-    | Some vg ->
-      Vg_IO.update vg ops >>|= fun vg' ->
-      debug "Performed %d ops" (List.length ops);
-      (* Encourage batching of metadata writes by sleeping *)
-      let now = Unix.gettimeofday () in
-      Lwt_unix.sleep (max 0. (5. -. (now -. !last_flush)))
-      >>= fun () ->
-      last_flush := now;
-      myvg := Some vg';
-      Lwt.return ()
-
-  let start name =
-    match !myvg with
-    | Some vg ->
-      begin Vg_IO.Volume.(connect { vg; name })
-      >>= function
-      | `Ok device ->
-        J.start device perform >>= fun j -> journal := Some j; Lwt.return ()
-      | `Error _ ->
-        failwith (Printf.sprintf "failed to start journal on %s" name)
-      end
-    | None ->
-      assert false
 
   let to_LVMs = ref []
   let from_LVMs = ref []
@@ -209,12 +170,14 @@ module VolumeManager = struct
       write (fun vg ->
         Lvm.Vg.create vg freeLVM size
       ) >>= fun () ->
-      (!wait_for_flush_t) () >>= fun () ->
       ( match !myvg with
         | None -> assert false
         | Some vg -> return vg )
       >>= fun vg ->
-      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = toLVM }
+      ( match Vg_IO.find vg toLVM with
+        | Some lv -> return lv
+        | None -> assert false ) >>= fun v ->
+      Vg_IO.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
@@ -222,7 +185,10 @@ module VolumeManager = struct
       >>= fun () ->
       Vg_IO.Volume.disconnect disk
       >>= fun () ->
-      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = fromLVM }
+      ( match Vg_IO.find vg fromLVM with
+        | Some lv -> return lv
+        | None -> assert false ) >>= fun v ->
+      Vg_IO.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
@@ -231,10 +197,6 @@ module VolumeManager = struct
       Vg_IO.Volume.disconnect disk
   
     let connect name =
-      (* XXX: we have an out-of-sync pair 'myvg' and 'metadata' which means we
-         have to wait for 'myvg' to be flushed. This can be removed if the redo log
-         is pushed into the library. *)
-      (!wait_for_flush_t) () >>= fun () ->
       ( match !myvg with
         | None -> assert false
         | Some vg -> return vg )
@@ -243,7 +205,10 @@ module VolumeManager = struct
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
       let freeLVM = freeLVM name in
-      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = toLVM }
+      ( match Vg_IO.find vg toLVM with
+        | Some lv -> return lv
+        | None -> assert false ) >>= fun v ->
+      Vg_IO.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
@@ -252,7 +217,10 @@ module VolumeManager = struct
       ToLVM.resume to_LVM
       >>= fun () ->
 
-      Vg_IO.Volume.connect { Vg_IO.Volume.vg; name = fromLVM }
+      ( match Vg_IO.find vg fromLVM with
+        | Some lv -> return lv
+        | None -> assert false ) >>= fun v ->
+      Vg_IO.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
@@ -346,13 +314,6 @@ module VolumeManager = struct
       (fun (host, _) ->
         Host.disconnect host
       ) !from_LVMs
-    >>= fun () ->
-    match !journal with
-    | Some j ->
-      J.shutdown j
-    | None ->
-      return ()
-
 end
 
 module FreePool = struct
@@ -408,7 +369,10 @@ module FreePool = struct
   let start name = match !VolumeManager.myvg with
     | Some vg ->
       debug "Opening LV '%s' to use as a freePool journal" name;
-      fatal_error ("open " ^ name) ( Vg_IO.Volume.connect { Vg_IO.Volume.vg; name })
+      ( match Vg_IO.find vg name with
+        | Some lv -> return lv
+        | None -> assert false ) >>= fun v ->
+      fatal_error ("open " ^ name) ( Vg_IO.Volume.connect v)
       >>= fun device ->
       J.start device perform
       >>= fun j' ->
@@ -572,8 +536,6 @@ let run port config daemon =
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
     VolumeManager.vgopen ~devices:config.Config.devices
-    >>= fun () ->
-    VolumeManager.start Xenvm_interface._redo_log_name
     >>= fun () ->
     FreePool.start Xenvm_interface._journal_name
     >>= fun () ->
