@@ -101,7 +101,7 @@ let format config name filenames =
       (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size))
       >>|= fun (_, op) ->
       Vg_IO.update vg [ op ]
-      >>|= fun _ ->
+      >>|= fun () ->
       return () in
   Lwt_main.run t
 
