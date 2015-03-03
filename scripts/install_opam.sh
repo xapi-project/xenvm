@@ -1,29 +1,21 @@
 #!/bin/bash
 
-sudo apt-get clean
-sudo apt-get update
-sudo apt-get install -y software-properties-common
+sudo yum clean all
+sudo yum update -y
 
-sudo add-apt-repository ppa:avsm/ppa
-sudo apt-get update
-sudo apt-get install -y ocaml opam m4 libdevmapper-dev libffi-dev
+cd /etc/yum.repos.d/
+sudo wget http://download.opensuse.org/repositories/home:ocaml/CentOS_7/home:ocaml.repo
+sudo yum install -y opam
 
-opam init -a
+sudo yum install -y opam m4 gcc patch aspcud git device-mapper-libs libffi-devel device-mapper-devel
+
+opam init -a --comp=4.02.1
 eval `opam config env`
 
-opam switch 4.02.1
-eval `opam config env`
+# There appears to be a dependency problem. If we don't preinstall lwt, mirage-types gets compiled
+# without lwt support, even though it's mentioned as a depext
+opam install lwt
 
-opam install -y lwt camldm cohttp ounit oasis
-
-git clone git://github.com/mirage/shared-block-ring
-opam pin add -y shared-block-ring shared-block-ring
-
-git clone git://github.com/xapi-project/camldm
-opam pin add -y camldm camldm
-
-git clone git://github.com/mirage/mirage-block-volume
-opam pin add -y mirage-block-volume mirage-block-volume
-
-
+opam remote add thinlvhd git://github.com/xapi-project/thin-lvhd-opam-repo
+opam install -y thin-lvhd-tools
 
