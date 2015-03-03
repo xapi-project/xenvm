@@ -5,10 +5,9 @@
 VAGRANTFILE_API_VERSION = "2"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-  config.vm.box = "chef/ubuntu-14.04"
-
+  config.vm.box = "chef/centos-7.0"
   config.vm.provider "xenserver" do |v, override|
-    override.vm.box = "jonludlam/xs-ubuntu-trusty"
+    override.vm.box = "jonludlam/xs-centos-7"
   end
 
   config.vm.provision "shell", path: "scripts/install_opam.sh", privileged: false
