@@ -96,7 +96,7 @@ let format config name filenames =
         (name,block)
       ) blocks in
       Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
-      Vg_IO.connect (List.map snd pvs)
+      Vg_IO.connect (List.map snd pvs) `RW
       >>|= fun vg ->
       (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size))
       >>|= fun (_, op) ->

@@ -122,7 +122,7 @@ module VolumeManager = struct
         | `Ok x -> return x
       ) devices'
     >>= fun devices' ->
-    Vg_IO.connect devices' >>|= fun vg ->
+    Vg_IO.connect devices' `RW >>|= fun vg ->
     Lwt.wakeup_later myvg_u vg;
     return ()
 

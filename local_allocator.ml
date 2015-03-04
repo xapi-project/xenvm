@@ -43,7 +43,7 @@ let query_lvm config =
   | device :: _ ->
     with_block device
       (fun x ->
-        Vg_IO.connect [ x ]
+        Vg_IO.connect [ x ] `RO
         >>= function
         | `Error e ->
           error "Fatal error reading LVM metadata: %s" e;
