@@ -15,18 +15,6 @@ module Config = struct
   } with sexp
 end
 
-type pv = {
-  pe_start: int64;
-  device: string;
-} with sexp
-(* The minimum amount of info about a PV we need ot know *)
-
-type vg = {
-  extent_size: int64;
-  pvs: (Lvm.Pv.Name.t * pv) list;
-}
-(* The minimum amount of info about a VG we need ot know *)
-
 let with_block filename f =
   let open Lwt in
   Block.connect filename
@@ -35,27 +23,26 @@ let with_block filename f =
   | `Ok x ->
     Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
 
+module Vg_IO = Lvm.Vg.Make(Log)(Block)
+
+let get_device config = match config.Config.devices with
+  | [ x ] -> return x
+  | _ ->
+    fail (Failure "I require exactly one physical device")
+
 let query_lvm config =
-  let module Vg_IO = Lvm.Vg.Make(Log)(Block) in
-  match config.Config.devices with
-  | [] ->
-    fail (Failure "I require at least one physical device")
-  | device :: _ ->
-    with_block device
-      (fun x ->
-        Vg_IO.connect [ x ] `RO
-        >>= function
-        | `Error e ->
-          error "Fatal error reading LVM metadata: %s" e;
-          fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
-        | `Ok x ->
-          let x = Vg_IO.metadata_of x in
-          let extent_size = x.Lvm.Vg.extent_size in
-          let pvs = List.map (fun pv ->
-            pv.Lvm.Pv.name, { pe_start = pv.Lvm.Pv.pe_start; device }
-          ) x.Lvm.Vg.pvs in
-          return { extent_size; pvs }
-      )
+  get_device config
+  >>= fun device ->
+  with_block device
+    (fun x ->
+      Vg_IO.connect [ x ] `RO
+      >>= function
+      | `Error e ->
+        error "Fatal error reading LVM metadata: %s" e;
+        fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
+      | `Ok x ->
+        return x
+    )
 
 (* This error must cause the system to stop for manual maintenance.
    Perhaps we could scope this later and take down only a single connection? *)
@@ -68,7 +55,7 @@ let fatal_error msg m = m >>= function
   | `Ok x -> return x
 
 module FromLVM = struct
-  module R = Shared_block.Ring.Make(Block)(FreeAllocation)
+  module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () = R.Producer.create ~disk () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
   | `Ok x -> return x
@@ -120,7 +107,7 @@ module FromLVM = struct
   | `Ok x -> return x
 end
 module ToLVM = struct
-  module R = Shared_block.Ring.Make(Block)(ExpandVolume)
+  module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () = R.Producer.create ~disk () >>= function
   | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
   | `Ok x -> return x
@@ -194,8 +181,9 @@ let sizeof volume =
   List.fold_left max 0L ends
 
 (* Compute the new segments and device mapper targets if [extents] are appended onto [lv] *)
-let extend_volume vg lv extents =
-  let to_sector pv segment = Int64.(add pv.pe_start (mul segment vg.extent_size)) in
+let extend_volume device vg lv extents =
+  let open Lvm in
+  let to_sector pv segment = Int64.(add pv.Pv.pe_start (mul segment vg.Vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
   let next_sector = sizeof lv in
   let _, segments, targets =
@@ -203,19 +191,19 @@ let extend_volume vg lv extents =
     List.fold_left
       (fun (next_sector, segments, targets) (pvname, (psegment, size)) ->
         try
-          let next_segment = Int64.div next_sector vg.extent_size in
-          let pv = List.assoc pvname vg.pvs in
-          let device = Location.Path pv.device in
+          let next_segment = Int64.div next_sector vg.Vg.extent_size in
+          let pv = List.find (fun pv -> pv.Pv.name = pvname) vg.Vg.pvs in
+          let device = Location.Path device in
           let segment =
             { Lvm.Lv.Segment.start_extent = next_segment;
               extent_count = size;
               cls = Lvm.Lv.Segment.Linear { Lvm.Lv.Linear.name = pvname; start_extent = psegment } } in
           let target =
             { Target.start = next_sector;
-              size = Int64.mul size vg.extent_size;
+              size = Int64.mul size vg.Vg.extent_size;
               kind = Target.Linear { Location.device; offset = to_sector pv psegment } } in
 
-          Int64.(add next_sector (mul size vg.extent_size)),
+          Int64.(add next_sector (mul size vg.Vg.extent_size)),
           segment :: segments,
           target :: targets
         with Not_found ->
@@ -257,17 +245,24 @@ let main config socket journal freePool fromLVM toLVM =
     Device.read_sector_size config.Config.devices
     >>= fun sector_size ->
 
+    get_device config
+    >>= fun vg_device ->
+
     query_lvm config
     >>= fun vg ->
+    let metadata = Vg_IO.metadata_of vg in
 
-    Block.connect config.Config.toLVM
+    ( match Vg_IO.find vg config.Config.toLVM with
+      | Some x -> return x
+      | None -> assert false ) >>= fun v ->
+    Vg_IO.Volume.connect v
     >>= function
     | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.toLVM))
     | `Ok disk ->
     ToLVM.attach ~disk ()
     >>= fun tolvm ->
 
-    let extent_size = vg.extent_size in (* in sectors *)
+    let extent_size = metadata.Lvm.Vg.extent_size in (* in sectors *)
     let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
 
     info "Device %s has %d byte sectors" (List.hd config.Config.devices) sector_size;
@@ -286,7 +281,10 @@ let main config socket journal freePool fromLVM toLVM =
 
     let receive_free_blocks_forever () =
       debug "Receiving free blocks from the SRmaster forever";
-      Block.connect config.Config.fromLVM
+      ( match Vg_IO.find vg config.Config.fromLVM with
+        | Some x -> return x
+        | None -> assert false ) >>= fun v ->
+      Vg_IO.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.fromLVM))
       | `Ok disk ->
@@ -388,7 +386,7 @@ let main config socket journal freePool fromLVM toLVM =
                   (Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum)
                   (fun () -> FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib))
                 >>= fun extents ->
-                let segments, targets = extend_volume vg data_volume extents in
+                let segments, targets = extend_volume vg_device metadata data_volume extents in
                 let _, volume = Mapper.vg_lv_of_name device in
                 let volume = { ExpandVolume.volume; segments } in
                 let device = { ExpandDevice.extents; device; targets } in
