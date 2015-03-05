@@ -15,6 +15,27 @@ module Config = struct
   } with sexp
 end
 
+let rec try_forever msg f =
+  f ()
+  >>= function
+  | `Ok x -> return (`Ok x)
+  | `Error x -> return (`Error x)
+  | `Retry ->
+    debug "%s: retrying after 5s" msg;
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    try_forever msg f
+
+(* This error must cause the system to stop for manual maintenance.
+   Perhaps we could scope this later and take down only a single connection? *)
+let fatal_error_t msg =
+  error "%s" msg;
+  fail (Failure msg)
+
+let fatal_error msg m = m >>= function
+  | `Error _ -> fatal_error_t msg
+  | `Ok x -> return x
+
 let with_block filename f =
   let open Lwt in
   Block.connect filename
@@ -44,57 +65,45 @@ let query_lvm config =
         return x
     )
 
-(* This error must cause the system to stop for manual maintenance.
-   Perhaps we could scope this later and take down only a single connection? *)
-let fatal_error_t msg =
-  error "%s" msg;
-  fail (Failure msg)
-
-let fatal_error msg m = m >>= function
-  | `Error _ -> fatal_error_t msg
-  | `Ok x -> return x
-
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
   let rec attach ~disk () =
     fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~disk ()) 
   let rec suspend t =
-    R.Consumer.suspend t
-    >>= function
-    | `Error msg -> fatal_error_t msg
-    | `Retry ->
-      Lwt_unix.sleep 5.
-      >>= fun () ->
-      suspend t
-    | `Ok () ->
+    try_forever "FromLVM.suspend" (fun () -> R.Consumer.suspend t)
+    >>= fun x ->
+    fatal_error "FromLVM.suspend" (return x)
+    >>= fun () ->
       let rec wait () =
         fatal_error "reading state of FromLVM" (R.Consumer.state t)
         >>= function
         | `Suspended -> return ()
-        | `Running -> wait () in
+        | `Running ->
+          Lwt_unix.sleep 5.
+          >>= fun () ->
+          wait () in
       wait ()
   let rec resume t =
-    R.Consumer.resume t
-    >>= function
-    | `Error msg -> fatal_error_t msg
-    | `Retry ->
-      Lwt_unix.sleep 5.
-      >>= fun () ->
-      resume t
-    | `Ok () ->
+    try_forever "FromLVM.resume" (fun () -> R.Consumer.resume t)
+    >>= fun x ->
+    fatal_error "FromLVM.suspend" (return x)
+    >>= fun () ->
       let rec wait () =
         fatal_error "reading state of FromLVM" (R.Consumer.state t)
         >>= function
-        | `Suspended -> wait ()
+        | `Suspended ->
+          Lwt_unix.sleep 5.
+          >>= fun () ->
+          wait ()
         | `Running -> return () in
       wait ()
   let rec pop t =
     R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
-    >>= function
-    | `Error msg -> fatal_error_t msg
-    | `Ok (position, rev_items) ->
-      let items = List.rev rev_items in
-      return (position, items)
+    >>= fun x ->
+    fatal_error "FromLVM.pop" (return x)
+    >>= fun (position, rev_items) ->
+    let items = List.rev rev_items in
+    return (position, items)
   let advance t position =
     fatal_error "advancing the FromLVM consumer pointer" (R.Consumer.advance ~t ~position ())
 end
@@ -117,8 +126,6 @@ module ToLVM = struct
 end
 
 module FreePool = struct
-  (** Record the free block list in a file *)
-
   let m = Lwt_mutex.create ()
   let free = ref []
 
@@ -134,7 +141,9 @@ module FreePool = struct
       (fun () ->
         debug "FreePool.find %Ld extents from %s" nr_extents
           (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t !free)); 
-        return (Lvm.Pv.Allocator.find !free nr_extents)
+        match Lvm.Pv.Allocator.find !free nr_extents with
+        | `Ok x -> return (`Ok x)
+        | _ -> return `Retry
       )
 
   let remove extents =
@@ -157,8 +166,6 @@ module Op = struct
   include SexpToCstruct.Make(T)
   include T
 end
-
-exception Retry (* out of space *)
 
 (* Return the virtual size of the volume *)
 let sizeof volume =
@@ -198,16 +205,6 @@ let extend_volume device vg lv extents =
           next_sector, segments, targets
       ) (next_sector, [], []) extents in
    segments, targets
-
-let rec try_forever msg f =
-  f ()
-  >>= function
-  | `Ok x -> return x
-  | _ ->
-    debug "%s: retrying after 5s" msg;
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    try_forever msg f
 
 let stat x =
   match Devmapper.stat x with
@@ -324,9 +321,10 @@ let main config socket journal freePool fromLVM toLVM =
         sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
         ToLVM.push tolvm t.volume
         >>= fun position ->
-        try_forever
-          (Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device)
-          (fun () -> stat t.device.ExpandDevice.device)
+        let msg = Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device in
+        try_forever msg (fun () -> stat t.device.ExpandDevice.device)
+        >>= fun x ->
+        fatal_error msg (return x)
         >>= fun to_device ->
         FreePool.remove t.device.ExpandDevice.extents
         >>= fun () ->
@@ -368,9 +366,10 @@ let main config socket journal freePool fromLVM toLVM =
                 error "Couldn't find device mapper device: %s" device;
                 return ()
               | Some data_volume ->
-                try_forever
-                  (Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum)
-                  (fun () -> FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib))
+                let msg = Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum in
+                try_forever msg (fun () -> FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib))
+                >>= fun x ->
+                fatal_error msg (return x)
                 >>= fun extents ->
                 let segments, targets = extend_volume vg_device metadata data_volume extents in
                 let _, volume = Mapper.vg_lv_of_name device in
