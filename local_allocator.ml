@@ -129,32 +129,32 @@ end
 
 module FreePool = struct
   let m = Lwt_mutex.create ()
+  let c = Lwt_condition.create ()
   let free = ref []
 
   let add extents =
     Lwt_mutex.with_lock m
       (fun () ->
         free := Lvm.Pv.Allocator.merge !free extents;
+        Lwt_condition.broadcast c ();
         return ()
       )
 
-  let find nr_extents =
+  let remove nr_extents =
     Lwt_mutex.with_lock m
       (fun () ->
-        debug "FreePool.find %Ld extents from %s" nr_extents
-          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t !free)); 
-        match Lvm.Pv.Allocator.find !free nr_extents with
-        | `Ok x -> return (`Ok x)
-        | _ -> return `Retry
-      )
-
-  let remove extents =
-    Lwt_mutex.with_lock m
-      (fun () ->
-        debug "FreePool.remove %s"
-          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t extents));
-        free := Lvm.Pv.Allocator.sub !free extents;
-        return ()
+        debug "FreePool.extents %Ld extents from %s" nr_extents
+          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t !free));
+        let rec wait () =
+          match Lvm.Pv.Allocator.find !free nr_extents with
+          | `Ok x ->
+            free := Lvm.Pv.Allocator.sub !free x;
+            return x
+          | _ ->
+            Lwt_condition.wait ~mutex:m c
+            >>= fun () ->
+            wait () in
+        wait ()
       )
 end
 
@@ -313,9 +313,6 @@ let main config socket journal freePool fromLVM toLVM =
         loop_forever () in
       loop_forever () in
 
-    let (_: unit Lwt.t) = receive_free_blocks_forever () in
-    let (_: unit Lwt.t) = wait_for_shutdown_forever () in
-
     (* This is the idempotent part which will be done at-least-once *)
     let perform ops =
       let open Op in
@@ -328,8 +325,6 @@ let main config socket journal freePool fromLVM toLVM =
         >>= fun x ->
         fatal_error msg (return x)
         >>= fun to_device ->
-        FreePool.remove t.device.ExpandDevice.extents
-        >>= fun () ->
         (* Append the physical blocks to toLV *)
         let to_targets = to_device.Devmapper.targets @ t.device.ExpandDevice.targets in
         Devmapper.suspend t.device.ExpandDevice.device;
@@ -358,6 +353,9 @@ let main config socket journal freePool fromLVM toLVM =
     J.start device perform
     >>= fun j ->
 
+    let (_: unit Lwt.t) = receive_free_blocks_forever () in
+    let (_: unit Lwt.t) = wait_for_shutdown_forever () in
+
     (* Called to extend a single device. This function decides what needs to be
        done, pushes the operation to the journal and waits for it to complete.
        The idempotent perform function is exected at least once. We need to 
@@ -375,10 +373,7 @@ let main config socket journal freePool fromLVM toLVM =
                 error "Couldn't find device mapper device: %s" device;
                 return ()
               | Some data_volume ->
-                let msg = Printf.sprintf "Waiting for %Ld MiB free space" config.Config.allocation_quantum in
-                try_forever msg (fun () -> FreePool.find Int64.(div config.Config.allocation_quantum extent_size_mib))
-                >>= fun x ->
-                fatal_error msg (return x)
+                FreePool.remove Int64.(div config.Config.allocation_quantum extent_size_mib)
                 >>= fun extents ->
                 let segments, targets = extend_volume vg_device metadata data_volume extents in
                 let _, volume = Mapper.vg_lv_of_name device in
