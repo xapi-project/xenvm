@@ -17,4 +17,5 @@ depends: [
   "shared-block-ring"
   "devmapper"
   "cmdliner"
+  "bisect"
 ]
