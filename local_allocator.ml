@@ -156,6 +156,55 @@ module FreePool = struct
             wait () in
         wait ()
       )
+
+    let start config vg =
+      debug "Initialising the FreePool";
+      ( match Vg_IO.find vg config.Config.fromLVM with
+        | Some x -> return x
+        | None -> assert false ) >>= fun v ->
+      Vg_IO.Volume.connect v
+      >>= function
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.fromLVM))
+      | `Ok disk ->
+      FromLVM.attach ~disk ()
+      >>= fun from_lvm ->
+
+      (* Suspend and resume the queue: the producer will resend us all
+         the free blocks on resume. *)
+      debug "Suspending FromLVM queue";
+      FromLVM.suspend from_lvm
+      >>= fun () ->
+      (* Drop all queue entries to free space. They'll be duplicates
+         of the large request we expect on resume. *)
+      debug "Dropping FromLVM allocations";
+      FromLVM.pop from_lvm
+      >>= fun (pos, _) ->
+      FromLVM.advance from_lvm pos
+      >>= fun () ->
+      debug "Resuming FromLVM queue";
+      (* Resume the queue and we're good to go! *)
+      FromLVM.resume from_lvm
+      >>= fun () ->
+
+      let rec loop_forever () =
+        FromLVM.pop from_lvm
+        >>= fun (pos, ts) ->
+        let open FreeAllocation in
+        ( if ts = [] then begin
+            debug "No free blocks, sleeping for 5s";
+            Lwt_unix.sleep 5.
+          end else return ()
+        ) >>= fun () ->
+        Lwt_list.iter_s
+          (fun t ->
+            sexp_of_t t |> Sexplib.Sexp.to_string_hum |> debug "FreePool: received new allocation: %s";
+            add t
+          ) ts
+        >>= fun () ->
+        FromLVM.advance from_lvm pos
+        >>= fun () ->
+        loop_forever () in
+      loop_forever ()
 end
 
 module Op = struct
@@ -264,55 +313,6 @@ let main config socket journal freePool fromLVM toLVM =
         >>= fun () ->
         wait_for_shutdown_forever () in
 
-    let receive_free_blocks_forever () =
-      debug "Receiving free blocks from the SRmaster forever";
-      ( match Vg_IO.find vg config.Config.fromLVM with
-        | Some x -> return x
-        | None -> assert false ) >>= fun v ->
-      Vg_IO.Volume.connect v
-      >>= function
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.fromLVM))
-      | `Ok disk ->
-      FromLVM.attach ~disk ()
-      >>= fun from_lvm -> (* blocks for a while *)
-
-      (* Suspend and resume the queue: the producer will resend us all
-         the free blocks on resume. *)
-      debug "Suspending FromLVM queue";
-      FromLVM.suspend from_lvm
-      >>= fun () ->
-      (* Drop all queue entries to free space. They'll be duplicates
-         of the large request we expect on resume. *)
-      debug "Dropping FromLVM allocations";
-      FromLVM.pop from_lvm
-      >>= fun (pos, _) ->
-      FromLVM.advance from_lvm pos
-      >>= fun () ->
-      debug "Resuming FromLVM queue";
-      (* Resume the queue and we're good to go! *)
-      FromLVM.resume from_lvm
-      >>= fun () ->
-
-      let rec loop_forever () =
-        FromLVM.pop from_lvm
-        >>= fun (pos, ts) ->
-        let open FreeAllocation in
-        ( if ts = [] then begin
-            debug "No free blocks, sleeping for 5s";
-            Lwt_unix.sleep 5.
-          end else return ()
-        ) >>= fun () ->
-        Lwt_list.iter_s
-          (fun t ->
-            sexp_of_t t |> Sexplib.Sexp.to_string_hum |> print_endline;
-            FreePool.add t
-          ) ts
-        >>= fun () ->
-        FromLVM.advance from_lvm pos
-        >>= fun () ->
-        loop_forever () in
-      loop_forever () in
-
     (* This is the idempotent part which will be done at-least-once *)
     let perform ops =
       let open Op in
@@ -350,10 +350,12 @@ let main config socket journal freePool fromLVM toLVM =
       | `Ok x -> return x
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open localJournal device: %s" config.Config.localJournal))
     ) >>= fun device ->
+
+    (* We must replay the journal before resynchronising free blocks *)
     J.start device perform
     >>= fun j ->
 
-    let (_: unit Lwt.t) = receive_free_blocks_forever () in
+    let (_: unit Lwt.t) = FreePool.start config vg in
     let (_: unit Lwt.t) = wait_for_shutdown_forever () in
 
     (* Called to extend a single device. This function decides what needs to be
