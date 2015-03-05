@@ -1,6 +1,6 @@
 ## declare required packages
 
-OPAM_PACKAGES="cstruct lwt ocamlfind shared-block-ring camldm cmdliner bisect mirage-block-volume"
+OPAM_PACKAGES="cstruct lwt cohttp ssl ocamlfind shared-block-ring camldm cmdliner bisect mirage-block-volume"
 
 ## different PPAs required to cover the test matrix
 
