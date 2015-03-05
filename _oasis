@@ -14,7 +14,7 @@ Library xenvmidl
   Path:               idl
   Findlibname:        xenvmidl
   Modules:            Xenvm_interface, Xenvm_client, Log
-  BuildDepends:       rpclib, rpclib.syntax, lvm, cohttp.lwt, threads
+  BuildDepends:       rpclib, rpclib.syntax, lvm, cohttp.lwt, threads, bisect
 
 Executable "xenvmd"
   ByteOpt:            -warn-error +a
@@ -24,7 +24,7 @@ Executable "xenvmd"
   MainIs:             xenvmd.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring, bisect
 
 Executable "xenvm"
   ByteOpt:            -warn-error +a

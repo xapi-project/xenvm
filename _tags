@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: c17f235c7d2da1ca81c6eb35abe2338d)
+# DO NOT EDIT (digest: d79bbfe858d521ebb09708d168d1ccce)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -20,6 +20,7 @@ true: annot, bin_annot
 <idl/*.ml{,i,y}>: oasis_library_xenvmidl_byte
 <idl/xenvmidl.{cma,cmxa}>: oasis_library_xenvmidl_native
 <idl/*.ml{,i,y}>: oasis_library_xenvmidl_native
+<idl/*.ml{,i,y}>: pkg_bisect
 <idl/*.ml{,i,y}>: pkg_cohttp.lwt
 <idl/*.ml{,i,y}>: pkg_lvm
 <idl/*.ml{,i,y}>: pkg_rpclib
@@ -30,6 +31,7 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: oasis_executable_xenvmd_byte
 <xenvmd/xenvmd.{native,byte}>: oasis_executable_xenvmd_native
 <xenvmd/*.ml{,i,y}>: oasis_executable_xenvmd_native
+<xenvmd/xenvmd.{native,byte}>: pkg_bisect
 <xenvmd/xenvmd.{native,byte}>: pkg_cmdliner
 <xenvmd/xenvmd.{native,byte}>: pkg_cohttp.lwt
 <xenvmd/xenvmd.{native,byte}>: pkg_cstruct
@@ -48,6 +50,7 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: pkg_shared-block-ring
 <xenvmd/xenvmd.{native,byte}>: pkg_threads
 <xenvmd/xenvmd.{native,byte}>: use_xenvmidl
+<xenvmd/*.ml{,i,y}>: pkg_bisect
 <xenvmd/*.ml{,i,y}>: pkg_cmdliner
 <xenvmd/*.ml{,i,y}>: pkg_cohttp.lwt
 <xenvmd/*.ml{,i,y}>: pkg_cstruct
@@ -72,6 +75,7 @@ true: annot, bin_annot
 <xenvm/*.ml{,i,y}>: oasis_executable_xenvm_byte
 <xenvm/xenvm.{native,byte}>: oasis_executable_xenvm_native
 <xenvm/*.ml{,i,y}>: oasis_executable_xenvm_native
+<xenvm/xenvm.{native,byte}>: pkg_bisect
 <xenvm/xenvm.{native,byte}>: pkg_cmdliner
 <xenvm/xenvm.{native,byte}>: pkg_cohttp.lwt
 <xenvm/xenvm.{native,byte}>: pkg_devmapper
@@ -84,6 +88,7 @@ true: annot, bin_annot
 <xenvm/xenvm.{native,byte}>: pkg_rpclib.syntax
 <xenvm/xenvm.{native,byte}>: pkg_threads
 <xenvm/xenvm.{native,byte}>: use_xenvmidl
+<xenvm/*.ml{,i,y}>: pkg_bisect
 <xenvm/*.ml{,i,y}>: pkg_cmdliner
 <xenvm/*.ml{,i,y}>: pkg_cohttp.lwt
 <xenvm/*.ml{,i,y}>: pkg_devmapper
@@ -102,6 +107,7 @@ true: annot, bin_annot
 <*.ml{,i,y}>: oasis_executable_local_allocator_byte
 <local_allocator.{native,byte}>: oasis_executable_local_allocator_native
 <*.ml{,i,y}>: oasis_executable_local_allocator_native
+<local_allocator.{native,byte}>: pkg_bisect
 <local_allocator.{native,byte}>: pkg_cmdliner
 <local_allocator.{native,byte}>: pkg_cohttp.lwt
 <local_allocator.{native,byte}>: pkg_cstruct
@@ -120,6 +126,7 @@ true: annot, bin_annot
 <local_allocator.{native,byte}>: pkg_shared-block-ring
 <local_allocator.{native,byte}>: pkg_threads
 <local_allocator.{native,byte}>: use_xenvmidl
+<*.ml{,i,y}>: pkg_bisect
 <*.ml{,i,y}>: pkg_cmdliner
 <*.ml{,i,y}>: pkg_cohttp.lwt
 <*.ml{,i,y}>: pkg_cstruct
