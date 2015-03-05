@@ -10,3 +10,4 @@ masterJournal
 localJournal
 toLVM
 fromLVM
+*.out
