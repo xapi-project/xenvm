@@ -263,7 +263,7 @@ let stat x =
     error "The device mapper device %s has disappeared." x;
     return `Retry
 
-let main config socket journal fromLVM toLVM =
+let main config daemon socket journal fromLVM toLVM =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
     Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
@@ -272,6 +272,7 @@ let main config socket journal fromLVM toLVM =
     fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
   } in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+  if daemon then Lwt_daemon.daemonize ();
 
   let t =
     Device.read_sector_size config.Config.devices
@@ -439,6 +440,10 @@ let config =
   let doc = "Path to the config file" in
   Arg.(value & opt file "localConfig" & info [ "config" ] ~docv:"CONFIG" ~doc)
 
+let daemon =
+  let doc = "Detach from the terminal and run as a daemon" in
+  Arg.(value & flag & info ["daemon"] ~docv:"DAEMON" ~doc)
+
 let socket =
   let doc = "Path of Unix domain socket to listen on" in
   Arg.(value & opt (some string) None & info [ "socket" ] ~docv:"SOCKET" ~doc)
@@ -456,7 +461,7 @@ let fromLVM =
   Arg.(value & opt (some file) None & info [ "fromLVM" ] ~docv:"FROMLVM" ~doc)
 
 let () =
-  let t = Term.(pure main $ config $ socket $ journal $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0
