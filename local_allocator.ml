@@ -9,7 +9,6 @@ module Config = struct
     allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
     localJournal: string; (* path to the host local journal *)
     devices: string list; (* devices containing the PVs *)
-    freePool: string; (* path where we will store free block information *)
     toLVM: string; (* pending updates for LVM *)
     fromLVM: string; (* received updates from LVM *)
   } with sexp
@@ -264,12 +263,11 @@ let stat x =
     error "The device mapper device %s has disappeared." x;
     return `Retry
 
-let main config socket journal freePool fromLVM toLVM =
+let main config socket journal fromLVM toLVM =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
     Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
     localJournal = (match journal with None -> config.Config.localJournal | Some x -> x);
-    freePool = (match freePool with None -> config.Config.freePool | Some x -> x);
     toLVM = (match toLVM with None -> config.Config.toLVM | Some x -> x);
     fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
   } in
@@ -449,10 +447,6 @@ let journal =
   let doc = "Path of the host local journal" in
   Arg.(value & opt (some file) None & info [ "journal" ] ~docv:"JOURNAL" ~doc)
 
-let freePool =
-  let doc = "Name of the device mapper device containing the free blocks" in
-  Arg.(value & opt (some string) None & info [ "freePool" ] ~docv:"FREEPOOL" ~doc)
-
 let toLVM =
   let doc = "Path to the device or file to contain the pending LVM metadata updates" in
   Arg.(value & opt (some file) None & info [ "toLVM" ] ~docv:"TOLVM" ~doc)
@@ -462,7 +456,7 @@ let fromLVM =
   Arg.(value & opt (some file) None & info [ "fromLVM" ] ~docv:"FROMLVM" ~doc)
 
 let () =
-  let t = Term.(pure main $ config $ socket $ journal $ freePool $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ config $ socket $ journal $ fromLVM $ toLVM) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0

@@ -3,7 +3,6 @@
  (port 8081)
  (allocation_quantum 16)
  (localJournal localJournal)
- (freePool host1-free)
  (devices (/dev/loop0))
  (toLVM host1-toLVM)
  (fromLVM host1-fromLVM)
