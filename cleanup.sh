@@ -8,4 +8,4 @@ done
 dmsetup remove_all
 dd if=/dev/zero of=/dev/loop0 bs=1M count=128
 losetup -d /dev/loop0
-rm -f localJournal
+rm -f localJournal bigdisk *.out

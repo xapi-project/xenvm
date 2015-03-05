@@ -16,13 +16,5 @@ export BISECT_FILE=xenvm.coverage
 ./xenvm.native host-create host1
 ./xenvm.native host-connect host1
 
-LVS="host1-free host1-toLVM host1-fromLVM"
-for i in ${LVS}; do
-  echo Activating $i
-  ./xenvm.native activate --lv $i `pwd`/djstest-$i /dev/loop0
-done
-
-./xenvm.native shutdown
-
 echo Run 'sudo ./local_allocator.native' and type 'djstest-live' to request an allocation
 echo Run './cleanup.sh' to remove all volumes and devices

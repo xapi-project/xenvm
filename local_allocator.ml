@@ -407,15 +407,13 @@ let main config daemon socket journal fromLVM toLVM =
       Lwt_unix.accept s
       >>= fun (fd, _) ->
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
-      let rec per_connection () =
-        Lwt_io.read_line ic
-        >>= function
-        | "" -> Lwt_io.close ic
-        | device ->
-          handler device
-          >>= fun () ->
-          per_connection () in
-      let (_: unit Lwt.t) = per_connection () in
+      (* read one line *)
+      Lwt_io.read_line ic
+      >>= fun device ->
+      handler device
+      >>= fun () ->
+      Lwt_io.close ic
+      >>= fun () ->
       tcp () in
     let listen_tcp = tcp () in
     
