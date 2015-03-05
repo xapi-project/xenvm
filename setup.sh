@@ -9,7 +9,6 @@ losetup /dev/loop0 bigdisk
 ./xenvm.native create --lv live
 ./xenvm.native activate --lv live `pwd`/djstest-live /dev/loop0
 
-dd if=/dev/zero of=localJournal bs=1M count=4
 ./xenvm.native benchmark
 
 ./xenvm.native host-create host1

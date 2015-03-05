@@ -15,6 +15,8 @@ module Config = struct
   } with sexp
 end
 
+let journal_size = Int64.(mul 4L (mul 1024L 1024L))
+
 let rec try_forever msg f =
   f ()
   >>= function
@@ -341,6 +343,13 @@ let main config socket journal freePool fromLVM toLVM =
       ) ops in
 
     let module J = Shared_block.Journal.Make(Log)(Block)(Op) in
+    ( if not (Sys.file_exists config.Config.localJournal) then begin
+        info "Creating an empty journal: %s" config.Config.localJournal;
+        Lwt_unix.openfile config.Config.localJournal [ Lwt_unix.O_CREAT; Lwt_unix.O_WRONLY ] 0o0666 >>= fun fd ->
+        Lwt_unix.LargeFile.lseek fd Int64.(sub journal_size 1L) Lwt_unix.SEEK_CUR >>= fun _ ->
+        Lwt_unix.write_string fd "\000" 0 1 >>= fun _ ->
+        Lwt_unix.close fd
+      end else return () ) >>= fun () ->
     ( Block.connect config.Config.localJournal
       >>= function
       | `Ok x -> return x
