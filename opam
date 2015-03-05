@@ -15,6 +15,7 @@ depends: [
   "lwt"
   "ocamlfind"
   "shared-block-ring"
+  "mirage-block-volume"
   "camldm"
   "cmdliner"
   "bisect"
