@@ -56,15 +56,8 @@ let fatal_error msg m = m >>= function
 
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
-  let create ~disk () = R.Producer.create ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error creating FromLVM queue: %s" x)
-  | `Ok x -> return x
-  let rec attach ~disk () = R.Consumer.attach ~disk () >>= function
-  | `Error _ ->
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    attach ~disk ()
-  | `Ok x -> return x
+  let rec attach ~disk () =
+    fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~disk ()) 
   let rec suspend t =
     R.Consumer.suspend t
     >>= function
@@ -102,21 +95,15 @@ module FromLVM = struct
     | `Ok (position, rev_items) ->
       let items = List.rev rev_items in
       return (position, items)
-  let advance t position = R.Consumer.advance ~t ~position () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the FromLVM consumer pointer: %s" x)
-  | `Ok x -> return x
+  let advance t position =
+    fatal_error "advancing the FromLVM consumer pointer" (R.Consumer.advance ~t ~position ())
 end
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
-  let create ~disk () = R.Producer.create ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error creating ToLVM queue: %s" x)
-  | `Ok x -> return x
-  let attach ~disk () = R.Producer.attach ~disk () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error attaching to the ToLVM producer queue: %s" x)
-  | `Ok x -> return x
-  let state t = R.Producer.state t >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error querying ToLVM state: %s" x)
-  | `Ok x -> return x
+  let attach ~disk () =
+    fatal_error "attaching to ToLVM queue" (R.Producer.attach ~disk ())
+  let state t =
+    fatal_error "querying ToLVM state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `TooBig -> fatal_error_t "Item is too large to be pushed to the ToLVM queue"
   | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the ToLVM queue: %s" x)
@@ -125,9 +112,8 @@ module ToLVM = struct
     >>= fun () ->
     push t item
   | `Ok x -> return x
-  let advance t position = R.Producer.advance ~t ~position () >>= function
-  | `Error x -> fatal_error_t (Printf.sprintf "Error advancing the ToLVM producer pointer: %s" x)
-  | `Ok x -> return x
+  let advance t position =
+    fatal_error "advancing ToLVM pointer" (R.Producer.advance ~t ~position ())
 end
 
 module FreePool = struct
