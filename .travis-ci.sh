@@ -1,6 +1,6 @@
 ## declare required packages
 
-OPAM_PACKAGES="cstruct lwt ocamlfind shared-block-ring devmapper cmdliner bisect"
+OPAM_PACKAGES="cstruct lwt ocamlfind shared-block-ring camldm cmdliner bisect"
 
 ## different PPAs required to cover the test matrix
 
@@ -22,7 +22,7 @@ echo "yes" | sudo add-apt-repository ppa:$ppa
 sudo apt-get update -qq
 sudo apt-get install -qq ocaml ocaml-native-compilers camlp4-extra opam
 export OPAMYES=1
-export OPAMVERBOSE=1
+export OPAMVERBOSE=0
 echo OCaml version
 ocaml -version
 echo OPAM versions

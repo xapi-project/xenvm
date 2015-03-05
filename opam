@@ -15,7 +15,7 @@ depends: [
   "lwt"
   "ocamlfind"
   "shared-block-ring"
-  "devmapper"
+  "camldm"
   "cmdliner"
   "bisect"
 ]
