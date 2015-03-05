@@ -32,6 +32,7 @@ opam --git-version
 opam init
 eval `opam config env`
 opam remote add lvhd git://github.com/xapi-project/thin-lvhd-opam-repo
+sudo apt-get install -qq `opam install ${OPAM_PACKAGES} -e ubuntu`
 opam install ${OPAM_PACKAGES}
 
 ## execute the build
