@@ -108,7 +108,7 @@ let format config name filenames =
 let create config name size =
   Lwt_main.run
     (let size_in_bytes = Int64.mul 1048576L size in
-     Client.create name size_in_bytes)
+     Client.create ~name ~size:size_in_bytes ~tags:[])
 
 let activate config lvname path pv =
   Lwt_main.run
@@ -166,7 +166,7 @@ let benchmark config =
       f n
       >>= fun () ->
       fori f (n - 1) in
-    fori (fun i -> Client.create (Printf.sprintf "test-lv-%d" i) mib) n
+    fori (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) n
     >>= fun () ->
     let time = Unix.gettimeofday () -. start in
     Printf.printf "%d creates in %.1f s\n" n time;

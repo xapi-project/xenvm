@@ -469,9 +469,10 @@ module Impl = struct
   let get context () =
     fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
   
-  let create context ~name ~size = 
+  let create context ~name ~size ~tags =
+    let tags = List.map Lvm.Tag.of_string tags in
     VolumeManager.write (fun vg ->
-      Lvm.Vg.create vg name size
+      Lvm.Vg.create vg name ~tags size
     )
 
   let rename context ~oldname ~newname = 

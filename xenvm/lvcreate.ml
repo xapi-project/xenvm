@@ -49,7 +49,7 @@ let lvcreate uri lv_name real_size percent_size tags vg_name =
     set_uri uri;
     Client.get () >>= fun vg ->
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
-    Client.create lv_name size)
+    Client.create lv_name size tags)
 
 let lv_name_arg =
   let doc = "Gives the name of the LV to be created. This must be unique within the volume group. " in
