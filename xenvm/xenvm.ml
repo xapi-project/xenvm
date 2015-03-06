@@ -346,7 +346,7 @@ let cmds = [
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
-  Lvmcompat.lvcreate_cmd
+  Lvcreate.lvcreate_cmd
 ]
 
 let () = match Term.eval_choice default_cmd cmds with
