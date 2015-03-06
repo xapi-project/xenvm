@@ -70,6 +70,7 @@ let table_of_vg vg =
 ]
 
 let lvs config =
+  set_uri config;
   Lwt_main.run 
     (Client.get () >>= fun vg ->
      print_table [ "key"; "value" ] (table_of_vg vg);
@@ -106,11 +107,13 @@ let format config name filenames =
   Lwt_main.run t
 
 let create config name size =
+  set_uri config;
   Lwt_main.run
     (let size_in_bytes = Int64.mul 1048576L size in
      Client.create ~name ~size:size_in_bytes ~tags:[])
 
 let activate config lvname path pv =
+  set_uri config;
   Lwt_main.run
     (Client.get_lv ~name:lvname
      >>= fun (vg, lv) ->
@@ -125,15 +128,20 @@ let activate config lvname path pv =
      return ())
 
 let host_create config host =
+  set_uri config;
   Lwt_main.run (Client.Host.create host)
 let host_connect config host =
+  set_uri config;
   Lwt_main.run (Client.Host.connect host)
 let host_disconnect config host =
+  set_uri config;
   Lwt_main.run (Client.Host.disconnect host)
 let host_destroy config host =
+  set_uri config;
   Lwt_main.run (Client.Host.destroy host)
 
 let host_list config =
+  set_uri config;
   let t =
     Client.Host.all () >>= fun hosts ->
     let open Xenvm_interface in
@@ -152,10 +160,12 @@ let host_list config =
   Lwt_main.run t
 
 let shutdown config =
+  set_uri config;
   Lwt_main.run
     (Client.shutdown ())
 
 let benchmark config =
+  set_uri config;
   let t =
     let mib = Int64.mul 1048576L 4L in
     let n = 1000 in
@@ -174,9 +184,8 @@ let benchmark config =
   Lwt_main.run t
 
 let help config =
-  Printf.printf "help - %s %s %d\n" config.config (match config.host with Some s -> s | None -> "<unset>") (match config.port with Some d -> d | None -> -1)
+  Printf.printf "help - %s %s\n" config.config (match config.uri with | Some u -> u | None -> "URI unset")
 
-  
 
 open Cmdliner
 let info =
@@ -188,19 +197,15 @@ let info =
   ] in
   Term.info "xenvm" ~version:"0.1-alpha" ~doc ~man
 
-let copts config host port = let copts = {Xenvm_common.host; port; config} in set_uri_from_copts copts
+let copts config uri = {Xenvm_common.uri; config}
 
 let config =
-  let doc = "Path to the config file" in
-  Arg.(value & opt file "xenvm.conf" & info [ "config" ] ~docv:"CONFIG" ~doc)
+  let doc = "Path to the config directory" in
+  Arg.(value & opt dir "/etc/xenvm.d" & info [ "configdir" ] ~docv:"CONFIGDIR" ~doc)
 
-let port =
-  let doc = "TCP port of xenvmd server" in
-  Arg.(value & opt (some int) (Some 4000) & info [ "port" ] ~docv:"PORT" ~doc)
-
-let host = 
-  let doc = "Hostname of xenvmd server" in
-  Arg.(value & opt (some string) (Some "127.0.0.1") & info [ "host" ] ~docv:"HOST" ~doc)
+let uri_arg =
+  let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
+  Arg.(value & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
 
 let hostname =
   let doc = "Unique name of client host" in
@@ -230,7 +235,7 @@ let size =
 let copts_sect = "COMMON OPTIONS"
 
 let copts_t =
-  Term.(pure copts $ config $ host $ port)
+  Term.(pure copts $ config $ uri_arg)
 
 let lvs_cmd =
   let doc = "List the logical volumes in the VG" in
