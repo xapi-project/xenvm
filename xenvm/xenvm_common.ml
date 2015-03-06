@@ -1,5 +1,6 @@
 open Sexplib.Std
-    
+open Cmdliner
+  
 module Client = Xenvm_client.Client
 
 type copts_t = {
@@ -7,15 +8,30 @@ type copts_t = {
   config : string; 
 }
 
-type vg_info_t = {
-  uri : string;
-  local_device : string;
-} with sexp
+let copts config uri_override = {uri_override; config}
+
+let config =
+  let doc = "Path to the config directory" in
+  Arg.(value & opt dir "/etc/xenvm.d" & info [ "configdir" ] ~docv:"CONFIGDIR" ~doc)
+
+let uri_arg =
+  let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
+  Arg.(value & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
+
+let copts_t =
+  Term.(pure copts $ config $ uri_arg)
 
 let set_uri copts =
   match copts.uri_override with
   | Some uri -> Xenvm_client.Rpc.uri := uri
   | None -> Xenvm_client.Rpc.uri := "http://localhost:4000/"
+
+
+
+type vg_info_t = {
+  uri : string;
+  local_device : string;
+} with sexp
 
 let set_vg_info_t copts uri local_device vg_name =
   let info = {uri; local_device} in

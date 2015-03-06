@@ -197,16 +197,6 @@ let info =
   ] in
   Term.info "xenvm" ~version:"0.1-alpha" ~doc ~man
 
-let copts config uri = {Xenvm_common.uri_override=uri; config}
-
-let config =
-  let doc = "Path to the config directory" in
-  Arg.(value & opt dir "/etc/xenvm.d" & info [ "configdir" ] ~docv:"CONFIGDIR" ~doc)
-
-let uri_arg =
-  let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
-  Arg.(value & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
-
 let hostname =
   let doc = "Unique name of client host" in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"HOSTNAME" ~doc)
@@ -233,9 +223,6 @@ let size =
 
 
 let copts_sect = "COMMON OPTIONS"
-
-let copts_t =
-  Term.(pure copts $ config $ uri_arg)
 
 let lvs_cmd =
   let doc = "List the logical volumes in the VG" in
