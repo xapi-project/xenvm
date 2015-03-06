@@ -8,7 +8,7 @@ type copts_t = {
   config : string; 
 }
 
-let copts config uri_override = {uri_override; config}
+let make_copts config uri_override = {uri_override; config}
 
 let config =
   let doc = "Path to the config directory" in
@@ -19,12 +19,8 @@ let uri_arg =
   Arg.(value & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
 
 let copts_t =
-  Term.(pure copts $ config $ uri_arg)
+  Term.(pure make_copts $ config $ uri_arg)
 
-let set_uri copts =
-  match copts.uri_override with
-  | Some uri -> Xenvm_client.Rpc.uri := uri
-  | None -> Xenvm_client.Rpc.uri := "http://localhost:4000/"
 
 
 
@@ -50,3 +46,20 @@ let get_vg_info_t copts vg_name =
     lift vg_info_t_of_sexp >>=
     lift (fun s -> Some s))
     (fun e -> Lwt.return None)
+
+
+
+
+let set_uri copts vg_info_opt =
+  let uri = 
+    match copts.uri_override with
+    | Some uri -> uri
+    | None ->
+      match vg_info_opt with
+      | Some info -> info.uri
+      | None -> "http://localhost:4000/"
+  in
+  Xenvm_client.Rpc.uri := uri
+
+
+

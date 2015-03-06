@@ -70,7 +70,7 @@ let table_of_vg vg =
 ]
 
 let lvs config =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run 
     (Client.get () >>= fun vg ->
      print_table [ "key"; "value" ] (table_of_vg vg);
@@ -107,13 +107,13 @@ let format config name filenames =
   Lwt_main.run t
 
 let create config name size =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run
     (let size_in_bytes = Int64.mul 1048576L size in
      Client.create ~name ~size:size_in_bytes ~tags:[])
 
 let activate config lvname path pv =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run
     (Client.get_lv ~name:lvname
      >>= fun (vg, lv) ->
@@ -128,20 +128,20 @@ let activate config lvname path pv =
      return ())
 
 let host_create config host =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run (Client.Host.create host)
 let host_connect config host =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run (Client.Host.connect host)
 let host_disconnect config host =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run (Client.Host.disconnect host)
 let host_destroy config host =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run (Client.Host.destroy host)
 
 let host_list config =
-  set_uri config;
+  set_uri config None;
   let t =
     Client.Host.all () >>= fun hosts ->
     let open Xenvm_interface in
@@ -160,12 +160,12 @@ let host_list config =
   Lwt_main.run t
 
 let shutdown config =
-  set_uri config;
+  set_uri config None;
   Lwt_main.run
     (Client.shutdown ())
 
 let benchmark config =
-  set_uri config;
+  set_uri config None;
   let t =
     let mib = Int64.mul 1048576L 4L in
     let n = 1000 in
