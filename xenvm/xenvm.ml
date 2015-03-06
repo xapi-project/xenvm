@@ -184,7 +184,7 @@ let benchmark config =
   Lwt_main.run t
 
 let help config =
-  Printf.printf "help - %s %s\n" config.config (match config.uri with | Some u -> u | None -> "URI unset")
+  Printf.printf "help - %s %s\n" config.config (match config.uri_override with | Some u -> u | None -> "URI unset")
 
 
 open Cmdliner
@@ -197,7 +197,7 @@ let info =
   ] in
   Term.info "xenvm" ~version:"0.1-alpha" ~doc ~man
 
-let copts config uri = {Xenvm_common.uri; config}
+let copts config uri = {Xenvm_common.uri_override=uri; config}
 
 let config =
   let doc = "Path to the config directory" in
