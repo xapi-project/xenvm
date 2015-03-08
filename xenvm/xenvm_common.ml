@@ -57,7 +57,7 @@ let set_uri copts vg_info_opt =
     | None ->
       match vg_info_opt with
       | Some info -> info.uri
-      | None -> "http://localhost:4000/"
+      | None -> "http://127.0.0.1:4000/"
   in
   Xenvm_client.Rpc.uri := uri
 
