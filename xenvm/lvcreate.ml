@@ -3,11 +3,6 @@
 open Cmdliner
 open Lwt
 
-let uri_arg =
-  let doc = "Gives the URI of the XenVM daemon in charge of the volume group." in
-  Arg.(value & opt string "http://localhost:4000/" & info ["u"; "uri"] ~docv:"URI" ~doc)
-
-
 
 (* lvcreate -n <name> vgname -l <size_in_percent> -L <size_in_mb> --addtag tag *)
 let kib = 1024L
@@ -38,7 +33,7 @@ let parse_size_string =
 
 let parse_percent_size_string s = failwith "Unimplemented"
 	
-let lvcreate uri lv_name real_size percent_size tags vg_name =
+let lvcreate copts lv_name real_size percent_size tags vg_name =
   let size = match real_size, percent_size with
     | Some x, None -> parse_size_string x
     | None, Some y -> parse_percent_size_string y
@@ -46,10 +41,11 @@ let lvcreate uri lv_name real_size percent_size tags vg_name =
     | None, None -> failwith "Need a size!" in
   let open Xenvm_common in
   Lwt_main.run (
-    set_uri uri;
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
     Client.get () >>= fun vg ->
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
-    Client.create lv_name size)
+    Client.create lv_name size tags)
 
 let lv_name_arg =
   let doc = "Gives the name of the LV to be created. This must be unique within the volume group. " in
@@ -77,7 +73,7 @@ let lvcreate_cmd =
     `S "DESCRIPTION";
     `P "lvcreate creates a new logical volume in a volume group by allocating logical extents from the free physical extent pool of that volume group.  If there are not enough free physical extents then the volume group can be extended with other physical volumes or by reducing existing logical volumes of this volume group in size."
   ] in
-  Term.(pure lvcreate $ uri_arg $ lv_name_arg $ real_size_arg $ percent_size_arg $ tags_arg $ vg_name_arg),
+  Term.(pure lvcreate $ Xenvm_common.copts_t $ lv_name_arg $ real_size_arg $ percent_size_arg $ tags_arg $ vg_name_arg),
   Term.info "lvcreate" ~sdocs:"COMMON OPTIONS" ~doc ~man
 
   

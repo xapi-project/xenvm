@@ -70,6 +70,7 @@ let table_of_vg vg =
 ]
 
 let lvs config =
+  set_uri config None;
   Lwt_main.run 
     (Client.get () >>= fun vg ->
      print_table [ "key"; "value" ] (table_of_vg vg);
@@ -106,11 +107,13 @@ let format config name filenames =
   Lwt_main.run t
 
 let create config name size =
+  set_uri config None;
   Lwt_main.run
     (let size_in_bytes = Int64.mul 1048576L size in
-     Client.create name size_in_bytes)
+     Client.create ~name ~size:size_in_bytes ~tags:[])
 
 let activate config lvname path pv =
+  set_uri config None;
   Lwt_main.run
     (Client.get_lv ~name:lvname
      >>= fun (vg, lv) ->
@@ -125,15 +128,20 @@ let activate config lvname path pv =
      return ())
 
 let host_create config host =
+  set_uri config None;
   Lwt_main.run (Client.Host.create host)
 let host_connect config host =
+  set_uri config None;
   Lwt_main.run (Client.Host.connect host)
 let host_disconnect config host =
+  set_uri config None;
   Lwt_main.run (Client.Host.disconnect host)
 let host_destroy config host =
+  set_uri config None;
   Lwt_main.run (Client.Host.destroy host)
 
 let host_list config =
+  set_uri config None;
   let t =
     Client.Host.all () >>= fun hosts ->
     let open Xenvm_interface in
@@ -152,10 +160,12 @@ let host_list config =
   Lwt_main.run t
 
 let shutdown config =
+  set_uri config None;
   Lwt_main.run
     (Client.shutdown ())
 
 let benchmark config =
+  set_uri config None;
   let t =
     let mib = Int64.mul 1048576L 4L in
     let n = 1000 in
@@ -166,7 +176,7 @@ let benchmark config =
       f n
       >>= fun () ->
       fori f (n - 1) in
-    fori (fun i -> Client.create (Printf.sprintf "test-lv-%d" i) mib) n
+    fori (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) n
     >>= fun () ->
     let time = Unix.gettimeofday () -. start in
     Printf.printf "%d creates in %.1f s\n" n time;
@@ -174,9 +184,8 @@ let benchmark config =
   Lwt_main.run t
 
 let help config =
-  Printf.printf "help - %s %s %d\n" config.config (match config.host with Some s -> s | None -> "<unset>") (match config.port with Some d -> d | None -> -1)
+  Printf.printf "help - %s %s\n" config.config (match config.uri_override with | Some u -> u | None -> "URI unset")
 
-  
 
 open Cmdliner
 let info =
@@ -187,20 +196,6 @@ let info =
     `P "TODO";
   ] in
   Term.info "xenvm" ~version:"0.1-alpha" ~doc ~man
-
-let copts config host port = let copts = {Xenvm_common.host; port; config} in set_uri_from_copts copts
-
-let config =
-  let doc = "Path to the config file" in
-  Arg.(value & opt file "xenvm.conf" & info [ "config" ] ~docv:"CONFIG" ~doc)
-
-let port =
-  let doc = "TCP port of xenvmd server" in
-  Arg.(value & opt (some int) (Some 4000) & info [ "port" ] ~docv:"PORT" ~doc)
-
-let host = 
-  let doc = "Hostname of xenvmd server" in
-  Arg.(value & opt (some string) (Some "127.0.0.1") & info [ "host" ] ~docv:"HOST" ~doc)
 
 let hostname =
   let doc = "Unique name of client host" in
@@ -228,9 +223,6 @@ let size =
 
 
 let copts_sect = "COMMON OPTIONS"
-
-let copts_t =
-  Term.(pure copts $ config $ host $ port)
 
 let lvs_cmd =
   let doc = "List the logical volumes in the VG" in
@@ -346,7 +338,8 @@ let cmds = [
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
-  Lvmcompat.lvcreate_cmd
+  Lvcreate.lvcreate_cmd;
+  Lvchange.lvchange_cmd
 ]
 
 let () = match Term.eval_choice default_cmd cmds with

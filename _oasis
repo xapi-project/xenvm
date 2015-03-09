@@ -34,7 +34,7 @@ Executable "xenvm"
   MainIs:             xenvm.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix
+  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, sexplib.syntax
 
 Executable "local_allocator"
   ByteOpt:            -warn-error +a
