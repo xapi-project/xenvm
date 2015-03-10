@@ -63,3 +63,23 @@ let set_uri copts vg_info_opt =
 
 
 
+let padto blank n s =
+  let result = String.make n blank in
+  String.blit s 0 result 0 (min n (String.length s));
+  result
+
+let print_table header rows =
+  let nth xs i = try List.nth xs i with Not_found -> "" in
+  let width_of_column i =
+    let values = nth header i :: (List.map (fun r -> nth r i) rows) in
+    let widths = List.map String.length values in
+    List.fold_left max 0 widths in
+  let widths = List.rev (snd(List.fold_left (fun (i, acc) _ -> (i + 1, (width_of_column i) :: acc)) (0, []) header)) in
+  let print_row row =
+    List.iter (fun (n, s) -> Printf.printf "%s " (padto ' ' n s)) (List.combine widths row);
+    Printf.printf "\n" in
+  print_row header;
+  List.iter print_row rows
+
+
+
