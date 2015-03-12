@@ -47,6 +47,20 @@ let attr_of_lv vg lv =
     ('-')
     ('-')
 
+let attr_of_vg vg =
+  let open Lvm.Vg in
+  Printf.sprintf "%c%c%c%c%c%c"
+    (if List.mem Status.Write vg.status
+     then 'w'
+     else if List.mem Status.Read vg.status
+     then 'r'
+     else '-') (* Permissions: (w)riteable, (r)ead-only *)
+    ('z') (* Resi(z)eable *)
+    ('-') (* E(x)ported *)
+    ('-') (* (p)artial: one or more physical volumes belonging to the volume group are missing from the system *)
+    ('n') (* Allocation policy - (c)ontiguous, c(l)ing, (n)ormal, (a)nywhere *)
+    ('-') (* clustered *)
+
 let all_fields = [
   {key="lv_name"; name="LV"; fn=Lv_fun (fun lv -> Literal lv.Lvm.Lv.name) };
   {key="vg_name"; name="VG"; fn=Vg_fun (fun vg -> Literal vg.Lvm.Vg.name) };
@@ -61,6 +75,13 @@ let all_fields = [
   {key="copy_percent"; name="Cpy%Sync"; fn=Lv_fun (fun _ -> Literal "")};
   {key="convert_lv"; name="Convert"; fn=Lv_fun (fun _ -> Literal "")};
   {key="lv_tags"; name="LV Tags"; fn=Lv_fun (fun lv -> Literal (String.concat "," (List.map Lvm.Tag.to_string lv.Lvm.Lv.tags)))};
+  
+  {key="pv_count"; name="#PV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.pvs)))};
+  {key="lv_count"; name="#LV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.lvs)))};
+  {key="snap_count"; name="#SN"; fn=Vg_fun (fun _ -> Literal "0")};
+  {key="vg_attr"; name="Attr"; fn=Vg_fun (fun vg -> Literal (attr_of_vg vg))};
+  {key="vg_size"; name="VSize"; fn=Vg_fun (fun vg -> Size (List.fold_left (fun acc pv -> Int64.add acc pv.Lvm.Pv.pe_count) 0L vg.Lvm.Vg.pvs))};
+  {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space))};
 ]
 
 let row_of (vg,lv_opt) units output =
