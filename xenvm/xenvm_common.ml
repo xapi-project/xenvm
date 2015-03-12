@@ -13,7 +13,12 @@ type fieldty =
 let convert_size vg units size =
   Printf.sprintf "%LdB" (Int64.mul (Int64.mul 512L vg.Lvm.Vg.extent_size) size)
 
-type field = { key: string; name: string; fn:Lvm.Vg.metadata * Lvm.Lv.t -> fieldty }
+type fieldfn =
+  | Lv_fun of (Lvm.Lv.t -> fieldty)
+  | Vg_fun of (Lvm.Vg.metadata -> fieldty)
+  | VgLv_fun of (Lvm.Vg.metadata * Lvm.Lv.t -> fieldty)
+
+type field = { key: string; name: string; fn:fieldfn }
 
 let attr_of_lv vg lv =
   let name = Mapper.name_of vg lv in
@@ -43,24 +48,30 @@ let attr_of_lv vg lv =
     ('-')
 
 let all_fields = [
-  {key="lv_name"; name="LV"; fn=(fun (_,lv) -> Literal lv.Lvm.Lv.name) };
-  {key="vg_name"; name="VG"; fn=(fun (vg,_) -> Literal vg.Lvm.Vg.name) };
-  {key="lv_attr"; name="Attr"; fn=(fun (vg,lv) -> Literal (attr_of_lv vg lv)) };
-  {key="lv_size"; name="LSize"; fn=(fun (_,lv) -> Size (Lvm.Lv.size_in_extents lv)) };
-  {key="pool_lv"; name="Pool"; fn=(fun _ -> Literal "")};
-  {key="data_percent"; name="Data%"; fn=(fun _ -> Literal "")};
-  {key="metadata_percent"; name="Meta%"; fn=(fun _ -> Literal "")};
-  {key="move_pv"; name="Move"; fn=(fun _ -> Literal "")};
-  {key="mirror_log"; name="Log"; fn=(fun _ -> Literal "")};
-  {key="copy_percent"; name="Cpy%Sync"; fn=(fun _ -> Literal "")};
-  {key="convert_lv"; name="Convert"; fn=(fun _ -> Literal "")};
-  {key="lv_tags"; name="LV Tags"; fn=(fun (_,lv) -> Literal (String.concat "," (List.map Lvm.Tag.to_string lv.Lvm.Lv.tags)))};
+  {key="lv_name"; name="LV"; fn=Lv_fun (fun lv -> Literal lv.Lvm.Lv.name) };
+  {key="vg_name"; name="VG"; fn=Vg_fun (fun vg -> Literal vg.Lvm.Vg.name) };
+  {key="lv_attr"; name="Attr"; fn=VgLv_fun (fun (vg,lv) -> Literal (attr_of_lv vg lv)) };
+  {key="lv_size"; name="LSize"; fn=Lv_fun (fun lv -> Size (Lvm.Lv.size_in_extents lv)) };
+  {key="pool_lv"; name="Pool"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="origin"; name="Origin"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="data_percent"; name="Data%"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="metadata_percent"; name="Meta%"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="move_pv"; name="Move"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="mirror_log"; name="Log"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="copy_percent"; name="Cpy%Sync"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="convert_lv"; name="Convert"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="lv_tags"; name="LV Tags"; fn=Lv_fun (fun lv -> Literal (String.concat "," (List.map Lvm.Tag.to_string lv.Lvm.Lv.tags)))};
 ]
 
-let row_of (vg,lv) units output =
+let row_of (vg,lv_opt) units output =
   List.fold_left (fun acc name ->
     match (try Some (List.find (fun f -> f.key=name) all_fields) with _ -> None) with
-    | Some field -> (field.fn (vg,lv))::acc
+    | Some field -> (
+	match field.fn,lv_opt with
+        | (Vg_fun f),_ -> (f vg)::acc
+        | (VgLv_fun f),Some lv -> (f (vg,lv))::acc
+        | (Lv_fun f), Some lv -> (f lv)::acc
+        | _,_ -> acc)
     | None -> acc) [] output |>
     List.map (function
     | Literal x -> x
