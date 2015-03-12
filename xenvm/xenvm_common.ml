@@ -1,7 +1,15 @@
 open Sexplib.Std
 open Cmdliner
+open Lwt
   
+let (>>|=) m f = m >>= function
+  | `Error e -> fail (Failure e)
+  | `Ok x -> f x
+
+
 module Client = Xenvm_client.Client
+
+let copts_sect = "COMMON OPTIONS"
 
 type copts_t = {
   uri_override : string option; (* CLI set URI override *)
@@ -18,9 +26,32 @@ let uri_arg =
   let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
   Arg.(value & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
 
+let uri_arg_required =
+  let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
+  Arg.(required & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
+
+let physical_device_arg =
+    let doc = "Path to the (single) physical PV" in
+    Arg.(value & opt (some string) None & info ["pvpath"] ~docv:"PV" ~doc)
+
+let physical_device_arg_required =
+    let doc = "Path to the (single) physical PV" in
+    Arg.(required & opt (some string) None & info ["pvpath"] ~docv:"PV" ~doc)
+
+let parse_vg_name name_arg =
+  let comps = Stringext.split name_arg '/' in
+  match comps with
+  | ["";"dev";vg] -> vg
+  | [vg] -> vg
+  | _ -> failwith "failed to parse vg name"
+
+let name_arg =
+  let doc = "Path to the volume group. Usually of the form /dev/VGNAME" in
+  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"VOLUMEGROUP" ~doc) in
+  Term.(pure parse_vg_name $ n)
+
 let copts_t =
   Term.(pure make_copts $ config $ uri_arg)
-
 
 
 
@@ -33,9 +64,21 @@ let set_vg_info_t copts uri local_device vg_name =
   let info = {uri; local_device} in
   let filename = Filename.concat copts.config vg_name in
   let s = sexp_of_vg_info_t info |> Sexplib.Sexp.to_string in
-  Lwt_io.with_file ~mode:Lwt_io.Output filename (fun f ->
-    Lwt_io.fprintf f "%s" s)
+  Lwt.catch (fun () -> Lwt_io.with_file ~mode:Lwt_io.Output filename (fun f ->
+      Lwt_io.fprintf f "%s" s))
+    (function
+    | Unix.Unix_error(Unix.ENOENT, _, s) ->
+      Printf.fprintf stderr "Unable to open file: Does the config dir '%s' exist?\n" copts.config;
+      exit 1
+    | Unix.Unix_error(Unix.EACCES, _, _) ->
+      Printf.fprintf stderr "Permission denied. You may need to rerun with 'sudo'\n";
+      exit 1
+    |e -> Lwt.fail e)
 
+let run_set_vg_info_t config uri local_device vg_name =
+  let copts = make_copts config (Some uri) in
+  Lwt_main.run (set_vg_info_t copts uri local_device vg_name)
+  
 let get_vg_info_t copts vg_name =
   let open Lwt in
   let lift f = fun x -> Lwt.return (f x) in
@@ -46,6 +89,17 @@ let get_vg_info_t copts vg_name =
     lift vg_info_t_of_sexp >>=
     lift (fun s -> Some s))
     (fun e -> Lwt.return None)
+
+
+let set_vg_info_cmd =
+  let doc = "Set the host-wide VG info" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "This command takes a physical device path and a URI, and will write these to the
+filesystem. Subsequent xenvm commands will use these as defaults.";
+  ] in
+  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ physical_device_arg_required $ name_arg),
+  Term.info "set-vg-info" ~sdocs:copts_sect ~doc ~man
 
 
 

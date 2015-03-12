@@ -3,10 +3,6 @@ open Lwt
 open Lvm
 open Xenvm_common
 
-let (>>|=) m f = m >>= function
-  | `Error e -> fail (Failure e)
-  | `Ok x -> f x
-
 let add_prefix x xs = List.map (function
   | [] -> []
   | y :: ys -> (x ^ "/" ^ y) :: ys
@@ -202,8 +198,6 @@ let size =
   Arg.(value & opt int64 4L & info ["size"] ~docv:"SIZE" ~doc)
 
 
-let copts_sect = "COMMON OPTIONS"
-
 let lvs_cmd =
   let doc = "List the logical volumes in the VG" in
   let man = [
@@ -321,6 +315,8 @@ let cmds = [
   Lvcreate.lvcreate_cmd;
   Lvchange.lvchange_cmd;
   Lvs.lvs_cmd;
+  set_vg_info_cmd;
+  Vgcreate.vgcreate_cmd;
 ]
 
 let () = match Term.eval_choice default_cmd cmds with

@@ -110,13 +110,6 @@ let parse_output output_opt =
     end
   | None -> default_fields
     
-let parse_vg_name name_arg =
-  let comps = Stringext.split name_arg '/' in
-  match comps with
-  | ["";"dev";vg] -> vg
-  | [vg] -> vg
-  | _ -> failwith "failed to parse vg name"
-
 let noheadings_arg =
   let doc = "Suppress the headings line that is normally the first line of output.  Useful if grepping the output." in
   Arg.(value & flag & info ["noheadings"] ~doc)
@@ -130,16 +123,11 @@ let output_arg =
   let a = Arg.(value & opt (some string) None & info ["o";"options"] ~doc) in
   Term.(pure parse_output $ a)
 
-let name_arg =
-  let doc = "Path to the volume group. Usually of the form /dev/VGNAME" in
-  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"VOLUMEGROUP" ~doc) in
-  Term.(pure parse_vg_name $ n)
-
 let lvs_cmd =
   let doc = "report information about logical volumes" in
   let man = [
     `S "DESCRIPTION";
     `P "lvs produces formatted output about logical volumes";
   ] in
-  Term.(pure lvs $ Xenvm_common.copts_t $ noheadings_arg $ units_arg $ output_arg $ name_arg),
+  Term.(pure lvs $ Xenvm_common.copts_t $ noheadings_arg $ units_arg $ output_arg $ Xenvm_common.name_arg),
   Term.info "lvs" ~sdocs:"COMMON OPTIONS" ~doc ~man
