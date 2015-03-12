@@ -3,10 +3,6 @@ open Lwt
 open Lvm
 open Xenvm_common
 
-let (>>|=) m f = m >>= function
-  | `Error e -> fail (Failure e)
-  | `Ok x -> f x
-
 let add_prefix x xs = List.map (function
   | [] -> []
   | y :: ys -> (x ^ "/" ^ y) :: ys
@@ -53,7 +49,7 @@ let lvs config =
   set_uri config None;
   Lwt_main.run 
     (Client.get () >>= fun vg ->
-     print_table [ "key"; "value" ] (table_of_vg vg);
+     print_table true [ "key"; "value" ] (table_of_vg vg);
      Lwt.return ())
 
 let format config name filenames =
@@ -135,7 +131,7 @@ let host_list config =
       fromLVM @ toLVM @ [ [ "freeExtents"; Int64.to_string h.freeExtents ] ] in
     List.map (fun h -> add_prefix h.name (table_of_host h)) hosts
     |> List.concat
-    |> print_table [ "key"; "value" ];
+    |> print_table true [ "key"; "value" ];
     return () in
   Lwt_main.run t
 
@@ -201,8 +197,6 @@ let size =
   let doc = "Size of the LV in megs" in
   Arg.(value & opt int64 4L & info ["size"] ~docv:"SIZE" ~doc)
 
-
-let copts_sect = "COMMON OPTIONS"
 
 let lvs_cmd =
   let doc = "List the logical volumes in the VG" in
@@ -321,6 +315,9 @@ let cmds = [
   Lvcreate.lvcreate_cmd;
   Lvchange.lvchange_cmd;
   Lvs.lvs_cmd;
+  set_vg_info_cmd;
+  Vgcreate.vgcreate_cmd;
+  Vgs.vgs_cmd;
 ]
 
 let () = match Term.eval_choice default_cmd cmds with

@@ -71,15 +71,11 @@ Activation  of a logical volume creates a symbolic link /dev/VolumeGroupName/Log
   let a = Arg.(value & opt (some char) None & info ["a"] ~docv:"ACTIVATE" ~doc) in
   Term.(pure parse_action $ a)
 
-let physical_device_arg =
-    let doc = "Path to the (single) physical PV" in
-    Arg.(value & opt (some string) None & info ["pvpath"] ~docv:"PV" ~doc)
-
 let lvchange_cmd =
   let doc = "Change the attributes of a logical volume" in
   let man = [
     `S "DESCRIPTION";
     `P "lvchange allows you to change the attributes of a logical volume including making them known to the kernel ready for use."
   ] in
-  Term.(pure lvchange $ Xenvm_common.copts_t $ name_arg $ physical_device_arg $ action_arg),
+  Term.(pure lvchange $ Xenvm_common.copts_t $ name_arg $ Xenvm_common.physical_device_arg $ action_arg),
   Term.info "lvchange" ~sdocs:"COMMON OPTIONS" ~doc ~man
