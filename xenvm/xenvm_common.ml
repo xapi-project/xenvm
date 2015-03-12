@@ -20,6 +20,9 @@ type fieldfn =
 
 type field = { key: string; name: string; fn:fieldfn }
 
+(* see https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/metadata/lv.c?id=v2_02_117#n643 
+   for canonical description of this field. *)
+
 let attr_of_lv vg lv =
   let name = Mapper.name_of vg lv in
   let info = Devmapper.stat name in
@@ -149,6 +152,37 @@ let name_arg =
   let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"VOLUMEGROUP" ~doc) in
   Term.(pure parse_vg_name $ n)
 
+let names_arg =
+  let doc = "Path to the volume groups. Usually of the form /dev/VGNAME" in
+  let n = Arg.(non_empty & pos_all string [] & info [] ~docv:"VOLUMEGROUP" ~doc) in
+  Term.(pure (List.map parse_vg_name) $ n)
+
+let noheadings_arg =
+  let doc = "Suppress the headings line that is normally the first line of output.  Useful if grepping the output." in
+  Arg.(value & flag & info ["noheadings"] ~doc)
+
+let units_arg =
+  let doc = "All sizes are output in these units: (h)uman-readable, (b)ytes, (s)ectors, (k)ilobytes, (m)egabytes, (g)igabytes, (t)erabytes, (p)etabytes, (e)xabytes.  Capitalise to use multiples of 1000 (S.I.) instead of  1024." in
+  Arg.(value & opt string "b" & info ["units"] ~doc)
+
+let parse_output default_fields output_opt =
+  match output_opt with
+  | Some output ->
+    if String.length output=0 then default_fields else begin
+      let default,rest =
+	if output.[0]='+'
+	then default_fields,String.sub output 1 (String.length output - 1)
+	else [],output
+      in
+      default @ (Stringext.split rest ',')
+    end
+  | None -> default_fields
+    
+let output_arg default_fields =
+  let doc = "Comma-separated ordered list of columns.  Precede the list with '+' to append to the default selection of columns instead of replacing it." in
+  let a = Arg.(value & opt (some string) None & info ["o";"options"] ~doc) in
+  Term.(pure (parse_output default_fields) $ a)
+
 let copts_t =
   Term.(pure make_copts $ config $ uri_arg)
 
@@ -221,7 +255,7 @@ let padto blank n s =
   String.blit s 0 result 0 (min n (String.length s));
   result
 
-let print_table header rows =
+let print_table noheadings header rows =
   let nth xs i = try List.nth xs i with Not_found -> "" in
   let width_of_column i =
     let values = nth header i :: (List.map (fun r -> nth r i) rows) in
@@ -231,7 +265,7 @@ let print_table header rows =
   let print_row row =
     List.iter (fun (n, s) -> Printf.printf "%s " (padto ' ' n s)) (List.combine widths row);
     Printf.printf "\n" in
-  print_row header;
+  if not noheadings then print_row header;
   List.iter print_row rows
 
 

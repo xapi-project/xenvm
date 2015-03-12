@@ -49,7 +49,7 @@ let lvs config =
   set_uri config None;
   Lwt_main.run 
     (Client.get () >>= fun vg ->
-     print_table [ "key"; "value" ] (table_of_vg vg);
+     print_table true [ "key"; "value" ] (table_of_vg vg);
      Lwt.return ())
 
 let format config name filenames =
@@ -131,7 +131,7 @@ let host_list config =
       fromLVM @ toLVM @ [ [ "freeExtents"; Int64.to_string h.freeExtents ] ] in
     List.map (fun h -> add_prefix h.name (table_of_host h)) hosts
     |> List.concat
-    |> print_table [ "key"; "value" ];
+    |> print_table true [ "key"; "value" ];
     return () in
   Lwt_main.run t
 
@@ -317,6 +317,7 @@ let cmds = [
   Lvs.lvs_cmd;
   set_vg_info_cmd;
   Vgcreate.vgcreate_cmd;
+  Vgs.vgs_cmd;
 ]
 
 let () = match Term.eval_choice default_cmd cmds with
