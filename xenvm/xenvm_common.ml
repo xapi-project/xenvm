@@ -167,6 +167,10 @@ let nosuffix_arg =
   let doc = "Suppress the printing of a suffix indicating the units of the sizes" in
   Arg.(value & flag & info ["nosuffix"] ~doc)
 
+let force_arg =
+  let doc = "Force the operation" in
+  Arg.(value & flag & info ["force";"f"] ~doc)
+
 let units_arg =
   let doc = "All sizes are output in these units: (h)uman-readable, (b)ytes, (s)ectors, (k)ilobytes, (m)egabytes, (g)igabytes, (t)erabytes, (p)etabytes, (e)xabytes.  Capitalise to use multiples of 1000 (S.I.) instead of  1024." in
   Arg.(value & opt string "b" & info ["units"] ~doc)
