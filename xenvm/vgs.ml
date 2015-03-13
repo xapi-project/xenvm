@@ -18,7 +18,7 @@ let vgs copts noheadings nosuffix units fields vg_names =
   let open Xenvm_common in
   Lwt_main.run (
     let headings = headings_of fields in
-    Lwt_list.map_s (fun vg_name ->
+    Lwt_list.map_s (fun (vg_name,_) ->
 	get_vg_info_t copts vg_name >>= fun info ->
 	set_uri copts info;
 	Client.get ()) vg_names >>= fun vgs ->

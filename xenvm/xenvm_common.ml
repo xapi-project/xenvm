@@ -140,22 +140,24 @@ let physical_device_arg_required =
     let doc = "Path to the (single) physical PV" in
     Arg.(required & opt (some string) None & info ["pvpath"] ~docv:"PV" ~doc)
 
-let parse_vg_name name_arg =
+let parse_name name_arg =
   let comps = Stringext.split name_arg '/' in
   match comps with
-  | ["";"dev";vg] -> vg
-  | [vg] -> vg
+  | ["";"dev";vg;lv] -> (vg,Some lv)
+  | ["";"dev";vg] -> (vg,None)
+  | [vg;lv] -> (vg,Some lv)
+  | [vg] -> (vg,None)
   | _ -> failwith "failed to parse vg name"
 
 let name_arg =
-  let doc = "Path to the volume group. Usually of the form /dev/VGNAME" in
-  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"VOLUMEGROUP" ~doc) in
-  Term.(pure parse_vg_name $ n)
+  let doc = "Path to the volume group (and optionally LV). Usually of the form /dev/VGNAME[/LVNAME]" in
+  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME" ~doc) in
+  Term.(pure parse_name $ n)
 
 let names_arg =
   let doc = "Path to the volume groups. Usually of the form /dev/VGNAME" in
   let n = Arg.(non_empty & pos_all string [] & info [] ~docv:"VOLUMEGROUP" ~doc) in
-  Term.(pure (List.map parse_vg_name) $ n)
+  Term.(pure (List.map parse_name) $ n)
 
 let noheadings_arg =
   let doc = "Suppress the headings line that is normally the first line of output.  Useful if grepping the output." in
@@ -197,7 +199,7 @@ type vg_info_t = {
   local_device : string;
 } with sexp
 
-let set_vg_info_t copts uri local_device vg_name =
+let set_vg_info_t copts uri local_device (vg_name,_) =
   let info = {uri; local_device} in
   let filename = Filename.concat copts.config vg_name in
   let s = sexp_of_vg_info_t info |> Sexplib.Sexp.to_string in
