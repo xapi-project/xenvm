@@ -40,12 +40,14 @@ let lvcreate copts lv_name real_size percent_size tags vg_name =
     | Some _, Some _ -> failwith "Please don't give two sizes!"
     | None, None -> failwith "Need a size!" in
   let open Xenvm_common in
-  Lwt_main.run (
+  let info = Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     Client.get () >>= fun vg ->
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
-    Client.create lv_name size tags)
+    Client.create lv_name size tags >>= fun () -> 
+    return info) in
+  match info with | Some i -> Lvchange.lvchange_activate copts (vg_name,Some lv_name) (Some i.local_device) | None -> ()
 
 let lv_name_arg =
   let doc = "Gives the name of the LV to be created. This must be unique within the volume group. " in
