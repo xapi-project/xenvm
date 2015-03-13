@@ -3,10 +3,10 @@ open Lwt
 open Log
 
 let (>>|=) m f = m >>= function
-  | `Error e -> fail (Failure e)
+  | `Error (`Msg e) -> fail (Failure e)
   | `Ok x -> f x
 let (>>*=) m f = match m with
-  | `Error e -> fail (Failure e)
+  | `Error (`Msg e) -> fail (Failure e)
   | `Ok x -> f x
 
 module Config = struct
@@ -32,13 +32,15 @@ let fatal_error_t msg =
   fail (Failure msg)
 
 let fatal_error msg m = m >>= function
-  | `Error x -> fatal_error_t (msg ^ ": " ^ x)
+  | `Error (`Msg x) -> fatal_error_t (msg ^ ": " ^ x)
+  | `Error `Suspended -> fatal_error_t (msg ^ ": queue is suspended")
+  | `Error `Retry -> fatal_error_t (msg ^ ": queue temporarily unavailable")
   | `Ok x -> return x
 
 module Vg_IO = Lvm.Vg.Make(Log)(Block)
 
 module ToLVM = struct
-  module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
+  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
   let rec attach ~disk () =
@@ -48,32 +50,36 @@ module ToLVM = struct
   let rec suspend t =
     R.Consumer.suspend t
     >>= function
-    | `Error msg -> fatal_error_t msg
-    | `Retry ->
+    | `Error (`Msg msg) -> fatal_error_t msg
+    | `Error `Suspended -> return ()
+    | `Error `Retry ->
       Lwt_unix.sleep 5.
       >>= fun () ->
       suspend t
     | `Ok () ->
       let rec wait () =
-        fatal_error "reading state of ToLVM" (R.Consumer.state t)
+        R.Consumer.state t
         >>= function
-        | `Suspended -> return ()
-        | `Running -> wait () in
+        | `Error _ -> fatal_error_t "reading state of ToLVM"
+        | `Ok `Running -> wait ()
+        | `Ok `Suspended -> return () in
       wait ()
   let rec resume t =
     R.Consumer.resume t
     >>= function
-    | `Error msg -> fatal_error_t msg
-    | `Retry ->
+    | `Error (`Msg msg) -> fatal_error_t msg
+    | `Error `Retry ->
       Lwt_unix.sleep 5.
       >>= fun () ->
       resume t
+    | `Error `Suspended -> return ()
     | `Ok () ->
       let rec wait () =
-        fatal_error "reading state of ToLVM" (R.Consumer.state t)
+        R.Consumer.state t
         >>= function
-        | `Suspended -> wait ()
-        | `Running -> return () in
+        | `Error _ -> fatal_error_t "reading state of ToLVM"
+        | `Ok `Suspended -> wait ()
+        | `Ok `Running -> return () in
       wait ()
   let rec pop t =
     fatal_error "ToLVM.pop"
@@ -85,20 +91,19 @@ module ToLVM = struct
     fatal_error "toLVM.advance" (R.Consumer.advance ~t ~position ())
 end
 module FromLVM = struct
-  module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
+  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
   let attach ~disk () =
     fatal_error "FromLVM.attach" (R.Producer.attach ~disk ())
   let state t = fatal_error "FromLVM.state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
-  | `TooBig -> fatal_error_t "Item is too large to be pushed to the FromLVM queue"
-  | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
-  | `Retry ->
+  | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
+  | `Error `Retry ->
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
-  | `Suspend ->
+  | `Error `Suspended ->
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -132,7 +137,7 @@ module VolumeManager = struct
     Lwt_mutex.with_lock lock (fun () -> 
       myvg >>= fun myvg ->
       ( match fn (Vg_IO.metadata_of myvg) with
-        | `Error e -> fail (Failure e)
+        | `Error (`Msg e) -> fail (Failure e)
         | `Ok x -> Lwt.return x )
       >>= fun (_, op) ->
       Vg_IO.update myvg [ op ]
@@ -337,7 +342,7 @@ module FreePool = struct
                let segments = Lvm.Lv.Segment.linear size allocation in
                Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(free, { lvex_segments = segments })))
              | _, _ ->
-               `Error (Printf.sprintf "Failed to find volume %s" free)
+               `Error (`Msg (Printf.sprintf "Failed to find volume %s" free))
           )
         >>= fun () ->
         FromLVM.push from_lvm allocation
@@ -348,7 +353,10 @@ module FreePool = struct
         return ()
       end
 
-  let perform = Lwt_list.iter_s perform
+  let perform ops =
+    Lwt_list.iter_s perform ops
+    >>= fun () ->
+    return (`Ok ())
 
   module J = Shared_block.Journal.Make(Log)(Vg_IO.Volume)(Op)
 
@@ -365,7 +373,7 @@ module FreePool = struct
       | `Ok x -> return x )
     >>= fun device ->
     J.start device perform
-    >>= fun j' ->
+    >>|= fun j' ->
     journal := Some j';
     return ()
 
@@ -407,7 +415,7 @@ module FreePool = struct
             ( match try Some(List.find (fun lv -> lv.Lvm.Lv.name = free) lvm.Lvm.Vg.lvs)
                     with _ -> None with
               | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
-              | None -> return (`Error (Printf.sprintf "Failed to find LV %s" free)) )
+              | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" free))) )
           >>= fun allocation ->
           FromLVM.push from_lvm allocation
           >>= fun pos ->
@@ -435,14 +443,14 @@ module FreePool = struct
                free size_mib config.Config.host_low_water_mark config.Config.host_allocation_quantum;
              (* find free space in the VG *)
              begin match !journal, Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.Config.host_allocation_quantum extent_size_mib) with
-             | _, `Error free_extents ->
+             | _, `Error (`OnlyThisMuchFree free_extents) ->
                info "LV %s is %Ld MiB but total space free (%Ld MiB) is less than allocation quantum (%Ld MiB)"
                  free size_mib Int64.(mul free_extents extent_size_mib) config.Config.host_allocation_quantum;
                (* try again later *)
                return ()
              | Some j, `Ok allocated_extents ->
                J.push j (Op.FreeAllocation (host, allocated_extents))
-               >>= fun wait ->
+               >>|= fun wait ->
                (* The operation is now in the journal *)
                wait ()
                (* The operation has been performed *)
@@ -470,7 +478,6 @@ module Impl = struct
     fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
   
   let create context ~name ~size ~tags =
-    let tags = List.map Lvm.Tag.of_string tags in
     VolumeManager.write (fun vg ->
       Lvm.Vg.create vg name ~tags size
     )

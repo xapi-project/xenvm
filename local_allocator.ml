@@ -14,6 +14,10 @@ module Config = struct
   } with sexp
 end
 
+let (>>|=) m f = m >>= function
+  | `Error (`Msg e) -> fail (Failure e)
+  | `Ok x -> f x
+
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
 
 let rec try_forever msg f =
@@ -59,7 +63,7 @@ let query_lvm config =
     (fun x ->
       Vg_IO.connect [ x ] `RO
       >>= function
-      | `Error e ->
+      | `Error (`Msg e) ->
         error "Fatal error reading LVM metadata: %s" e;
         fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
       | `Ok x ->
@@ -67,7 +71,7 @@ let query_lvm config =
     )
 
 module FromLVM = struct
-  module R = Shared_block.Ring.Make(Vg_IO.Volume)(FreeAllocation)
+  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let rec attach ~disk () =
     fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~disk ()) 
   let rec suspend t =
@@ -109,18 +113,17 @@ module FromLVM = struct
     fatal_error "advancing the FromLVM consumer pointer" (R.Consumer.advance ~t ~position ())
 end
 module ToLVM = struct
-  module R = Shared_block.Ring.Make(Vg_IO.Volume)(ExpandVolume)
+  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let attach ~disk () =
     fatal_error "attaching to ToLVM queue" (R.Producer.attach ~disk ())
   let state t =
     fatal_error "querying ToLVM state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
-  | `TooBig -> fatal_error_t "Item is too large to be pushed to the ToLVM queue"
-  | `Error x -> fatal_error_t (Printf.sprintf "Error pushing to the ToLVM queue: %s" x)
-  | `Retry | `Suspend ->
+  | `Error (`Retry | `Suspended) ->
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
+  | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the ToLVM queue: %s" x)
   | `Ok x -> return x
   let advance t position =
     fatal_error "advancing ToLVM pointer" (R.Producer.advance ~t ~position ())
@@ -334,7 +337,9 @@ let main config daemon socket journal fromLVM toLVM =
         Devmapper.resume t.device.ExpandDevice.device;
         print_endline "Resume local dm device";
         return ()
-      ) ops in
+      ) ops
+      >>= fun () ->
+      return (`Ok ()) in
 
     let module J = Shared_block.Journal.Make(Log)(Block)(Op) in
     ( if not (Sys.file_exists config.Config.localJournal) then begin
@@ -352,7 +357,7 @@ let main config daemon socket journal fromLVM toLVM =
 
     (* We must replay the journal before resynchronising free blocks *)
     J.start device perform
-    >>= fun j ->
+    >>|= fun j ->
 
     let (_: unit Lwt.t) = FreePool.start config vg in
     let (_: unit Lwt.t) = wait_for_shutdown_forever () in
@@ -381,7 +386,7 @@ let main config daemon socket journal fromLVM toLVM =
                 let volume = { ExpandVolume.volume; segments } in
                 let device = { ExpandDevice.extents; device; targets } in
                 J.push j { Op.volume; device }
-                >>= fun wait ->
+                >>|= fun wait ->
                 (* The operation is now in the journal *)
                 wait ()
                 (* The operation is now complete *)
