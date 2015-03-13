@@ -10,8 +10,8 @@ type fieldty =
   | Literal of string
   | Size of int64 (* Extents *)
 
-let convert_size vg units size =
-  Printf.sprintf "%LdB" (Int64.mul (Int64.mul 512L vg.Lvm.Vg.extent_size) size)
+let convert_size vg nosuffix units size =
+  Printf.sprintf "%Ld%s" (Int64.mul (Int64.mul 512L vg.Lvm.Vg.extent_size) size) (if nosuffix then "" else "B")
 
 type fieldfn =
   | Lv_fun of (Lvm.Lv.t -> fieldty)
@@ -87,7 +87,7 @@ let all_fields = [
   {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space))};
 ]
 
-let row_of (vg,lv_opt) units output =
+let row_of (vg,lv_opt) nosuffix units output =
   List.fold_left (fun acc name ->
     match (try Some (List.find (fun f -> f.key=name) all_fields) with _ -> None) with
     | Some field -> (
@@ -99,7 +99,7 @@ let row_of (vg,lv_opt) units output =
     | None -> acc) [] output |>
     List.map (function
     | Literal x -> x
-    | Size y -> convert_size vg units y) |> List.rev
+    | Size y -> convert_size vg nosuffix units y) |> List.rev
       
 let headings_of output =
   List.fold_left (fun acc name ->
@@ -160,6 +160,10 @@ let names_arg =
 let noheadings_arg =
   let doc = "Suppress the headings line that is normally the first line of output.  Useful if grepping the output." in
   Arg.(value & flag & info ["noheadings"] ~doc)
+
+let nosuffix_arg =
+  let doc = "Suppress the printing of a suffix indicating the units of the sizes" in
+  Arg.(value & flag & info ["nosuffix"] ~doc)
 
 let units_arg =
   let doc = "All sizes are output in these units: (h)uman-readable, (b)ytes, (s)ectors, (k)ilobytes, (m)egabytes, (g)igabytes, (t)erabytes, (p)etabytes, (e)xabytes.  Capitalise to use multiples of 1000 (S.I.) instead of  1024." in

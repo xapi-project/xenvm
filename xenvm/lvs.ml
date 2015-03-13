@@ -26,7 +26,7 @@ let lvs copts noheadings units fields vg_name =
     Client.get () >>= fun vg ->
 
     let headings = headings_of fields in
-    let rows = List.map (fun lv -> row_of (vg,Some lv) units fields) vg.Lvm.Vg.lvs in
+    let rows = List.map (fun lv -> row_of (vg,Some lv) false units fields) vg.Lvm.Vg.lvs in
     print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows);
     Lwt.return ()
   )
