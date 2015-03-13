@@ -20,7 +20,7 @@ let lvchange_activate copts (vg_name,lv_name) physical_device =
       | None, None -> failwith "Need to know the local device!"
     in
     let path = Printf.sprintf "/dev/%s/%s" vg_name lv_name in
-    (try Lwt_unix.mkdir (Filename.dirname path) 0x755 with _ -> Lwt.return ()) >>= fun () -> 
+    Lwt.catch (fun () -> Lwt_unix.mkdir (Filename.dirname path) 0x755) (fun _ -> Lwt.return ()) >>= fun () -> 
     Mapper.read [ local_device ]
     >>= fun devices ->
     let targets = Mapper.to_targets devices vg lv in
