@@ -20,7 +20,7 @@ let vgcreate vg_name devices =
     let pvs = List.mapi (fun i block ->
         let name = match Pv.Name.of_string (Printf.sprintf "pv%d" i) with
           | `Ok x -> x
-          | `Error x -> failwith x in
+          | `Error (`Msg x) -> failwith x in
         (name,block)
       ) blocks in
     Vg_IO.format vg_name ~magic:`Journalled pvs >>|= fun () ->

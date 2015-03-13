@@ -3,7 +3,7 @@ open Cmdliner
 open Lwt
   
 let (>>|=) m f = m >>= function
-  | `Error e -> fail (Failure e)
+  | `Error (`Msg e) -> fail (Failure e)
   | `Ok x -> f x
 
 type fieldty =
@@ -77,7 +77,7 @@ let all_fields = [
   {key="mirror_log"; name="Log"; fn=Lv_fun (fun _ -> Literal "")};
   {key="copy_percent"; name="Cpy%Sync"; fn=Lv_fun (fun _ -> Literal "")};
   {key="convert_lv"; name="Convert"; fn=Lv_fun (fun _ -> Literal "")};
-  {key="lv_tags"; name="LV Tags"; fn=Lv_fun (fun lv -> Literal (String.concat "," (List.map Lvm.Tag.to_string lv.Lvm.Lv.tags)))};
+  {key="lv_tags"; name="LV Tags"; fn=Lv_fun (fun lv -> Literal (String.concat "," (List.map Lvm.Name.Tag.to_string lv.Lvm.Lv.tags)))};
   
   {key="pv_count"; name="#PV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.pvs)))};
   {key="lv_count"; name="#LV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.lvs)))};

@@ -27,7 +27,7 @@ let table_of_pv pv = add_prefix (Pv.Name.to_string pv.Pv.name) [
 let table_of_lv lv = add_prefix lv.Lv.name [
   [ "name"; lv.Lv.name; ];
   [ "id"; Uuid.to_string lv.Lv.id; ];
-  [ "tags"; String.concat ", " (List.map Tag.to_string lv.Lv.tags) ];
+  [ "tags"; String.concat ", " (List.map Name.Tag.to_string lv.Lv.tags) ];
   [ "status"; String.concat ", " (List.map Lv.Status.to_string lv.Lv.status) ];
   [ "segments"; string_of_int (List.length lv.Lv.segments) ];
 ]
@@ -69,7 +69,7 @@ let format config name filenames =
       let pvs = List.mapi (fun i block ->
         let name = match Pv.Name.of_string (Printf.sprintf "pv%d" i) with
         | `Ok x -> x
-        | `Error x -> failwith x in
+        | `Error (`Msg x) -> failwith x in
         (name,block)
       ) blocks in
       Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
