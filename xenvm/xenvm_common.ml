@@ -2,6 +2,11 @@ open Sexplib.Std
 open Cmdliner
 open Lwt
 open Errors
+
+module Time = struct
+  type 'a io = 'a Lwt.t
+  let sleep = Lwt_unix.sleep
+end
   
 type fieldty =
   | Literal of string

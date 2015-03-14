@@ -15,6 +15,11 @@ module Config = struct
   } with sexp
 end
 
+module Time = struct
+  type 'a io = 'a Lwt.t
+  let sleep = Lwt_unix.sleep
+end
+
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
 
 let rec try_forever msg f =
@@ -46,7 +51,7 @@ let with_block filename f =
   | `Ok x ->
     Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
 
-module Vg_IO = Lvm.Vg.Make(Log)(Block)
+module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
 
 let get_device config = match config.Config.devices with
   | [ x ] -> return x

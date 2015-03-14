@@ -19,6 +19,11 @@ module ErrorLogOnly = struct
   let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 end
 
+module Time = struct
+  type 'a io = 'a Lwt.t
+  let sleep = Lwt_unix.sleep
+end
+
 (* This error must cause the system to stop for manual maintenance.
    Perhaps we could scope this later and take down only a single connection? *)
 let fatal_error_t msg =
@@ -31,7 +36,7 @@ let fatal_error msg m = m >>= function
   | `Error `Retry -> fatal_error_t (msg ^ ": queue temporarily unavailable")
   | `Ok x -> return x
 
-module Vg_IO = Lvm.Vg.Make(Log)(Block)
+module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
 
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)

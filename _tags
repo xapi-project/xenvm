@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: f86febdc2ed6d55b964677d4142f8f8f)
+# DO NOT EDIT (digest: e076abb218d272b822779b0f9b856c06)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -43,6 +43,7 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: pkg_lwt
 <xenvmd/xenvmd.{native,byte}>: pkg_lwt.unix
 <xenvmd/xenvmd.{native,byte}>: pkg_mirage-block-unix
+<xenvmd/xenvmd.{native,byte}>: pkg_mirage-clock-unix
 <xenvmd/xenvmd.{native,byte}>: pkg_oUnit
 <xenvmd/xenvmd.{native,byte}>: pkg_rpclib
 <xenvmd/xenvmd.{native,byte}>: pkg_rpclib.syntax
@@ -62,6 +63,7 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: pkg_lwt
 <xenvmd/*.ml{,i,y}>: pkg_lwt.unix
 <xenvmd/*.ml{,i,y}>: pkg_mirage-block-unix
+<xenvmd/*.ml{,i,y}>: pkg_mirage-clock-unix
 <xenvmd/*.ml{,i,y}>: pkg_oUnit
 <xenvmd/*.ml{,i,y}>: pkg_rpclib
 <xenvmd/*.ml{,i,y}>: pkg_rpclib.syntax
@@ -84,6 +86,7 @@ true: annot, bin_annot
 <xenvm/xenvm.{native,byte}>: pkg_lvm.mapper
 <xenvm/xenvm.{native,byte}>: pkg_lwt
 <xenvm/xenvm.{native,byte}>: pkg_lwt.unix
+<xenvm/xenvm.{native,byte}>: pkg_mirage-clock-unix
 <xenvm/xenvm.{native,byte}>: pkg_rpclib
 <xenvm/xenvm.{native,byte}>: pkg_rpclib.syntax
 <xenvm/xenvm.{native,byte}>: pkg_sexplib.syntax
@@ -98,6 +101,7 @@ true: annot, bin_annot
 <xenvm/*.ml{,i,y}>: pkg_lvm.mapper
 <xenvm/*.ml{,i,y}>: pkg_lwt
 <xenvm/*.ml{,i,y}>: pkg_lwt.unix
+<xenvm/*.ml{,i,y}>: pkg_mirage-clock-unix
 <xenvm/*.ml{,i,y}>: pkg_rpclib
 <xenvm/*.ml{,i,y}>: pkg_rpclib.syntax
 <xenvm/*.ml{,i,y}>: pkg_sexplib.syntax
@@ -121,6 +125,7 @@ true: annot, bin_annot
 <local_allocator.{native,byte}>: pkg_lwt
 <local_allocator.{native,byte}>: pkg_lwt.unix
 <local_allocator.{native,byte}>: pkg_mirage-block-unix
+<local_allocator.{native,byte}>: pkg_mirage-clock-unix
 <local_allocator.{native,byte}>: pkg_oUnit
 <local_allocator.{native,byte}>: pkg_rpclib
 <local_allocator.{native,byte}>: pkg_rpclib.syntax
@@ -140,6 +145,7 @@ true: annot, bin_annot
 <*.ml{,i,y}>: pkg_lwt
 <*.ml{,i,y}>: pkg_lwt.unix
 <*.ml{,i,y}>: pkg_mirage-block-unix
+<*.ml{,i,y}>: pkg_mirage-clock-unix
 <*.ml{,i,y}>: pkg_oUnit
 <*.ml{,i,y}>: pkg_rpclib
 <*.ml{,i,y}>: pkg_rpclib.syntax
