@@ -1,6 +1,7 @@
 open Cmdliner
 open Lwt
 open Xenvm_common
+open Errors
 
 let vgcreate vg_name devices =
   let open Lvm in

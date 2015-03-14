@@ -1,11 +1,8 @@
 open Sexplib.Std
 open Cmdliner
 open Lwt
+open Errors
   
-let (>>|=) m f = m >>= function
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Ok x -> f x
-
 type fieldty =
   | Literal of string
   | Size of int64 (* Extents *)
