@@ -1,7 +1,7 @@
 set -e
 
 eval `opam config env`
-opam pin add ocveralls git://github.com/djs55/ocveralls#fix-vector-combine -y
+#opam pin add ocveralls git://github.com/djs55/ocveralls#fix-vector-combine -y
 make
 
 # Making a 1G disk

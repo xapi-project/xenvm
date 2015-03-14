@@ -145,18 +145,20 @@ let benchmark config =
   set_uri config None;
   let t =
     let mib = Int64.mul 1048576L 4L in
-    let n = 1000 in
+    let number = 1000 in
     let start = Unix.gettimeofday () in
     let rec fori f = function
     | 0 -> return ()
     | n ->
       f n
       >>= fun () ->
+      if n mod 50 = 0 then Printf.printf "%d %f\n" (number - n) (Unix.gettimeofday () -. start);
       fori f (n - 1) in
-    fori (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) n
+    fori (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
     >>= fun () ->
     let time = Unix.gettimeofday () -. start in
-    Printf.printf "%d creates in %.1f s\n" n time;
+    Printf.printf "# %d creates in %.1f s\n" number time;
+    Printf.printf "# Average %.1f /sec\n" (float_of_int number /. time);
     return () in
   Lwt_main.run t
 
