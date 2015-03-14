@@ -1,7 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: fa060764aa8ac9c5cb4f72440a01a85e)
+# DO NOT EDIT (digest: 8af667af104e0c5095aa3246ef21b7c1)
 Xenvm_interface
 Xenvm_client
 Log
 Result
+Errors
 # OASIS_STOP

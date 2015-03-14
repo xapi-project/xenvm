@@ -2,6 +2,7 @@ open Cohttp_lwt_unix
 open Lwt
 open Lvm
 open Xenvm_common
+open Errors
 
 let add_prefix x xs = List.map (function
   | [] -> []

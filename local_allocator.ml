@@ -1,6 +1,7 @@
 open Lwt
 open Sexplib.Std
 open Log
+open Errors
 
 module Config = struct
   type t = {
@@ -13,10 +14,6 @@ module Config = struct
     fromLVM: string; (* received updates from LVM *)
   } with sexp
 end
-
-let (>>|=) m f = m >>= function
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Ok x -> f x
 
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
 
@@ -62,12 +59,8 @@ let query_lvm config =
   with_block device
     (fun x ->
       Vg_IO.connect [ x ] `RO
-      >>= function
-      | `Error (`Msg e) ->
-        error "Fatal error reading LVM metadata: %s" e;
-        fail (Failure (Printf.sprintf "Failed to read LVM metadata from %s" device))
-      | `Ok x ->
-        return x
+      >>|= fun x ->
+      return x
     )
 
 module FromLVM = struct

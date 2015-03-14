@@ -1,13 +1,7 @@
 open Sexplib.Std
 open Lwt
 open Log
-
-let (>>|=) m f = m >>= function
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Ok x -> f x
-let (>>*=) m f = match m with
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Ok x -> f x
+open Errors
 
 module Config = struct
   type t = {
@@ -136,10 +130,8 @@ module VolumeManager = struct
   let write fn =
     Lwt_mutex.with_lock lock (fun () -> 
       myvg >>= fun myvg ->
-      ( match fn (Vg_IO.metadata_of myvg) with
-        | `Error (`Msg e) -> fail (Failure e)
-        | `Ok x -> Lwt.return x )
-      >>= fun (_, op) ->
+      fn (Vg_IO.metadata_of myvg)
+      >>*= fun (_, op) ->
       Vg_IO.update myvg [ op ]
       >>|= fun () ->
       Lwt.return ()
