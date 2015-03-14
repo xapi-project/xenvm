@@ -55,7 +55,7 @@ let lvs config =
 
 let format config name filenames =
     let t =
-      let module Vg_IO = Vg.Make(Log)(Block) in
+      let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
       let open Xenvm_interface in
       (* 4 MiB per volume *)
       let size = Int64.(mul 4L (mul 1024L 1024L)) in

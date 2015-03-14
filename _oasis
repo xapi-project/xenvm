@@ -24,7 +24,7 @@ Executable "xenvmd"
   MainIs:             xenvmd.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring, bisect
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring, bisect
 
 Executable "xenvm"
   ByteOpt:            -warn-error +a
@@ -34,7 +34,7 @@ Executable "xenvm"
   MainIs:             xenvm.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, sexplib.syntax
+  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax, bisect
 
 Executable "local_allocator"
   ByteOpt:            -warn-error +a
@@ -44,4 +44,4 @@ Executable "local_allocator"
   MainIs:             local_allocator.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring, bisect
