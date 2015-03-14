@@ -1,5 +1,6 @@
 set -e
 
+eval `opam config env`
 make
 
 # Making a 1G disk
