@@ -19,4 +19,9 @@ depends: [
   "camldm"
   "cmdliner"
   "bisect"
+  "cohttp"
+  "rpc"
+  "sexplib"
+  "camldm"
+  "ounit"
 ]
