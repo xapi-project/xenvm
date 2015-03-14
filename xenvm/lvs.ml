@@ -18,7 +18,7 @@ let default_fields = [
  "convert_lv"]
 
 
-let lvs copts noheadings units fields vg_name =
+let lvs copts noheadings units fields (vg_name,lv_name_opt) =
   let open Xenvm_common in
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
@@ -26,7 +26,13 @@ let lvs copts noheadings units fields vg_name =
     Client.get () >>= fun vg ->
 
     let headings = headings_of fields in
-    let rows = List.map (fun lv -> row_of (vg,Some lv) units fields) vg.Lvm.Vg.lvs in
+    let rows = 
+      match lv_name_opt with
+      | None -> List.map (fun lv -> row_of (vg,Some lv) false units fields) vg.Lvm.Vg.lvs
+      | Some lv_name ->
+        let lv = List.find (fun lv -> lv.Lvm.Lv.name = lv_name) vg.Lvm.Vg.lvs in
+        [row_of (vg,Some lv) false units fields]
+    in
     print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows);
     Lwt.return ()
   )

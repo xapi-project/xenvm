@@ -10,6 +10,7 @@ external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""
 external get : unit -> Vg_wrapper.t = ""
 external create : name:string -> size:int64 -> tags:string list -> unit = ""
 external rename : oldname:string -> newname:string -> unit = ""
+external remove : name:string -> unit = ""
 
 external shutdown : unit -> unit = ""
 

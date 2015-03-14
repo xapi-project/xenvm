@@ -7,7 +7,8 @@ type action = Activate | Deactivate
 
 (* lvchange -a[n|y] /dev/VGNAME/LVNAME *)
 
-let lvchange_activate copts (vg_name,lv_name) physical_device =
+let lvchange_activate copts (vg_name,lv_name_opt) physical_device =
+  let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need to know an LV name" in
   let open Xenvm_common in
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
@@ -20,7 +21,7 @@ let lvchange_activate copts (vg_name,lv_name) physical_device =
       | None, None -> failwith "Need to know the local device!"
     in
     let path = Printf.sprintf "/dev/%s/%s" vg_name lv_name in
-    (try Lwt_unix.mkdir (Filename.dirname path) 0x755 with _ -> Lwt.return ()) >>= fun () -> 
+    Lwt.catch (fun () -> Lwt_unix.mkdir (Filename.dirname path) 0x755) (fun _ -> Lwt.return ()) >>= fun () -> 
     Mapper.read [ local_device ]
     >>= fun devices ->
     let targets = Mapper.to_targets devices vg lv in
@@ -29,7 +30,8 @@ let lvchange_activate copts (vg_name,lv_name) physical_device =
     Devmapper.mknod name path 0o0600;
     return ())
 
-let lvchange_deactivate copts (vg_name,lv_name) =
+let lvchange_deactivate copts (vg_name,lv_name_opt) =
+  let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need LV name" in
   let open Xenvm_common in
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
@@ -45,18 +47,6 @@ let lvchange copts name physical_device action =
   | Some Deactivate -> lvchange_deactivate copts name
   | None -> ()
     
-let parse_name name_arg =
-  let comps = Stringext.split name_arg '/' in
-  match comps with
-  | ["";"dev";vg;lv] -> (vg,lv)
-  | [vg;lv] -> (vg,lv)
-  | _ -> failwith "failed to parse vg/lv name"
-
-let name_arg =
-  let doc = "Path to the logical volume. Usually of the form /dev/VGNAME/LVNAME" in
-  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"VOLUMEGROUP" ~doc) in
-  Term.(pure parse_name $ n)
-
 let action_arg =
   let parse_action c =
     match c with
@@ -77,5 +67,5 @@ let lvchange_cmd =
     `S "DESCRIPTION";
     `P "lvchange allows you to change the attributes of a logical volume including making them known to the kernel ready for use."
   ] in
-  Term.(pure lvchange $ Xenvm_common.copts_t $ name_arg $ Xenvm_common.physical_device_arg $ action_arg),
+  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg),
   Term.info "lvchange" ~sdocs:"COMMON OPTIONS" ~doc ~man

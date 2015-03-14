@@ -10,8 +10,8 @@ type fieldty =
   | Literal of string
   | Size of int64 (* Extents *)
 
-let convert_size vg units size =
-  Printf.sprintf "%LdB" (Int64.mul (Int64.mul 512L vg.Lvm.Vg.extent_size) size)
+let convert_size vg nosuffix units size =
+  Printf.sprintf "%Ld%s" (Int64.mul (Int64.mul 512L vg.Lvm.Vg.extent_size) size) (if nosuffix then "" else "B")
 
 type fieldfn =
   | Lv_fun of (Lvm.Lv.t -> fieldty)
@@ -87,7 +87,7 @@ let all_fields = [
   {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space))};
 ]
 
-let row_of (vg,lv_opt) units output =
+let row_of (vg,lv_opt) nosuffix units output =
   List.fold_left (fun acc name ->
     match (try Some (List.find (fun f -> f.key=name) all_fields) with _ -> None) with
     | Some field -> (
@@ -99,7 +99,7 @@ let row_of (vg,lv_opt) units output =
     | None -> acc) [] output |>
     List.map (function
     | Literal x -> x
-    | Size y -> convert_size vg units y) |> List.rev
+    | Size y -> convert_size vg nosuffix units y) |> List.rev
       
 let headings_of output =
   List.fold_left (fun acc name ->
@@ -140,26 +140,36 @@ let physical_device_arg_required =
     let doc = "Path to the (single) physical PV" in
     Arg.(required & opt (some string) None & info ["pvpath"] ~docv:"PV" ~doc)
 
-let parse_vg_name name_arg =
+let parse_name name_arg =
   let comps = Stringext.split name_arg '/' in
   match comps with
-  | ["";"dev";vg] -> vg
-  | [vg] -> vg
+  | ["";"dev";vg;lv] -> (vg,Some lv)
+  | ["";"dev";vg] -> (vg,None)
+  | [vg;lv] -> (vg,Some lv)
+  | [vg] -> (vg,None)
   | _ -> failwith "failed to parse vg name"
 
 let name_arg =
-  let doc = "Path to the volume group. Usually of the form /dev/VGNAME" in
-  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"VOLUMEGROUP" ~doc) in
-  Term.(pure parse_vg_name $ n)
+  let doc = "Path to the volume group (and optionally LV). Usually of the form /dev/VGNAME[/LVNAME]" in
+  let n = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME" ~doc) in
+  Term.(pure parse_name $ n)
 
 let names_arg =
   let doc = "Path to the volume groups. Usually of the form /dev/VGNAME" in
   let n = Arg.(non_empty & pos_all string [] & info [] ~docv:"VOLUMEGROUP" ~doc) in
-  Term.(pure (List.map parse_vg_name) $ n)
+  Term.(pure (List.map parse_name) $ n)
 
 let noheadings_arg =
   let doc = "Suppress the headings line that is normally the first line of output.  Useful if grepping the output." in
   Arg.(value & flag & info ["noheadings"] ~doc)
+
+let nosuffix_arg =
+  let doc = "Suppress the printing of a suffix indicating the units of the sizes" in
+  Arg.(value & flag & info ["nosuffix"] ~doc)
+
+let force_arg =
+  let doc = "Force the operation" in
+  Arg.(value & flag & info ["force";"f"] ~doc)
 
 let units_arg =
   let doc = "All sizes are output in these units: (h)uman-readable, (b)ytes, (s)ectors, (k)ilobytes, (m)egabytes, (g)igabytes, (t)erabytes, (p)etabytes, (e)xabytes.  Capitalise to use multiples of 1000 (S.I.) instead of  1024." in
@@ -193,7 +203,7 @@ type vg_info_t = {
   local_device : string;
 } with sexp
 
-let set_vg_info_t copts uri local_device vg_name =
+let set_vg_info_t copts uri local_device (vg_name,_) =
   let info = {uri; local_device} in
   let filename = Filename.concat copts.config vg_name in
   let s = sexp_of_vg_info_t info |> Sexplib.Sexp.to_string in

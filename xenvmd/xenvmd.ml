@@ -487,6 +487,11 @@ module Impl = struct
       Lvm.Vg.rename vg oldname newname
     )
 
+  let remove context ~name =
+    VolumeManager.write (fun vg ->
+      Lvm.Vg.remove vg name
+    )
+
   let get_lv context ~name =
     let open Lvm in
     fatal_error "get_lv"
