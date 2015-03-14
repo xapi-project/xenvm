@@ -1,27 +1,19 @@
-#!/bin/sh
-
 set -e
 
-echo Setting up allocator
-./setup.sh &
+make
 
-sleep 5
+# Making a 1G disk
+rm -f bigdisk xenvm*.out
+dd if=/dev/zero of=bigdisk bs=1 seek=16G count=0
 
-echo Running the local allocator
-./local_allocator.native &
+BISECT_FILE=xenvm.coverage ./xenvm.native format bigdisk --vg djstest
+BISECT_FILE=xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf &
 
-sleep 5
+export BISECT_FILE=xenvm.coverage
 
-echo Requesting an allocation
-echo djstest-live | nc localhost 8081
+./xenvm.native create --lv live
+./xenvm.native benchmark
 
-sleep 5
-
-echo Shutting everything down
 ./xenvm.native shutdown
-
-sleep 5
-
-cd _build
-echo Code coverage summary
-bisect-report ../*.out -summary-only -text -
+bisect-report xenvm*.out -summary-only -html /vagrant/report/
+`opam config var bin`/ocveralls xenvm*.out --send
