@@ -1,27 +1,23 @@
-#!/bin/sh
-
 set -e
 
-echo Setting up allocator
-./setup.sh &
+eval `opam config env`
+make
 
-sleep 5
+# Making a 1G disk
+rm -f bigdisk _build/xenvm*.out
+dd if=/dev/zero of=bigdisk bs=1 seek=16G count=0
 
-echo Running the local allocator
-./local_allocator.native &
+BISECT_FILE=_build/xenvm.coverage ./xenvm.native format bigdisk --vg djstest
+BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf &
 
-sleep 5
+export BISECT_FILE=_build/xenvm.coverage
 
-echo Requesting an allocation
-echo djstest-live | nc localhost 8081
+./xenvm.native create --lv live
+./xenvm.native benchmark
 
-sleep 5
-
-echo Shutting everything down
 ./xenvm.native shutdown
-
-sleep 5
-
-cd _build
-echo Code coverage summary
-bisect-report ../*.out -summary-only -text -
+wait $(pidof xenvmd.native)
+echo Generating bisect report-- this fails on travis
+(cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
+echo Sending to coveralls-- this only works on travis
+`opam config var bin`/ocveralls --prefix _build _build/xenvm*.out --send || echo "Failed to upload to coveralls"

@@ -2,6 +2,7 @@
 all: build doc
 
 export OCAMLRUNPARAM=b
+NAME=xenvmidl
 
 setup.bin: setup.ml
 	@ocamlopt.opt -o $@ $< || ocamlopt -o $@ $< || ocamlc -o $@ $<
