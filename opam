@@ -25,4 +25,5 @@ depends: [
   "camldm"
   "ounit"
   "oasis"
+  "ocveralls"
 ]
