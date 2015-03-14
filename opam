@@ -24,4 +24,5 @@ depends: [
   "sexplib"
   "camldm"
   "ounit"
+  "oasis"
 ]
