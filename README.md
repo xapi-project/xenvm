@@ -1,5 +1,8 @@
 thin-lvhd-tools
 ===============
+
+[![Build Status](https://travis-ci.org/djs55/thin-lvhd-tools.png?branch=master)](https://travis-ci.org/djs55/thin-lvhd-tools) [![Coverage Status](https://coveralls.io/repos/djs55/thin-lvhd-tools/badge.png?branch=master)](https://coveralls.io/r/djs55/thin-lvhd-tools?branch=master)
+
 Support tools for a thin lvhd implementation as described in
 [the design doc](http://xapi-project.github.io/xapi/futures/thin-lvhd/thin-lvhd.html).
 
