@@ -17,6 +17,7 @@ export BISECT_FILE=_build/xenvm.coverage
 
 ./xenvm.native shutdown
 wait $(pidof xenvmd.native)
-(cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/)
-echo Sending to coveralls
-`opam config var bin`/ocveralls --prefix _build _build/xenvm*.out --send || echo "Failed to upload to coveralls (this only works from travis)"
+echo Generating bisect report-- this fails on travis
+(cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
+echo Sending to coveralls-- this only works on travis
+`opam config var bin`/ocveralls --prefix _build _build/xenvm*.out --send || echo "Failed to upload to coveralls"
