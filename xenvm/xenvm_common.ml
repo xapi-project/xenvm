@@ -82,7 +82,7 @@ let all_fields = [
   {key="lv_tags"; name="LV Tags"; fn=Lv_fun (fun lv -> Literal (String.concat "," (List.map Lvm.Name.Tag.to_string lv.Lvm.Lv.tags)))};
   
   {key="pv_count"; name="#PV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.pvs)))};
-  {key="lv_count"; name="#LV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.lvs)))};
+  {key="lv_count"; name="#LV"; fn=Vg_fun (fun vg -> Literal (string_of_int (Lvm.Vg.LVs.cardinal vg.Lvm.Vg.lvs)))};
   {key="snap_count"; name="#SN"; fn=Vg_fun (fun _ -> Literal "0")};
   {key="vg_attr"; name="Attr"; fn=Vg_fun (fun vg -> Literal (attr_of_vg vg))};
   {key="vg_size"; name="VSize"; fn=Vg_fun (fun vg -> Size (List.fold_left (fun acc pv -> Int64.add acc pv.Lvm.Pv.pe_count) 0L vg.Lvm.Vg.pvs))};

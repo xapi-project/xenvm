@@ -35,7 +35,8 @@ let table_of_lv lv = add_prefix lv.Lv.name [
 
 let table_of_vg vg =
   let pvs = List.flatten (List.map table_of_pv vg.Vg.pvs) in
-  let lvs = List.flatten (List.map table_of_lv vg.Vg.lvs) in [
+  let lvs = Vg.LVs.fold (fun _ lv acc -> lv :: acc) vg.Vg.lvs [] in
+  let lvs = List.flatten (List.map table_of_lv lvs) in [
   [ "name"; vg.Vg.name ];
   [ "id"; Uuid.to_string vg.Vg.id ];
   [ "status"; String.concat ", " (List.map Vg.Status.to_string vg.Vg.status) ];
@@ -145,20 +146,28 @@ let benchmark config =
   set_uri config None;
   let t =
     let mib = Int64.mul 1048576L 4L in
-    let number = 1000 in
+    let number = 40000 in
     let start = Unix.gettimeofday () in
-    let rec fori f = function
-    | 0 -> return ()
+    let rec fori acc f = function
+    | 0 -> return acc
     | n ->
       f n
       >>= fun () ->
-      if n mod 50 = 0 then Printf.printf "%d %f\n" (number - n) (Unix.gettimeofday () -. start);
-      fori f (n - 1) in
-    fori (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
-    >>= fun () ->
+      fori ((number - n, Unix.gettimeofday () -. start) :: acc) f (n - 1) in
+    fori [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
+    >>= fun creates ->
     let time = Unix.gettimeofday () -. start in
-    Printf.printf "# %d creates in %.1f s\n" number time;
-    Printf.printf "# Average %.1f /sec\n" (float_of_int number /. time);
+    let oc = open_out "benchmark.dat" in
+    List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" n t) (List.rev creates);
+    Printf.fprintf oc "# %d creates in %.1f s\n" number time;
+    Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int number /. time);
+    let start = Unix.gettimeofday () in
+    fori [] (fun i -> Client.remove ~name:(Printf.sprintf "test-lv-%d" i)) number
+    >>= fun destroys ->
+    let time = Unix.gettimeofday () -. start in
+    List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" (number + n) t) (List.rev destroys);
+    Printf.fprintf oc "# %d destroys in %.1f s\n" number time;
+    Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int number /. time);
     return () in
   Lwt_main.run t
 

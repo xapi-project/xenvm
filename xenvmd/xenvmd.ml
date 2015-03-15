@@ -291,7 +291,7 @@ module VolumeManager = struct
           let fromLVM = { Xenvm_interface.lv; suspended } in
           read (fun vg ->
             try
-              let lv = List.find (fun lv -> lv.Lvm.Lv.name = freeLVM name) vg.Lvm.Vg.lvs in
+              let lv = Lvm.Vg.LVs.find (freeLVM name) vg.Lvm.Vg.lvs in
               return (Lvm.Lv.size_in_extents lv)
             with Not_found -> return 0L
           ) >>= fun freeExtents ->
@@ -333,13 +333,13 @@ module FreePool = struct
       | Some from_lvm, Some free  ->
         VolumeManager.write
           (fun vg ->
-             match List.partition (fun lv -> lv.Lvm.Lv.name=free) vg.Lvm.Vg.lvs with
-             | [ lv ], others ->
+             match (try Some(Lvm.Vg.LVs.find free vg.Lvm.Vg.lvs) with Not_found -> None) with
+             | None ->
+               `Error (`Msg (Printf.sprintf "Failed to find volume %s" free))
+             | Some lv ->
                let size = Lvm.Lv.size_in_extents lv in
                let segments = Lvm.Lv.Segment.linear size allocation in
                Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(free, { lvex_segments = segments })))
-             | _, _ ->
-               `Error (`Msg (Printf.sprintf "Failed to find volume %s" free))
           )
         >>= fun () ->
         FromLVM.push from_lvm allocation
@@ -409,8 +409,7 @@ module FreePool = struct
           wait ()
           >>= fun () ->
           fatal_error "resend_free_volumes"
-            ( match try Some(List.find (fun lv -> lv.Lvm.Lv.name = free) lvm.Lvm.Vg.lvs)
-                    with _ -> None with
+            ( match try Some(Lvm.Vg.LVs.find free lvm.Lvm.Vg.lvs) with _ -> None with
               | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
               | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" free))) )
           >>= fun allocation ->
@@ -432,7 +431,7 @@ module FreePool = struct
       (* XXX: avoid double-allocating the same free blocks *)
       Lwt_list.iter_s
        (fun (host, free) ->
-         match try Some(List.find (fun lv -> lv.Lvm.Lv.name = free) x.Lvm.Vg.lvs) with _ -> None with
+         match try Some(Lvm.Vg.LVs.find free x.Lvm.Vg.lvs) with _ -> None with
          | Some lv ->
            let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
            if size_mib < config.Config.host_low_water_mark then begin
@@ -493,8 +492,8 @@ module Impl = struct
     let open Lvm in
     fatal_error "get_lv"
       (VolumeManager.read (fun vg ->
-        let lv = List.find (fun lv -> lv.Lv.name = name) vg.Vg.lvs in
-        return (`Ok ({ vg with Vg.lvs = [] }, lv))
+        let lv = Lvm.Vg.LVs.find name vg.Vg.lvs in
+        return (`Ok ({ vg with Vg.lvs = Vg.LVs.empty }, lv))
       ))
 
   let shutdown context () =
