@@ -10,16 +10,18 @@ end
   
 type fieldty =
   | Literal of string
-  | Size of int64 (* Extents *)
+  | Size of int64 (* Sectors *)
 
 let convert_size vg nosuffix units size =
-  Printf.sprintf "%Ld%s" (Int64.mul (Int64.mul 512L vg.Lvm.Vg.extent_size) size) (if nosuffix then "" else "B")
+  Printf.sprintf "%Ld%s" (Int64.mul 512L size) (if nosuffix then "" else "B")
 
 type fieldfn =
   | Lv_fun of (Lvm.Lv.t -> fieldty)
   | Vg_fun of (Lvm.Vg.metadata -> fieldty)
   | VgLv_fun of (Lvm.Vg.metadata * Lvm.Lv.t -> fieldty)
   | Pv_fun of (Lvm.Pv.t -> fieldty)
+  | Seg_fun of (Lvm.Lv.Segment.t -> fieldty)
+  | VgSeg_fun of (Lvm.Vg.metadata * Lvm.Lv.Segment.t -> fieldty)
 
 type field = { key: string; name: string; fn:fieldfn }
 
@@ -67,11 +69,18 @@ let attr_of_vg vg =
     ('n') (* Allocation policy - (c)ontiguous, c(l)ing, (n)ormal, (a)nywhere *)
     ('-') (* clustered *)
 
+let devices_of_seg seg =
+  let open Lvm.Lv in
+  match seg.Segment.cls with
+  | Segment.Linear x ->
+    Printf.sprintf "%s(%Ld)" (Lvm.Pv.Name.to_string x.Linear.name) x.Linear.start_extent
+    
 let all_fields = [
   {key="lv_name"; name="LV"; fn=Lv_fun (fun lv -> Literal lv.Lvm.Lv.name) };
   {key="vg_name"; name="VG"; fn=Vg_fun (fun vg -> Literal vg.Lvm.Vg.name) };
+  {key="vg_extent_size"; name="Ext"; fn=Vg_fun (fun vg -> Size vg.Lvm.Vg.extent_size) };
   {key="lv_attr"; name="Attr"; fn=VgLv_fun (fun (vg,lv) -> Literal (attr_of_lv vg lv)) };
-  {key="lv_size"; name="LSize"; fn=Lv_fun (fun lv -> Size (Lvm.Lv.size_in_extents lv)) };
+  {key="lv_size"; name="LSize"; fn=VgLv_fun (fun (vg,lv) -> Size (Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv))) };
   {key="pool_lv"; name="Pool"; fn=Lv_fun (fun _ -> Literal "")};
   {key="origin"; name="Origin"; fn=Lv_fun (fun _ -> Literal "")};
   {key="data_percent"; name="Data%"; fn=Lv_fun (fun _ -> Literal "")};
@@ -86,20 +95,30 @@ let all_fields = [
   {key="lv_count"; name="#LV"; fn=Vg_fun (fun vg -> Literal (string_of_int (Lvm.Vg.LVs.cardinal vg.Lvm.Vg.lvs)))};
   {key="snap_count"; name="#SN"; fn=Vg_fun (fun _ -> Literal "0")};
   {key="vg_attr"; name="Attr"; fn=Vg_fun (fun vg -> Literal (attr_of_vg vg))};
-  {key="vg_size"; name="VSize"; fn=Vg_fun (fun vg -> Size (List.fold_left (fun acc pv -> Int64.add acc pv.Lvm.Pv.pe_count) 0L vg.Lvm.Vg.pvs))};
-  {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space))};
+  {key="vg_size"; name="VSize"; fn=Vg_fun (fun vg -> Size (Int64.mul vg.Lvm.Vg.extent_size (List.fold_left (fun acc pv -> Int64.add acc pv.Lvm.Pv.pe_count) 0L vg.Lvm.Vg.pvs)))};
+  {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Int64.mul vg.Lvm.Vg.extent_size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space)))};
+  {key="pv_name"; name="PV"; fn=Pv_fun (fun pv -> Literal (Lvm.Pv.Name.to_string pv.Lvm.Pv.name))};
+  {key="pe_start"; name="1st PE"; fn=Pv_fun (fun pv -> Size pv.Lvm.Pv.pe_start)};
+  {key="seg_type"; name="Type"; fn=Seg_fun (fun seg -> Literal (match seg.Lvm.Lv.Segment.cls with | Lvm.Lv.Segment.Linear _ -> "linear"))};
+  {key="seg_count"; name="#Seg"; fn=Lv_fun (fun lv -> Literal (string_of_int (List.length lv.Lvm.Lv.segments)))};
+  {key="seg_start"; name="Start"; fn=VgSeg_fun (fun (vg,seg) -> Size (Int64.mul vg.Lvm.Vg.extent_size seg.Lvm.Lv.Segment.start_extent))};
+  {key="seg_size"; name="SSize"; fn=VgSeg_fun (fun (vg,seg) -> Size (Int64.mul vg.Lvm.Vg.extent_size seg.Lvm.Lv.Segment.extent_count))};
+  {key="devices"; name="Devices"; fn=Seg_fun (fun seg -> Literal (devices_of_seg seg))};
+  
 ]
 
-let row_of (vg,pv_opt,lv_opt) nosuffix units output =
+let row_of (vg,pv_opt,lv_opt,seg_opt) nosuffix units output =
   List.fold_left (fun acc name ->
     match (try Some (List.find (fun f -> f.key=name) all_fields) with _ -> None) with
     | Some field -> (
-	match field.fn,pv_opt,lv_opt with
-        | (Vg_fun f),_ ,_-> (f vg)::acc
-        | (VgLv_fun f),_,Some lv -> (f (vg,lv))::acc
-        | (Lv_fun f), _,Some lv -> (f lv)::acc
-        | (Pv_fun f), Some pv, _ -> (f pv)::acc
-        | _,_,_ -> acc)
+	match field.fn,pv_opt,lv_opt,seg_opt with
+        | (Vg_fun f),_,_,_-> (f vg)::acc
+        | (VgLv_fun f),_,Some lv,_ -> (f (vg,lv))::acc
+        | (Lv_fun f),_,Some lv,_ -> (f lv)::acc
+        | (Pv_fun f),Some pv,_,_ -> (f pv)::acc
+        | (Seg_fun f),_,_,Some s -> (f s)::acc
+        | (VgSeg_fun f),_,_,Some s -> (f (vg,s))::acc
+        | _,_,_,_ -> acc)
     | None -> acc) [] output |>
     List.map (function
     | Literal x -> x
