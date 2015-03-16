@@ -19,6 +19,7 @@ type fieldfn =
   | Lv_fun of (Lvm.Lv.t -> fieldty)
   | Vg_fun of (Lvm.Vg.metadata -> fieldty)
   | VgLv_fun of (Lvm.Vg.metadata * Lvm.Lv.t -> fieldty)
+  | Pv_fun of (Lvm.Pv.t -> fieldty)
 
 type field = { key: string; name: string; fn:fieldfn }
 
@@ -89,15 +90,16 @@ let all_fields = [
   {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space))};
 ]
 
-let row_of (vg,lv_opt) nosuffix units output =
+let row_of (vg,pv_opt,lv_opt) nosuffix units output =
   List.fold_left (fun acc name ->
     match (try Some (List.find (fun f -> f.key=name) all_fields) with _ -> None) with
     | Some field -> (
-	match field.fn,lv_opt with
-        | (Vg_fun f),_ -> (f vg)::acc
-        | (VgLv_fun f),Some lv -> (f (vg,lv))::acc
-        | (Lv_fun f), Some lv -> (f lv)::acc
-        | _,_ -> acc)
+	match field.fn,pv_opt,lv_opt with
+        | (Vg_fun f),_ ,_-> (f vg)::acc
+        | (VgLv_fun f),_,Some lv -> (f (vg,lv))::acc
+        | (Lv_fun f), _,Some lv -> (f lv)::acc
+        | (Pv_fun f), Some pv, _ -> (f pv)::acc
+        | _,_,_ -> acc)
     | None -> acc) [] output |>
     List.map (function
     | Literal x -> x

@@ -22,7 +22,7 @@ let vgs copts noheadings nosuffix units fields vg_names =
 	get_vg_info_t copts vg_name >>= fun info ->
 	set_uri copts info;
 	Client.get ()) vg_names >>= fun vgs ->
-    let rows = List.map (fun vg -> row_of (vg,None) nosuffix units fields) vgs in
+    let rows = List.map (fun vg -> row_of (vg,None,None) nosuffix units fields) vgs in
     print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows);
     Lwt.return ()
   )
