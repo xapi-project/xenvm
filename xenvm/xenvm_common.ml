@@ -74,7 +74,7 @@ let devices_of_seg seg =
   match seg.Segment.cls with
   | Segment.Linear x ->
     Printf.sprintf "%s(%Ld)" (Lvm.Pv.Name.to_string x.Linear.name) x.Linear.start_extent
-    
+
 let all_fields = [
   {key="lv_name"; name="LV"; fn=Lv_fun (fun lv -> Literal lv.Lvm.Lv.name) };
   {key="vg_name"; name="VG"; fn=Vg_fun (fun vg -> Literal vg.Lvm.Vg.name) };
@@ -106,6 +106,29 @@ let all_fields = [
   {key="devices"; name="Devices"; fn=Seg_fun (fun seg -> Literal (devices_of_seg seg))};
   
 ]
+
+let has_pv_field fields =
+  List.exists (fun field_name ->
+    try
+      let l = List.find (fun f -> f.key = field_name) all_fields in
+      match l.fn with
+      | Pv_fun _ -> true
+      | _ -> false
+    with _ ->
+      false) fields
+
+let has_seg_field fields =
+  List.exists (fun field_name ->
+    try
+      let l = List.find (fun f -> f.key = field_name) all_fields in
+      match l.fn with
+      | Seg_fun _ 
+      | VgSeg_fun _ -> true
+      | _ -> false
+    with _ ->
+      false) fields
+
+
 
 let row_of (vg,pv_opt,lv_opt,seg_opt) nosuffix units output =
   List.fold_left (fun acc name ->
