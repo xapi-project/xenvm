@@ -198,7 +198,47 @@ let output_arg default_fields =
 let copts_t =
   Term.(pure make_copts $ config $ uri_arg)
 
+let kib = 1024L
+let sectors = 512L
+let mib = Int64.mul kib 1024L
+let gib = Int64.mul mib 1024L
+let tib = Int64.mul gib 1024L
+  
+let parse_size_string =
+  let re = Re_emacs.compile_pat "\\([0-9]+\\)\\(.*\\)" in
+  function s -> 
+    try
+      let substrings = Re.exec re s in
+      let multiplier =
+        match Re.get substrings 2 with
+        | "" | "M" | "m" -> mib
+        | "s" | "S" -> sectors
+        | "b" | "B" -> 1L
+        | "k" | "K" -> kib
+        | "g" | "G" -> gib
+        | "t" | "T" -> tib
+        | _ -> failwith "Unknown suffix"
+      in
+      Re.get substrings 1 |> Int64.of_string |> Int64.mul multiplier
+    with
+    | Not_found ->
+      failwith "Expecting a size of the form [0-9]+[mMbBkKgGtTsS]?"
 
+let parse_percent_size_string s = failwith "Unimplemented"
+
+let parse_size real_size percent_size = match real_size, percent_size with
+  | Some x, None -> parse_size_string x
+  | None, Some y -> parse_percent_size_string y
+  | Some _, Some _ -> failwith "Please don't give two sizes!"
+  | None, None -> failwith "Need a size!"
+
+let real_size_arg =
+  let doc = "Gives the size to  allocate for the logical volume. A size suffix of B for bytes, S for sectors as 512 bytes, K for kilobytes, M for megabytes, G for gigabytes, T for terabytes. Default unit is megabytes." in
+  Arg.(value & opt (some string) None & info ["L"; "size"] ~docv:"SIZE" ~doc)
+
+let percent_size_arg =
+  let doc = "Gives the size to allocate for the expressed as a percentage of the total space in the Volume Group with the suffix %VG, or as a percentage of the remaining free space in the Volume Group with the suffix %FREE" in
+  Arg.(value & opt (some string) None & info ["l"] ~docv:"PERCENTAGE%{VG|FREE}" ~doc)
 
 type vg_info_t = {
   uri : string;

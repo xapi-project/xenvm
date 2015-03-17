@@ -320,6 +320,7 @@ let default_cmd =
   Term.(pure help $ copts_t), info
       
 let cmds = [
+  Lvresize.lvresize_cmd;
   format_cmd; create_cmd; activate_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
