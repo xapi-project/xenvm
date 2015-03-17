@@ -5,10 +5,17 @@
 VAGRANTFILE_API_VERSION = "2"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-  config.vm.box = "chef/centos-7.0"
-  config.vm.provider "xenserver" do |v, override|
-    override.vm.box = "jonludlam/xs-centos-7"
+  config.vm.define "dev" do |dev|
+    dev.vm.box = "chef/centos-7.0"
+    dev.vm.provider "xenserver" do |v, override|
+      override.vm.box = "jonludlam/xs-centos-7"
+    end
+    dev.vm.provision "shell", path: "scripts/install_opam.sh", privileged: false
   end
 
-  config.vm.provision "shell", path: "scripts/install_opam.sh", privileged: false
+  config.vm.define "test" do |test|
+    test.vm.box_check_update = true
+    test.vm.box = "jonludlam/xs-trunk-ring3"
+    test.vm.provision "shell", inline: "hostname vg-tr3-test; echo vg-tr3-test > /etc/hostname"
+  end
 end
