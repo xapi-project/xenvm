@@ -331,6 +331,7 @@ let cmds = [
   Vgcreate.vgcreate_cmd;
   Vgs.vgs_cmd;
   Lvremove.lvremove_cmd;
+  Lvrename.lvrename_cmd;
 ]
 
 let () = match Term.eval_choice default_cmd cmds with
