@@ -99,7 +99,7 @@ let all_fields = [
   {key="vg_free"; name="VFree"; fn=Vg_fun (fun vg -> Size (Int64.mul vg.Lvm.Vg.extent_size (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space)))};
   {key="pv_name"; name="PV"; fn=Pv_fun (fun pv -> Literal (Lvm.Pv.Name.to_string pv.Lvm.Pv.name))};
   {key="pe_start"; name="1st PE"; fn=Pv_fun (fun pv -> Size pv.Lvm.Pv.pe_start)};
-  {key="seg_type"; name="Type"; fn=Seg_fun (fun seg -> Literal (match seg.Lvm.Lv.Segment.cls with | Lvm.Lv.Segment.Linear _ -> "linear"))};
+  {key="segtype"; name="Type"; fn=Seg_fun (fun seg -> Literal (match seg.Lvm.Lv.Segment.cls with | Lvm.Lv.Segment.Linear _ -> "linear"))};
   {key="seg_count"; name="#Seg"; fn=Lv_fun (fun lv -> Literal (string_of_int (List.length lv.Lvm.Lv.segments)))};
   {key="seg_start"; name="Start"; fn=VgSeg_fun (fun (vg,seg) -> Size (Int64.mul vg.Lvm.Vg.extent_size seg.Lvm.Lv.Segment.start_extent))};
   {key="seg_size"; name="SSize"; fn=VgSeg_fun (fun (vg,seg) -> Size (Int64.mul vg.Lvm.Vg.extent_size seg.Lvm.Lv.Segment.extent_count))};
