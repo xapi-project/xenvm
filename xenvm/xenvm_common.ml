@@ -28,9 +28,26 @@ type field = { key: string; name: string; fn:fieldfn }
 (* see https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/metadata/lv.c?id=v2_02_117#n643 
    for canonical description of this field. *)
 
+(* Since we're single-shot, cache the active devices here *)
+let devmapper_ls =
+  let cache = ref None in
+  fun () ->
+    match !cache with
+    | None ->
+      let ls = Devmapper.ls () in
+      cache := Some ls;
+      ls
+    | Some ls ->
+      ls
+
+let devmapper_stat name =
+  if List.mem name (devmapper_ls ())
+  then Devmapper.stat name
+  else None
+
 let attr_of_lv vg lv =
   let name = Mapper.name_of vg lv in
-  let info = Devmapper.stat name in
+  let info = devmapper_stat name in
   Printf.sprintf "%c%c%c%c%c%c%c%c%c%c"
     ('-')
     (if List.mem Lvm.Lv.Status.Write lv.Lvm.Lv.status
