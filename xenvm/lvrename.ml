@@ -3,7 +3,7 @@
 open Cmdliner
 open Lwt
 
-let lvrename copts (vg_name,lv_opt) newname =
+let lvrename copts (vg_name,lv_opt) newname physical_device =
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
   (* It seems you can say "vg/lv" or "lv" *)
   let newname = match newname with
@@ -13,9 +13,30 @@ let lvrename copts (vg_name,lv_opt) newname =
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    Client.get () >>= fun vg ->
+    let local_device = match (info,physical_device) with
+      | _, Some d -> d (* cmdline overrides default for the VG *)
+      | Some info, None -> info.local_device (* If we've got a default, use that *)
+      | None, None -> failwith "Need to know the local device!"
+    in
+    Client.get_lv ~name:lv_name >>= fun (vg, lv) ->                                                                              
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
-    Client.rename ~oldname:lv_name ~newname:newname)
+    Client.rename ~oldname:lv_name ~newname:newname
+    >>= fun () ->
+    (* Delete the old device node *)
+    Lwt.catch (fun () -> Lwt_unix.unlink (Printf.sprintf "/dev/%s/%s" vg_name lv_name)) (fun _ -> Lwt.return ()) >>= fun () ->
+    let all = Devmapper.ls () in
+    let old_name = Mapper.name_of vg lv in
+    if List.mem old_name all then begin
+      Devmapper.remove old_name;
+      Mapper.read [ local_device ]
+      >>= fun devices ->
+      let targets = Mapper.to_targets devices vg lv in
+      let new_name = Mapper.name_of vg { lv with Lvm.Lv.name = newname } in
+      Devmapper.create new_name targets;
+      Devmapper.mknod new_name (Printf.sprintf "/dev/%s/%s" vg_name newname) 0x0600;
+      return ()
+    end else return ()
+  )
 
 let new_name_arg =
   let doc = "New name for the LV" in
@@ -28,7 +49,7 @@ let lvrename_cmd =
     `S "DESCRIPTION";
     `P "lvrename renames an existing logical volume with a new name. The contents of the logical volume are unchanged."
   ] in
-  Term.(pure lvrename $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ new_name_arg),
+  Term.(pure lvrename $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ new_name_arg $ Xenvm_common.physical_device_arg),
   Term.info "lvrename" ~sdocs:"COMMON OPTIONS" ~doc ~man
 
   
