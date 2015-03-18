@@ -493,6 +493,11 @@ module Impl = struct
       Lvm.Vg.resize vg name size
     )
 
+  let set_status context ~name ~readonly =
+    VolumeManager.write (fun vg ->
+      Lvm.Vg.set_status vg name Lvm.Lv.Status.(if readonly then [Read] else [Read; Write])
+    )
+
   let get_lv context ~name =
     let open Lvm in
     fatal_error "get_lv"
