@@ -7,8 +7,7 @@ type action = Activate | Deactivate
 
 (* lvchange -a[n|y] /dev/VGNAME/LVNAME *)
 
-let lvchange_activate copts (vg_name,lv_name_opt) physical_device =
-  let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need to know an LV name" in
+let lvchange_activate copts vg_name lv_name physical_device =
   let open Xenvm_common in
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
@@ -34,8 +33,7 @@ let lvchange_activate copts (vg_name,lv_name_opt) physical_device =
     end;
     return ())
 
-let lvchange_deactivate copts (vg_name,lv_name_opt) =
-  let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need LV name" in
+let lvchange_deactivate copts vg_name lv_name =
   let open Xenvm_common in
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
@@ -47,11 +45,26 @@ let lvchange_deactivate copts (vg_name,lv_name_opt) =
     then Devmapper.remove name;
     return ())
 
-let lvchange copts name physical_device action =
-  match action with
-  | Some Activate -> lvchange_activate copts name physical_device
-  | Some Deactivate -> lvchange_deactivate copts name
-  | None -> ()
+let lvchange copts (vg_name,lv_name_opt) physical_device action perm =
+  let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need LV name" in
+  (match action with
+  | Some Activate -> lvchange_activate copts vg_name lv_name physical_device
+  | Some Deactivate -> lvchange_deactivate copts vg_name lv_name
+  | None -> ());
+  (match perm with
+  | Some x ->
+    let readonly =
+      match x with
+      | "r" -> true
+      | "rw" -> false
+      | _ -> failwith "Invalid permissions"
+    in
+    Lwt_main.run (
+        let open Xenvm_common in
+	get_vg_info_t copts vg_name >>= fun info ->
+	set_uri copts info;
+        Client.set_status ~name:lv_name ~readonly)
+  | None -> ())
     
 let action_arg =
   let parse_action c =
@@ -67,11 +80,15 @@ Activation  of a logical volume creates a symbolic link /dev/VolumeGroupName/Log
   let a = Arg.(value & opt (some char) None & info ["a"] ~docv:"ACTIVATE" ~doc) in
   Term.(pure parse_action $ a)
 
+let perm_arg =
+  let doc = "Change the permissions of logical volume. Possible values are 'r' or 'rw'" in
+  Arg.(value & opt (some string) None & info ["p"] ~docv:"PERMISSION" ~doc)
+    
 let lvchange_cmd =
   let doc = "Change the attributes of a logical volume" in
   let man = [
     `S "DESCRIPTION";
     `P "lvchange allows you to change the attributes of a logical volume including making them known to the kernel ready for use."
   ] in
-  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg),
+  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg),
   Term.info "lvchange" ~sdocs:"COMMON OPTIONS" ~doc ~man
