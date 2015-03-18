@@ -42,7 +42,9 @@ let lvchange_deactivate copts (vg_name,lv_name_opt) =
     set_uri copts info;
     Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
     let name = Mapper.name_of vg lv in
-    Devmapper.remove name;
+    let all = Devmapper.ls () in
+    if List.mem name all
+    then Devmapper.remove name;
     return ())
 
 let lvchange copts name physical_device action =
