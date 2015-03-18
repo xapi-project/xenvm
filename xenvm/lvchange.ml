@@ -26,8 +26,12 @@ let lvchange_activate copts (vg_name,lv_name_opt) physical_device =
     >>= fun devices ->
     let targets = Mapper.to_targets devices vg lv in
     let name = Mapper.name_of vg lv in
-    Devmapper.create name targets;
-    Devmapper.mknod name path 0o0600;
+    (* Don't recreate it if it already exists *)
+    let all = Devmapper.ls () in
+    if not(List.mem name all) then begin
+      Devmapper.create name targets;
+      Devmapper.mknod name path 0o0600;
+    end;
     return ())
 
 let lvchange_deactivate copts (vg_name,lv_name_opt) =
