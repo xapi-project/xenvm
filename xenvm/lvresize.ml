@@ -45,4 +45,11 @@ let lvresize_cmd =
   Term.(pure lvresize $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.real_size_arg $ Xenvm_common.percent_size_arg),
   Term.info "lvresize" ~sdocs:"COMMON OPTIONS" ~doc ~man
 
-  
+let lvextend_cmd =
+  let doc = "Resize a logical volume" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "lvextend will resize an existing logical volume.";
+  ] in
+  Term.(pure lvresize $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.real_size_arg $ Xenvm_common.percent_size_arg),
+  Term.info "lvextend" ~sdocs:"COMMON OPTIONS" ~doc ~man
