@@ -179,10 +179,9 @@ let copts_sect = "COMMON OPTIONS"
 type copts_t = {
   uri_override : string option; (* CLI set URI override *)
   config : string;
-  local_allocator_path: string option;
 }
 
-let make_copts config uri_override local_allocator_path = {uri_override; config; local_allocator_path}
+let make_copts config uri_override = {uri_override; config }
 
 let config =
   let doc = "Path to the config directory" in
@@ -199,10 +198,6 @@ let uri_arg_required =
 let local_allocator_path =
   let doc = "Path to the Unix domain socket where the local allocator is running." in
   Arg.(value & opt (some string) None & info [ "local-allocator-path" ] ~docv:"LOCAL" ~doc)
-
-let local_allocator_path_required =
-  let doc = "Path to the Unix domain socket where the local allocator is running." in
-  Arg.(required & opt (some string) None & info [ "local-allocator-path" ] ~docv:"LOCAL" ~doc)
 
 let physical_device_arg =
     let doc = "Path to the (single) physical PV" in
@@ -266,7 +261,7 @@ let output_arg default_fields =
   Term.(pure (parse_output default_fields) $ a)
 
 let copts_t =
-  Term.(pure make_copts $ config $ uri_arg $ local_allocator_path)
+  Term.(pure make_copts $ config $ uri_arg)
 
 let kib = 1024L
 let sectors = 512L
@@ -318,10 +313,11 @@ let percent_size_arg =
 type vg_info_t = {
   uri : string;
   local_device : string;
+  local_allocator_path : string option;
 } with sexp
 
-let set_vg_info_t copts uri local_device (vg_name,_) =
-  let info = {uri; local_device} in
+let set_vg_info_t copts uri local_device local_allocator_path (vg_name,_) =
+  let info = {uri; local_device; local_allocator_path } in
   let filename = Filename.concat copts.config vg_name in
   let s = sexp_of_vg_info_t info |> Sexplib.Sexp.to_string in
   Lwt.catch (fun () -> Lwt_io.with_file ~mode:Lwt_io.Output filename (fun f ->
@@ -336,8 +332,8 @@ let set_vg_info_t copts uri local_device (vg_name,_) =
     |e -> Lwt.fail e)
 
 let run_set_vg_info_t config uri local_allocator_path local_device vg_name =
-  let copts = make_copts config (Some uri) (Some local_allocator_path) in
-  Lwt_main.run (set_vg_info_t copts uri local_device vg_name)
+  let copts = make_copts config (Some uri) in
+  Lwt_main.run (set_vg_info_t copts uri local_device local_allocator_path vg_name)
   
 let get_vg_info_t copts vg_name =
   let open Lwt in
@@ -358,7 +354,7 @@ let set_vg_info_cmd =
     `P "This command takes a physical device path and a URI, and will write these to the
 filesystem. Subsequent xenvm commands will use these as defaults.";
   ] in
-  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ local_allocator_path_required $ physical_device_arg_required $ name_arg),
+  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ local_allocator_path $ physical_device_arg_required $ name_arg),
   Term.info "set-vg-info" ~sdocs:copts_sect ~doc ~man
 
 

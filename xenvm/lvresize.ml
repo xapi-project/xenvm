@@ -31,17 +31,17 @@ let lvresize copts (vg_name,lv_opt) real_size percent_size =
       >>= fun () ->
       Lwt_io.close oc in
 
-    match copts.Xenvm_common.local_allocator_path with
-    | None ->
-      (* safe to allocate remotely *)
-      resize_remotely ()
-    | Some allocator ->
+    match info with
+    | Some { Xenvm_common.local_allocator_path = Some allocator } ->
       let name = Mapper.name_of vg lv in
       let all = Devmapper.ls () in
       (* An active device with local allocator running must be resized locally *)
       if List.mem name all
       then resize_locally allocator
       else resize_remotely ()
+    | _ ->
+      (* safe to allocate remotely *)
+      resize_remotely ()
   )
 
 let lvresize_cmd =
