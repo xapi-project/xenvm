@@ -427,12 +427,12 @@ let main config daemon socket journal fromLVM toLVM =
 open Cmdliner
 let info =
   let doc =
-    "Local block allocator" in
+    "Xenvm: local block allocator" in
   let man = [
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.info "local-allocator" ~version:"0.1-alpha" ~doc ~man
+  Term.info "xenvm-local-allocator" ~version:"0.1-alpha" ~doc ~man
 
 let config =
   let doc = "Path to the config file" in
