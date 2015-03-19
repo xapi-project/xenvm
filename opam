@@ -5,7 +5,7 @@ tags: [
 ]
 build: [
   [make "all"]
-  [make "install"]
+  [make "install" "BINDIR=%{bin}%"]
 ]
 remove: [
   [make "uninstall"]

@@ -4,6 +4,8 @@ all: build doc
 export OCAMLRUNPARAM=b
 NAME=xenvmidl
 
+BINDIR?=/sbin
+
 setup.bin: setup.ml
 	@ocamlopt.opt -o $@ $< || ocamlopt -o $@ $< || ocamlc -o $@ $<
 	@rm -f setup.cmx setup.cmi setup.o setup.cmo
@@ -21,9 +23,9 @@ setup.ml: _oasis
 	@oasis setup
 
 install: setup.bin
-	install -m 0755 xenvmd.native /sbin/xenvmd
-	install -m 0755 xenvm.native /sbin/xenvm
-	install -m 0755 local_allocator.native /sbin/xenvm-local-allocator
+	install -m 0755 xenvmd.native ${BINDIR}/xenvmd
+	install -m 0755 xenvm.native ${BINDIR}/xenvm
+	install -m 0755 local_allocator.native ${BINDIR}/xenvm-local-allocator
 
 uninstall:
 	@ocamlfind remove $(NAME) || true
