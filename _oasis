@@ -13,8 +13,8 @@ Library xenvmidl
   CompiledObject:     best
   Path:               idl
   Findlibname:        xenvmidl
-  Modules:            Xenvm_interface, Xenvm_client, Log, Result, Errors
-  BuildDepends:       rpclib, rpclib.syntax, lvm, cohttp.lwt, threads, bisect
+  Modules:            Xenvm_interface, Xenvm_client, Log, Result, Errors, ResizeRequest
+  BuildDepends:       rpclib, rpclib.syntax, sexplib, sexplib.syntax, lvm, cohttp.lwt, threads, bisect, mirage-block-unix, devmapper
 
 Executable "xenvmd"
   ByteOpt:            -warn-error +a
@@ -36,11 +36,11 @@ Executable "xenvm"
   Install:            false
   BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax, bisect
 
-Executable "local_allocator"
+Executable "xenvm-local-allocator"
   ByteOpt:            -warn-error +a
   NativeOpt:          -warn-error +a
   CompiledObject:     best
-  Path:               .
+  Path:               xenvm-local-allocator
   MainIs:             local_allocator.ml
   Custom:             true
   Install:            false

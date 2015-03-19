@@ -122,7 +122,7 @@ module VolumeManager = struct
         | `Ok x -> return x
       ) devices'
     >>= fun devices' ->
-    Vg_IO.connect devices' `RW >>|= fun vg ->
+    Vg_IO.connect ~flush_interval:5. devices' `RW >>|= fun vg ->
     Lwt.wakeup_later myvg_u vg;
     return ()
 
@@ -138,6 +138,14 @@ module VolumeManager = struct
       fn (Vg_IO.metadata_of myvg)
       >>*= fun (_, op) ->
       Vg_IO.update myvg [ op ]
+      >>|= fun () ->
+      Lwt.return ()
+    )
+
+  let sync () =
+    Lwt_mutex.with_lock lock (fun () ->
+      myvg >>= fun myvg ->
+      Vg_IO.sync myvg
       >>|= fun () ->
       Lwt.return ()
     )
@@ -166,6 +174,8 @@ module VolumeManager = struct
       write (fun vg ->
         Lvm.Vg.create vg freeLVM size
       ) >>= fun () ->
+      (* The local allocator needs to see the volumes now *)
+      sync () >>= fun () ->
       myvg >>= fun vg ->
       ( match Vg_IO.find vg toLVM with
         | Some lv -> return lv
