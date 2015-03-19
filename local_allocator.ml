@@ -6,7 +6,6 @@ open Errors
 module Config = struct
   type t = {
     socket: string; (* listen on this socket *)
-    port: int; (* listen on this port *)
     allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
     localJournal: string; (* path to the host local journal *)
     devices: string list; (* devices containing the PVs *)
@@ -400,13 +399,12 @@ let main config daemon socket journal fromLVM toLVM =
       handler device
       >>= fun () ->
       stdin () in
-    let read_stdin = stdin () in
 
-    let s = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
+    let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
     Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR true;
-    Lwt_unix.bind s (Lwt_unix.ADDR_INET(Unix.inet_addr_of_string "0.0.0.0", config.Config.port));
+    Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.Config.socket));
     Lwt_unix.listen s 5;
-    let rec tcp () =
+    let rec unix () =
       Lwt_unix.accept s
       >>= fun (fd, _) ->
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
@@ -417,10 +415,9 @@ let main config daemon socket journal fromLVM toLVM =
       >>= fun () ->
       Lwt_io.close ic
       >>= fun () ->
-      tcp () in
-    let listen_tcp = tcp () in
-    
-    Lwt.join [ read_stdin; listen_tcp ] in
+      unix () in
+    let listen_unix = unix () in
+    Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ])) in
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->

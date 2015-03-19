@@ -1,6 +1,5 @@
 (
  (socket socket)
- (port 8081)
  (allocation_quantum 16)
  (localJournal localJournal)
  (devices (/dev/loop0))
