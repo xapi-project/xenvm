@@ -421,6 +421,8 @@ let main config daemon socket journal fromLVM toLVM =
 
     let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
     Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR true;
+    Lwt.catch (fun () -> Lwt_unix.unlink config.Config.socket) (fun _ -> return ())
+    >>= fun () ->
     Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.Config.socket));
     Lwt_unix.listen s 5;
     let rec unix () =
