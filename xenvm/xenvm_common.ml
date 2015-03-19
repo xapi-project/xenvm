@@ -178,10 +178,11 @@ let copts_sect = "COMMON OPTIONS"
 
 type copts_t = {
   uri_override : string option; (* CLI set URI override *)
-  config : string; 
+  config : string;
+  local_allocator_path: string option;
 }
 
-let make_copts config uri_override = {uri_override; config}
+let make_copts config uri_override local_allocator_path = {uri_override; config; local_allocator_path}
 
 let config =
   let doc = "Path to the config directory" in
@@ -194,6 +195,14 @@ let uri_arg =
 let uri_arg_required =
   let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
   Arg.(required & opt (some string) None & info ["u"; "uri"] ~docv:"URI" ~doc)
+
+let local_allocator_path =
+  let doc = "Path to the Unix domain socket where the local allocator is running." in
+  Arg.(value & opt (some string) None & info [ "local-allocator-path" ] ~docv:"LOCAL" ~doc)
+
+let local_allocator_path_required =
+  let doc = "Path to the Unix domain socket where the local allocator is running." in
+  Arg.(required & opt (some string) None & info [ "local-allocator-path" ] ~docv:"LOCAL" ~doc)
 
 let physical_device_arg =
     let doc = "Path to the (single) physical PV" in
@@ -257,7 +266,7 @@ let output_arg default_fields =
   Term.(pure (parse_output default_fields) $ a)
 
 let copts_t =
-  Term.(pure make_copts $ config $ uri_arg)
+  Term.(pure make_copts $ config $ uri_arg $ local_allocator_path)
 
 let kib = 1024L
 let sectors = 512L
@@ -288,7 +297,12 @@ let parse_size_string =
 let parse_percent_size_string s = failwith "Unimplemented"
 
 let parse_size real_size percent_size = match real_size, percent_size with
-  | Some x, None -> parse_size_string x
+  | Some x, None ->
+    begin match x.[0] with
+    | '+' -> `IncreaseBy (parse_size_string (String.sub x 1 (String.length x - 1)))
+    | '-' -> `DecreaseBy (parse_size_string (String.sub x 1 (String.length x - 1)))
+    | _ -> `Absolute (parse_size_string x)
+    end
   | None, Some y -> parse_percent_size_string y
   | Some _, Some _ -> failwith "Please don't give two sizes!"
   | None, None -> failwith "Need a size!"
@@ -321,8 +335,8 @@ let set_vg_info_t copts uri local_device (vg_name,_) =
       exit 1
     |e -> Lwt.fail e)
 
-let run_set_vg_info_t config uri local_device vg_name =
-  let copts = make_copts config (Some uri) in
+let run_set_vg_info_t config uri local_allocator_path local_device vg_name =
+  let copts = make_copts config (Some uri) (Some local_allocator_path) in
   Lwt_main.run (set_vg_info_t copts uri local_device vg_name)
   
 let get_vg_info_t copts vg_name =
@@ -344,7 +358,7 @@ let set_vg_info_cmd =
     `P "This command takes a physical device path and a URI, and will write these to the
 filesystem. Subsequent xenvm commands will use these as defaults.";
   ] in
-  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ physical_device_arg_required $ name_arg),
+  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ local_allocator_path_required $ physical_device_arg_required $ name_arg),
   Term.info "set-vg-info" ~sdocs:copts_sect ~doc ~man
 
 
