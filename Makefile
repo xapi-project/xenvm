@@ -21,7 +21,9 @@ setup.ml: _oasis
 	@oasis setup
 
 install: setup.bin
-	@./setup.bin -install
+	install -m 0755 xenvmd.native /sbin/xenvmd
+	install -m 0755 xenvm.native /sbin/xenvm
+	install -m 0755 local_allocator.native /sbin/xenvm-local-allocator
 
 uninstall:
 	@ocamlfind remove $(NAME) || true
