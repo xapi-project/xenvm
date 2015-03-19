@@ -393,7 +393,7 @@ let main config daemon socket journal fromLVM toLVM =
                   error "Request for -ve number of extents";
                   return ()
                 end else begin
-                  FreePool.remove Int64.(div nr_extents extent_size_mib)
+                  FreePool.remove nr_extents
                   >>= fun extents ->
                   let segments, targets = extend_volume vg_device metadata data_volume extents in
                   let _, volume = Mapper.vg_lv_of_name device in
