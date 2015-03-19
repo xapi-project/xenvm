@@ -366,7 +366,7 @@ let main config daemon socket journal fromLVM toLVM =
        blocks to 2 different LVs. *)
     let handler =
       let m = Lwt_mutex.create () in
-      fun device ->
+      fun { ResizeRequest.local_dm_name = device; action } ->
         Lwt_mutex.with_lock m
           (fun () ->
             ( match Devmapper.stat device with
@@ -376,17 +376,29 @@ let main config daemon socket journal fromLVM toLVM =
                 error "Couldn't find device mapper device: %s" device;
                 return ()
               | Some data_volume ->
-                FreePool.remove Int64.(div config.Config.allocation_quantum extent_size_mib)
-                >>= fun extents ->
-                let segments, targets = extend_volume vg_device metadata data_volume extents in
-                let _, volume = Mapper.vg_lv_of_name device in
-                let volume = { ExpandVolume.volume; segments } in
-                let device = { ExpandDevice.extents; device; targets } in
-                J.push j { Op.volume; device }
-                >>|= fun wait ->
-                (* The operation is now in the journal *)
-                wait ()
-                (* The operation is now complete *)
+                let sector_size = Int64.of_int sector_size in
+                let current = Int64.mul sector_size (sizeof data_volume) in
+                let nr_extents = match action with
+                | `Absolute x ->
+                  Int64.(div (div (sub x current) sector_size) extent_size)
+                | `IncreaseBy x ->
+                  Int64.(div (div x sector_size) extent_size) in
+                if nr_extents < 0L then begin
+                  error "Request for -ve number of extents";
+                  return ()
+                end else begin
+                  FreePool.remove Int64.(div nr_extents extent_size_mib)
+                  >>= fun extents ->
+                  let segments, targets = extend_volume vg_device metadata data_volume extents in
+                  let _, volume = Mapper.vg_lv_of_name device in
+                  let volume = { ExpandVolume.volume; segments } in
+                  let device = { ExpandDevice.extents; device; targets } in
+                  J.push j { Op.volume; device }
+                  >>|= fun wait ->
+                  (* The operation is now in the journal *)
+                  wait ()
+                  (* The operation is now complete *)
+                end
             )
           ) in
 
@@ -396,7 +408,8 @@ let main config daemon socket journal fromLVM toLVM =
     let rec stdin () =
       Lwt_io.read_line Lwt_io.stdin
       >>= fun device ->
-      handler device
+      let r = { ResizeRequest.local_dm_name = device; action = `IncreaseBy 1L } in
+      handler r
       >>= fun () ->
       stdin () in
 
@@ -410,8 +423,9 @@ let main config daemon socket journal fromLVM toLVM =
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
       (* read one line *)
       Lwt_io.read_line ic
-      >>= fun device ->
-      handler device
+      >>= fun message ->
+      let r = ResizeRequest.t_of_sexp (Sexplib.Sexp.of_string message) in
+      handler r
       >>= fun () ->
       Lwt_io.close ic
       >>= fun () ->
