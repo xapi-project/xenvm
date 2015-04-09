@@ -344,7 +344,7 @@ let main config daemon socket journal fromLVM toLVM =
       >>= fun () ->
       return (`Ok ()) in
 
-    let module J = Shared_block.Journal.Make(Log)(Block)(Op) in
+    let module J = Shared_block.Journal.Make(Log)(Block)(Time)(Clock)(Op) in
     ( if not (Sys.file_exists config.Config.localJournal) then begin
         info "Creating an empty journal: %s" config.Config.localJournal;
         Lwt_unix.openfile config.Config.localJournal [ Lwt_unix.O_CREAT; Lwt_unix.O_WRONLY ] 0o0666 >>= fun fd ->

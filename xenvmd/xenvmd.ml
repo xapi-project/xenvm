@@ -365,7 +365,7 @@ module FreePool = struct
     >>= fun () ->
     return (`Ok ())
 
-  module J = Shared_block.Journal.Make(Log)(Vg_IO.Volume)(Op)
+  module J = Shared_block.Journal.Make(Log)(Vg_IO.Volume)(Time)(Clock)(Op)
 
   let journal = ref None
 
