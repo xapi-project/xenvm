@@ -1,7 +1,7 @@
-thin-lvhd-tools
-===============
+xenvm
+=====
 
-[![Build Status](https://travis-ci.org/djs55/thin-lvhd-tools.png?branch=master)](https://travis-ci.org/djs55/thin-lvhd-tools) [![Coverage Status](https://coveralls.io/repos/djs55/thin-lvhd-tools/badge.png?branch=master)](https://coveralls.io/r/djs55/thin-lvhd-tools?branch=master)
+[![Build Status](https://travis-ci.org/xapi-project/xenvm.png?branch=master)](https://travis-ci.org/xapi-project/xenvm) [![Coverage Status](https://coveralls.io/repos/xapi-project/xenvm/badge.png?branch=master)](https://coveralls.io/r/xapi-project/xenvm?branch=master)
 
 Support tools for a thin lvhd implementation as described in
 [the design doc](http://xapi-project.github.io/xapi/futures/thin-lvhd/thin-lvhd.html).

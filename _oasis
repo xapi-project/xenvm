@@ -1,7 +1,7 @@
 OASISFormat: 0.3
-Name:        thin-lvhd-tools
+Name:        xenvm
 Version:     0.1
-Synopsis:    Simple thin LVHD tools
+Synopsis:    LVM-like volume manager supporting thinly provisioned LVs
 Authors:     David Scott
 License:     ISC
 Plugins:     META (0.3)

@@ -1,7 +1,7 @@
 # OASIS_START
-# DO NOT EDIT (digest: 79b9edab5763a0163b1942757a4baa5f)
+# DO NOT EDIT (digest: 798568431db55f5a6dcaff164adbe75d)
 version = "0.1"
-description = "Simple thin LVHD tools"
+description = "LVM-like volume manager supporting thinly provisioned LVs"
 requires =
 "rpclib rpclib.syntax sexplib sexplib.syntax lvm cohttp.lwt threads bisect mirage-block-unix devmapper"
 archive(byte) = "xenvmidl.cma"
