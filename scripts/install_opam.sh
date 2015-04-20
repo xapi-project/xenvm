@@ -16,6 +16,6 @@ eval `opam config env`
 # without lwt support, even though it's mentioned as a depext
 opam install lwt
 
-opam remote add thinlvhd git://github.com/xapi-project/thin-lvhd-opam-repo
-opam install -y thin-lvhd-tools
+opam remote add xapi-project git://github.com/xapi-project/opam-repo-dev
+opam install -y xenvm
 
