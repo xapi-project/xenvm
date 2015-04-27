@@ -1,5 +1,7 @@
 (* XenVM LVM type thing *)
 
+exception HostNotCreated
+
 let _journal_name = "xenvm_journal"
 
 external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""
