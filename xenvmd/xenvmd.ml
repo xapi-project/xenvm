@@ -216,6 +216,10 @@ module VolumeManager = struct
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
       let freeLVM = freeLVM name in
+      ( try
+	  Lwt.return (Lvm.Vg.LVs.find_by_name freeLVM (Vg_IO.metadata_of vg).Lvm.Vg.lvs).Lvm.Lv.id
+        with _ ->
+	  fail Xenvm_interface.HostNotCreated ) >>= fun freeLVMid ->
       ( match Vg_IO.find vg toLVM with
         | Some lv -> return lv
         | None -> assert false ) >>= fun v ->
@@ -227,7 +231,6 @@ module VolumeManager = struct
       >>= fun to_LVM ->
       ToLVM.resume to_LVM
       >>= fun () ->
-
       ( match Vg_IO.find vg fromLVM with
         | Some lv -> return lv
         | None -> assert false ) >>= fun v ->
@@ -239,7 +242,7 @@ module VolumeManager = struct
       >>= fun from_LVM ->
       to_LVMs := (name, to_LVM) :: !to_LVMs;
       from_LVMs := (name, from_LVM) :: !from_LVMs;
-      free_LVs := (name, freeLVM) :: !free_LVs;
+      free_LVs := (name, (freeLVM,freeLVMid)) :: !free_LVs;
       return ()
 
     let flush name =
@@ -251,11 +254,12 @@ module VolumeManager = struct
         >>= fun (pos, items) ->
         Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
           write (fun vg ->
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(volume, { lvex_segments = segments })))
+	      let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
+            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(id, { lvex_segments = segments })))
           ) >>= fun () ->
           write (fun vg ->
-            let free = (List.assoc name !free_LVs) in
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(free, { lvc_segments = segments })))
+            let (_,freeid) = (List.assoc name !free_LVs) in
+            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(freeid, { lvc_segments = segments })))
           )
         ) items
         >>= fun () ->
@@ -312,7 +316,7 @@ module VolumeManager = struct
           let fromLVM = { Xenvm_interface.lv; suspended } in
           read (fun vg ->
             try
-              let lv = Lvm.Vg.LVs.find (freeLVM name) vg.Lvm.Vg.lvs in
+              let lv = Lvm.Vg.LVs.find_by_name (freeLVM name) vg.Lvm.Vg.lvs in
               return (Lvm.Lv.size_in_extents lv)
             with Not_found -> return 0L
           ) >>= fun freeExtents ->
@@ -351,16 +355,16 @@ module FreePool = struct
       let q = try Some(List.assoc host !VolumeManager.from_LVMs) with Not_found -> None in
       let host' = try Some(List.assoc host !VolumeManager.free_LVs) with Not_found -> None in
       begin match q, host' with
-      | Some from_lvm, Some free  ->
+      | Some from_lvm, Some (freename,freeid)  ->
         VolumeManager.write
           (fun vg ->
-             match (try Some(Lvm.Vg.LVs.find free vg.Lvm.Vg.lvs) with Not_found -> None) with
+             match (try Some(Lvm.Vg.LVs.find freeid vg.Lvm.Vg.lvs) with Not_found -> None) with
              | None ->
-               `Error (`Msg (Printf.sprintf "Failed to find volume %s" free))
+               `Error (`Msg (Printf.sprintf "Failed to find volume %s" freename))
              | Some lv ->
                let size = Lvm.Lv.size_in_extents lv in
                let segments = Lvm.Lv.Segment.linear size allocation in
-               Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(free, { lvex_segments = segments })))
+               Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(freeid, { lvex_segments = segments })))
           )
         >>= fun () ->
         FromLVM.push from_lvm allocation
@@ -411,7 +415,7 @@ module FreePool = struct
     >>= fun lvm ->
 
     Lwt_list.iter_s
-      (fun (host, free) ->
+      (fun (host, (freename,freeid)) ->
         (* XXX: need to lock the host somehow. Ideally we would still service
            other queues while one host is locked. *)
         let from_lvm = List.assoc host !VolumeManager.from_LVMs in
@@ -430,9 +434,9 @@ module FreePool = struct
           wait ()
           >>= fun () ->
           fatal_error "resend_free_volumes"
-            ( match try Some(Lvm.Vg.LVs.find free lvm.Lvm.Vg.lvs) with _ -> None with
+            ( match try Some(Lvm.Vg.LVs.find freeid lvm.Lvm.Vg.lvs) with _ -> None with
               | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
-              | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" free))) )
+              | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" freename))) )
           >>= fun allocation ->
           FromLVM.push from_lvm allocation
           >>= fun pos ->
@@ -451,18 +455,18 @@ module FreePool = struct
       let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
       (* XXX: avoid double-allocating the same free blocks *)
       Lwt_list.iter_s
-       (fun (host, free) ->
-         match try Some(Lvm.Vg.LVs.find free x.Lvm.Vg.lvs) with _ -> None with
+       (fun (host, (freename,freeid)) ->
+         match try Some(Lvm.Vg.LVs.find freeid x.Lvm.Vg.lvs) with _ -> None with
          | Some lv ->
            let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
            if size_mib < config.Config.host_low_water_mark then begin
              info "LV %s is %Ld MiB < low_water_mark %Ld MiB; allocating %Ld MiB"
-               free size_mib config.Config.host_low_water_mark config.Config.host_allocation_quantum;
+               freename size_mib config.Config.host_low_water_mark config.Config.host_allocation_quantum;
              (* find free space in the VG *)
              begin match !journal, Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.Config.host_allocation_quantum extent_size_mib) with
              | _, `Error (`OnlyThisMuchFree free_extents) ->
                info "LV %s is %Ld MiB but total space free (%Ld MiB) is less than allocation quantum (%Ld MiB)"
-                 free size_mib Int64.(mul free_extents extent_size_mib) config.Config.host_allocation_quantum;
+                 freename size_mib Int64.(mul free_extents extent_size_mib) config.Config.host_allocation_quantum;
                (* try again later *)
                return ()
              | Some j, `Ok allocated_extents ->
@@ -472,12 +476,12 @@ module FreePool = struct
                wait ()
                (* The operation has been performed *)
              | None, `Ok _ ->
-               error "Unable to extend LV %s because the journal is not configured" free;
+               error "Unable to extend LV %s because the journal is not configured" freename;
                return ()
              end
            end else return ()
          | None ->
-           error "Failed to find host %s free LV %s" host free;
+           error "Failed to find host %s free LV %s" host freename;
            return ()
        ) !VolumeManager.free_LVs
 end
@@ -523,7 +527,7 @@ module Impl = struct
     let open Lvm in
     fatal_error "get_lv"
       (VolumeManager.read (fun vg ->
-        let lv = Lvm.Vg.LVs.find name vg.Vg.lvs in
+        let lv = Lvm.Vg.LVs.find_by_name name vg.Vg.lvs in
         return (`Ok ({ vg with Vg.lvs = Vg.LVs.empty }, lv))
       ))
 
