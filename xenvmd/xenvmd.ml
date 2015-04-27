@@ -161,44 +161,55 @@ module VolumeManager = struct
 
   module Host = struct
     let create name =
-      let size = Int64.(mul 4L (mul 1024L 1024L)) in
+      let freeLVM = freeLVM name in
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
-      let freeLVM = freeLVM name in
-      write (fun vg ->
-        Lvm.Vg.create vg toLVM size
-      ) >>= fun () ->
-      write (fun vg ->
-        Lvm.Vg.create vg fromLVM size
-      ) >>= fun () ->
-      write (fun vg ->
-        Lvm.Vg.create vg freeLVM size
-      ) >>= fun () ->
-      (* The local allocator needs to see the volumes now *)
-      sync () >>= fun () ->
       myvg >>= fun vg ->
-      ( match Vg_IO.find vg toLVM with
-        | Some lv -> return lv
-        | None -> assert false ) >>= fun v ->
-      Vg_IO.Volume.connect v
-      >>= function
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
-      | `Ok disk ->
-      ToLVM.create ~disk ()
-      >>= fun () ->
-      Vg_IO.Volume.disconnect disk
-      >>= fun () ->
-      ( match Vg_IO.find vg fromLVM with
-        | Some lv -> return lv
-        | None -> assert false ) >>= fun v ->
-      Vg_IO.Volume.connect v
-      >>= function
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
-      | `Ok disk ->
-      FromLVM.create ~disk ()
-      >>= fun () ->
-      Vg_IO.Volume.disconnect disk
-  
+      match Vg_IO.find vg freeLVM with
+      |	Some lv ->
+	debug "Found freeLVM exists already";
+	return () (* We've already done this *)
+      | None -> begin
+	  debug "No freeLVM volume";
+	  let size = Int64.(mul 4L (mul 1024L 1024L)) in
+          write (fun vg ->
+            Lvm.Vg.create vg toLVM size
+          ) >>= fun () ->
+          write (fun vg ->
+            Lvm.Vg.create vg fromLVM size
+          ) >>= fun () ->
+          (* The local allocator needs to see the volumes now *)
+          sync () >>= fun () ->
+          myvg >>= fun vg ->
+          ( match Vg_IO.find vg toLVM with
+            | Some lv -> return lv
+            | None -> assert false ) >>= fun v ->
+          Vg_IO.Volume.connect v
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
+          | `Ok disk ->
+          ToLVM.create ~disk ()
+          >>= fun () ->
+          Vg_IO.Volume.disconnect disk
+          >>= fun () ->
+          ( match Vg_IO.find vg fromLVM with
+            | Some lv -> return lv
+            | None -> assert false ) >>= fun v ->
+          Vg_IO.Volume.connect v
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
+          | `Ok disk ->
+          FromLVM.create ~disk ()
+          >>= fun () ->
+          Vg_IO.Volume.disconnect disk >>= fun () ->
+          (* Create the freeLVM LV at the end - we can use the existence
+             of this as a flag to show that we've finished host creation *)
+          write (fun vg ->
+            Lvm.Vg.create vg freeLVM size
+          ) >>= fun () ->
+          sync ()
+	end
+      
     let connect name =
       myvg >>= fun vg ->
       info "Registering host %s" name;
