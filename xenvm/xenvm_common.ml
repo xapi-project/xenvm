@@ -20,6 +20,7 @@ type fieldfn =
   | Vg_fun of (Lvm.Vg.metadata -> fieldty)
   | VgLv_fun of (Lvm.Vg.metadata * Lvm.Lv.t -> fieldty)
   | Pv_fun of (Lvm.Pv.t -> fieldty)
+  | VgPv_fun of (Lvm.Vg.metadata * Lvm.Pv.t -> fieldty)
   | Seg_fun of (Lvm.Lv.Segment.t -> fieldty)
   | VgSeg_fun of (Lvm.Vg.metadata * Lvm.Lv.Segment.t -> fieldty)
 
@@ -86,6 +87,13 @@ let attr_of_vg vg =
     ('n') (* Allocation policy - (c)ontiguous, c(l)ing, (n)ormal, (a)nywhere *)
     ('-') (* clustered *)
 
+let attr_of_pv pv =
+  let open Lvm.Pv in
+  Printf.sprintf "%c--"
+    (if List.mem Status.Allocatable pv.status
+     then 'a'
+     else '-')
+
 let devices_of_seg seg =
   let open Lvm.Lv in
   match seg.Segment.cls with
@@ -106,6 +114,12 @@ let all_fields = [
   {key="mirror_log"; name="Log"; fn=Lv_fun (fun _ -> Literal "")};
   {key="copy_percent"; name="Cpy%Sync"; fn=Lv_fun (fun _ -> Literal "")};
   {key="convert_lv"; name="Convert"; fn=Lv_fun (fun _ -> Literal "")};
+  {key="pv_fmt"; name="Fmt"; fn=Pv_fun (fun _ -> Literal "lvm2")};
+  {key="pv_attr"; name="Attr"; fn=Pv_fun (fun pv -> Literal (attr_of_pv pv))};
+
+  {key="pv_size"; name="PSize"; fn=VgPv_fun (fun (vg, pv) -> Size (Int64.mul vg.Lvm.Vg.extent_size pv.Lvm.Pv.pe_count))};
+  {key="pv_free"; name="PFree"; fn=VgPv_fun (fun (vg, pv) -> Size (Int64.mul vg.Lvm.Vg.extent_size (Lvm.Pv.Allocator.size (List.filter (fun (name, _) -> name = pv.Lvm.Pv.name) vg.Lvm.Vg.free_space))))};
+
   {key="lv_tags"; name="LV Tags"; fn=Lv_fun (fun lv -> Literal (String.concat "," (List.map Lvm.Name.Tag.to_string lv.Lvm.Lv.tags)))};
   
   {key="pv_count"; name="#PV"; fn=Vg_fun (fun vg -> Literal (string_of_int (List.length vg.Lvm.Vg.pvs)))};
@@ -156,6 +170,7 @@ let row_of (vg,pv_opt,lv_opt,seg_opt) nosuffix units output =
         | (VgLv_fun f),_,Some lv,_ -> (f (vg,lv))::acc
         | (Lv_fun f),_,Some lv,_ -> (f lv)::acc
         | (Pv_fun f),Some pv,_,_ -> (f pv)::acc
+        | (VgPv_fun f),Some pv,_,_ -> (f (vg, pv))::acc
         | (Seg_fun f),_,_,Some s -> (f s)::acc
         | (VgSeg_fun f),_,_,Some s -> (f (vg,s))::acc
         | _,_,_,_ -> acc)
@@ -225,6 +240,10 @@ let names_arg =
   let doc = "Path to the volume groups. Usually of the form /dev/VGNAME" in
   let n = Arg.(non_empty & pos_all string [] & info [] ~docv:"VOLUMEGROUP" ~doc) in
   Term.(pure (List.map parse_name) $ n)
+
+let devices_arg =
+  let doc = "Path to the devices" in
+  Arg.(non_empty & pos_all file [] & info [] ~docv:"DEVICE" ~doc)
 
 let noheadings_arg =
   let doc = "Suppress the headings line that is normally the first line of output.  Useful if grepping the output." in
