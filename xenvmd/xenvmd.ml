@@ -639,6 +639,7 @@ let cmd =
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
+   Random.self_init ();
    match Term.eval cmd with | `Error _ -> exit 1 | _ -> exit 0
 
 

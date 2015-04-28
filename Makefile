@@ -37,6 +37,11 @@ reinstall: setup.bin
 	@ocamlfind remove $(NAME) || true
 	@./setup.bin -reinstall
 
+release:
+	# Remove our dependencies on bisect
+	sed -i -r s'/, bisect//g' _oasis
+	sed -i -r s'/\"bisect\"//g' opam
+
 clean:
 	@ocamlbuild -clean
 	@rm -f setup.data setup.log setup.bin
