@@ -194,7 +194,7 @@ let filenames =
   Arg.(non_empty & pos_all file [] & info [] ~docv:"FILENAMES" ~doc)
 
 let filename =
-  let doc = "Path to the files" in
+  let doc = "Path to the file" in
   Arg.(required & pos 0 (some file) None & info [] ~docv:"FILENAME" ~doc)
 
 let vgname =
@@ -332,6 +332,7 @@ let cmds = [
   set_vg_info_cmd;
   Vgcreate.vgcreate_cmd;
   Vgs.vgs_cmd;
+  Pvs.pvs_cmd;
   Lvremove.lvremove_cmd;
   Lvrename.lvrename_cmd;
 ]
