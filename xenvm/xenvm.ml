@@ -333,6 +333,8 @@ let cmds = [
   Vgcreate.vgcreate_cmd;
   Vgs.vgs_cmd;
   Pvs.pvs_cmd;
+  Vgremove.vgremove_cmd;
+  Pvremove.pvremove_cmd;
   Lvremove.lvremove_cmd;
   Lvrename.lvrename_cmd;
 ]
