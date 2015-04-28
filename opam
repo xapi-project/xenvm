@@ -19,7 +19,7 @@ depends: [
   "mirage-clock-unix"
   "camldm"
   "cmdliner"
-  "bisect"
+  
   "cohttp"
   "rpc"
   "sexplib"

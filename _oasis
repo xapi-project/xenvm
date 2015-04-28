@@ -14,7 +14,7 @@ Library xenvmidl
   Path:               idl
   Findlibname:        xenvmidl
   Modules:            Xenvm_interface, Xenvm_client, Log, Result, Errors, ResizeRequest
-  BuildDepends:       rpclib, rpclib.syntax, sexplib, sexplib.syntax, lvm, cohttp.lwt, threads, mirage-block-unix, devmapper, bisect
+  BuildDepends:       rpclib, rpclib.syntax, sexplib, sexplib.syntax, lvm, cohttp.lwt, threads, mirage-block-unix, devmapper
 
 Executable "xenvmd"
   ByteOpt:            -warn-error +a
@@ -24,7 +24,7 @@ Executable "xenvmd"
   MainIs:             xenvmd.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring, bisect
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring
 
 Executable "xenvm"
   ByteOpt:            -warn-error +a
@@ -34,7 +34,7 @@ Executable "xenvm"
   MainIs:             xenvm.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax, bisect
+  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax
 
 Executable "xenvm-local-allocator"
   ByteOpt:            -warn-error +a
@@ -44,4 +44,4 @@ Executable "xenvm-local-allocator"
   MainIs:             local_allocator.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring, bisect
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring
