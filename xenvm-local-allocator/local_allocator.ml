@@ -83,6 +83,7 @@ module FromLVM = struct
         >>= function
         | `Suspended -> return ()
         | `Running ->
+          debug "FromLVM.suspend got `Running; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait () in
@@ -96,6 +97,7 @@ module FromLVM = struct
         fatal_error "reading state of FromLVM" (R.Consumer.state t)
         >>= function
         | `Suspended ->
+          debug "FromLVM.resume got `Suspended; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -118,6 +120,7 @@ module ToLVM = struct
     >>= function
     | `Ok x -> return x
     | _ ->
+      debug "ToLVM.attach got `Error; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       attach ~disk ()
@@ -125,6 +128,7 @@ module ToLVM = struct
     fatal_error "querying ToLVM state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Retry | `Suspended) ->
+    debug "ToLVM.push got `Error; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -322,6 +326,7 @@ let main config daemon socket journal fromLVM toLVM =
         info "The ToLVM queue has been suspended. We will acknowledge and exit";
         exit 0
       | `Running ->
+        debug "The ToLVM queue is still running";
         Lwt_unix.sleep 5.
         >>= fun () ->
         wait_for_shutdown_forever () in

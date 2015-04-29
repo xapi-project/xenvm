@@ -52,6 +52,7 @@ module ToLVM = struct
     | `Error (`Msg msg) -> fatal_error_t msg
     | `Error `Suspended -> return ()
     | `Error `Retry ->
+      debug "ToLVM.suspend got `Retry; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       suspend t
@@ -61,6 +62,7 @@ module ToLVM = struct
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
         | `Ok `Running ->
+          debug "ToLVM.suspend got `Running; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -71,6 +73,7 @@ module ToLVM = struct
     >>= function
     | `Error (`Msg msg) -> fatal_error_t msg
     | `Error `Retry ->
+      debug "ToLVM.resume got `Retry; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       resume t
@@ -81,6 +84,7 @@ module ToLVM = struct
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
         | `Ok `Suspended ->
+          debug "ToLVM.resume got `Suspended; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -101,7 +105,7 @@ module FromLVM = struct
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
   let rec attach ~disk () = R.Producer.attach ~disk () >>= function
   | `Error `Suspended ->
-    info "FromLVM.attach: `Retry";
+    debug "FromLVM.attach got `Suspended; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     attach ~disk ()
@@ -110,10 +114,12 @@ module FromLVM = struct
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
   | `Error `Retry ->
+    debug "FromLVM.push got `Retry; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
   | `Error `Suspended ->
+    debug "FromLVM.push got `Suspended; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -444,6 +450,7 @@ module FreePool = struct
             FromLVM.state from_lvm
             >>= function
             | `Suspended ->
+              debug "FromLVM.state got `Suspended; sleeping";
               Lwt_unix.sleep 5.
               >>= fun () ->
               wait ()
