@@ -42,7 +42,7 @@ module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let rec attach ~disk () =
+  let attach ~disk () =
     fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~disk ())
   let state t =
     fatal_error "querying ToLVM state" (R.Consumer.state t)
