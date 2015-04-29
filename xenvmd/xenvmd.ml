@@ -99,8 +99,13 @@ module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let attach ~disk () =
-    fatal_error "FromLVM.attach" (R.Producer.attach ~disk ())
+  let rec attach ~disk () = R.Producer.attach ~disk () >>= function
+  | `Error `Suspended ->
+    info "FromLVM.attach: `Retry";
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    attach ~disk ()
+  | x -> fatal_error "FromLVM.attach" (return x)
   let state t = fatal_error "FromLVM.state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
