@@ -214,7 +214,7 @@ module FreePool = struct
         FromLVM.advance from_lvm pos
         >>= fun () ->
         loop_forever () in
-      loop_forever ()
+      return loop_forever
 end
 
 module Op = struct
@@ -370,7 +370,9 @@ let main config daemon socket journal fromLVM toLVM =
     J.start device perform
     >>|= fun j ->
 
-    let (_: unit Lwt.t) = FreePool.start config vg in
+    FreePool.start config vg
+    >>= fun forever_fun ->
+    let (_: unit Lwt.t) = forever_fun () in
     let (_: unit Lwt.t) = wait_for_shutdown_forever () in
 
     (* Called to extend a single device. This function decides what needs to be
