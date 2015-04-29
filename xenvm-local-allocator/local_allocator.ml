@@ -25,12 +25,12 @@ let rec try_forever msg f =
   f ()
   >>= function
   | `Ok x -> return (`Ok x)
-  | `Error x -> return (`Error x)
-  | `Retry ->
+  | `Error `Retry ->
     debug "%s: retrying after 5s" msg;
     Lwt_unix.sleep 5.
     >>= fun () ->
     try_forever msg f
+  | `Error x -> return (`Error x)
 
 (* This error must cause the system to stop for manual maintenance.
    Perhaps we could scope this later and take down only a single connection? *)
@@ -267,7 +267,7 @@ let stat x =
   | Some x -> return (`Ok x)
   | None ->
     error "The device mapper device %s has disappeared." x;
-    return `Retry
+    return (`Error `Retry)
 
 let main config daemon socket journal fromLVM toLVM =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
