@@ -60,7 +60,10 @@ module ToLVM = struct
         R.Consumer.state t
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
-        | `Ok `Running -> wait ()
+        | `Ok `Running ->
+          Lwt_unix.sleep 5.
+          >>= fun () ->
+          wait ()
         | `Ok `Suspended -> return () in
       wait ()
   let rec resume t =
@@ -77,7 +80,10 @@ module ToLVM = struct
         R.Consumer.state t
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
-        | `Ok `Suspended -> wait ()
+        | `Ok `Suspended ->
+          Lwt_unix.sleep 5.
+          >>= fun () ->
+          wait ()
         | `Ok `Running -> return () in
       wait ()
   let rec pop t =
