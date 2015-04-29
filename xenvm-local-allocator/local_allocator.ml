@@ -433,14 +433,16 @@ let main config daemon socket journal fromLVM toLVM =
       handler r
       >>= fun () ->
       stdin () in
-
+    debug "Creating Unix domain socket %s" config.Config.socket;
     let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
     Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR true;
     Lwt.catch (fun () -> Lwt_unix.unlink config.Config.socket) (fun _ -> return ())
     >>= fun () ->
+    debug "Binding and listening on the socket";
     Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.Config.socket));
     Lwt_unix.listen s 5;
     let rec unix () =
+      debug "Calling accept on the socket";
       Lwt_unix.accept s
       >>= fun (fd, _) ->
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
@@ -454,7 +456,11 @@ let main config daemon socket journal fromLVM toLVM =
       >>= fun () ->
       unix () in
     let listen_unix = unix () in
-    Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ])) in
+    debug "Waiting forever for requests";
+    Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ]))
+    >>= fun () ->
+    debug "Stopped listening";
+    return () in
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
