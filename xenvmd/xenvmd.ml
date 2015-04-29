@@ -42,7 +42,7 @@ module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let rec attach ~disk () =
+  let attach ~disk () =
     fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~disk ())
   let state t =
     fatal_error "querying ToLVM state" (R.Consumer.state t)
@@ -52,6 +52,7 @@ module ToLVM = struct
     | `Error (`Msg msg) -> fatal_error_t msg
     | `Error `Suspended -> return ()
     | `Error `Retry ->
+      debug "ToLVM.suspend got `Retry; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       suspend t
@@ -61,6 +62,7 @@ module ToLVM = struct
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
         | `Ok `Running ->
+          debug "ToLVM.suspend got `Running; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -71,6 +73,7 @@ module ToLVM = struct
     >>= function
     | `Error (`Msg msg) -> fatal_error_t msg
     | `Error `Retry ->
+      debug "ToLVM.resume got `Retry; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       resume t
@@ -81,6 +84,7 @@ module ToLVM = struct
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
         | `Ok `Suspended ->
+          debug "ToLVM.resume got `Suspended; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -99,16 +103,23 @@ module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let attach ~disk () =
-    fatal_error "FromLVM.attach" (R.Producer.attach ~disk ())
+  let rec attach ~disk () = R.Producer.attach ~disk () >>= function
+  | `Error `Suspended ->
+    debug "FromLVM.attach got `Suspended; sleeping";
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    attach ~disk ()
+  | x -> fatal_error "FromLVM.attach" (return x)
   let state t = fatal_error "FromLVM.state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
   | `Error `Retry ->
+    debug "FromLVM.push got `Retry; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
   | `Error `Suspended ->
+    debug "FromLVM.push got `Suspended; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -235,6 +246,9 @@ module VolumeManager = struct
       | `Ok disk ->
       ToLVM.attach ~disk ()
       >>= fun to_LVM ->
+      ToLVM.state to_LVM
+      >>= fun state ->
+      debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
       ToLVM.resume to_LVM
       >>= fun () ->
       ( match Vg_IO.find vg fromLVM with
@@ -246,6 +260,9 @@ module VolumeManager = struct
       | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_LVM ->
+      FromLVM.state from_LVM
+      >>= fun state ->
+      debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
       to_LVMs := (name, to_LVM) :: !to_LVMs;
       from_LVMs := (name, from_LVM) :: !from_LVMs;
       free_LVs := (name, (freeLVM,freeLVMid)) :: !free_LVs;
@@ -433,6 +450,7 @@ module FreePool = struct
             FromLVM.state from_lvm
             >>= function
             | `Suspended ->
+              debug "FromLVM.state got `Suspended; sleeping";
               Lwt_unix.sleep 5.
               >>= fun () ->
               wait ()

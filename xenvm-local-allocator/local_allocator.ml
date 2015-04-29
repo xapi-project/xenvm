@@ -71,6 +71,8 @@ module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let rec attach ~disk () =
     fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~disk ()) 
+  let state t =
+    fatal_error "querying FromLVM state" (R.Consumer.state t)
   let rec suspend t =
     try_forever "FromLVM.suspend" (fun () -> R.Consumer.suspend t)
     >>= fun x ->
@@ -81,6 +83,7 @@ module FromLVM = struct
         >>= function
         | `Suspended -> return ()
         | `Running ->
+          debug "FromLVM.suspend got `Running; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait () in
@@ -94,6 +97,7 @@ module FromLVM = struct
         fatal_error "reading state of FromLVM" (R.Consumer.state t)
         >>= function
         | `Suspended ->
+          debug "FromLVM.resume got `Suspended; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -116,6 +120,7 @@ module ToLVM = struct
     >>= function
     | `Ok x -> return x
     | _ ->
+      debug "ToLVM.attach got `Error; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       attach ~disk ()
@@ -123,6 +128,7 @@ module ToLVM = struct
     fatal_error "querying ToLVM state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Retry | `Suspended) ->
+    debug "ToLVM.push got `Error; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -173,6 +179,9 @@ module FreePool = struct
       | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_lvm ->
+      FromLVM.state from_lvm
+      >>= fun state ->
+      debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
 
       (* Suspend and resume the queue: the producer will resend us all
          the free blocks on resume. *)
@@ -209,7 +218,7 @@ module FreePool = struct
         FromLVM.advance from_lvm pos
         >>= fun () ->
         loop_forever () in
-      loop_forever ()
+      return loop_forever
 end
 
 module Op = struct
@@ -300,6 +309,9 @@ let main config daemon socket journal fromLVM toLVM =
     | `Ok disk ->
     ToLVM.attach ~disk ()
     >>= fun tolvm ->
+    ToLVM.state tolvm
+    >>= fun state ->
+    debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
 
     let extent_size = metadata.Lvm.Vg.extent_size in (* in sectors *)
     let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
@@ -314,6 +326,7 @@ let main config daemon socket journal fromLVM toLVM =
         info "The ToLVM queue has been suspended. We will acknowledge and exit";
         exit 0
       | `Running ->
+        debug "The ToLVM queue is still running";
         Lwt_unix.sleep 5.
         >>= fun () ->
         wait_for_shutdown_forever () in
@@ -362,7 +375,9 @@ let main config daemon socket journal fromLVM toLVM =
     J.start device perform
     >>|= fun j ->
 
-    let (_: unit Lwt.t) = FreePool.start config vg in
+    FreePool.start config vg
+    >>= fun forever_fun ->
+    let (_: unit Lwt.t) = forever_fun () in
     let (_: unit Lwt.t) = wait_for_shutdown_forever () in
 
     (* Called to extend a single device. This function decides what needs to be
