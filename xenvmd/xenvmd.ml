@@ -235,6 +235,9 @@ module VolumeManager = struct
       | `Ok disk ->
       ToLVM.attach ~disk ()
       >>= fun to_LVM ->
+      ToLVM.state to_LVM
+      >>= fun state ->
+      debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
       ToLVM.resume to_LVM
       >>= fun () ->
       ( match Vg_IO.find vg fromLVM with
@@ -246,6 +249,9 @@ module VolumeManager = struct
       | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_LVM ->
+      FromLVM.state from_LVM
+      >>= fun state ->
+      debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
       to_LVMs := (name, to_LVM) :: !to_LVMs;
       from_LVMs := (name, from_LVM) :: !from_LVMs;
       free_LVs := (name, (freeLVM,freeLVMid)) :: !free_LVs;

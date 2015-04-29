@@ -71,6 +71,8 @@ module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let rec attach ~disk () =
     fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~disk ()) 
+  let state t =
+    fatal_error "querying FromLVM state" (R.Consumer.state t)
   let rec suspend t =
     try_forever "FromLVM.suspend" (fun () -> R.Consumer.suspend t)
     >>= fun x ->
@@ -173,6 +175,9 @@ module FreePool = struct
       | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_lvm ->
+      FromLVM.state from_lvm
+      >>= fun state ->
+      debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
 
       (* Suspend and resume the queue: the producer will resend us all
          the free blocks on resume. *)
@@ -300,6 +305,9 @@ let main config daemon socket journal fromLVM toLVM =
     | `Ok disk ->
     ToLVM.attach ~disk ()
     >>= fun tolvm ->
+    ToLVM.state tolvm
+    >>= fun state ->
+    debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
 
     let extent_size = metadata.Lvm.Vg.extent_size in (* in sectors *)
     let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
