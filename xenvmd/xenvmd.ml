@@ -198,6 +198,7 @@ module VolumeManager = struct
           (* The local allocator needs to see the volumes now *)
           sync () >>= fun () ->
           myvg >>= fun vg ->
+
           ( match Vg_IO.find vg toLVM with
             | Some lv -> return lv
             | None -> assert false ) >>= fun v ->
@@ -205,10 +206,16 @@ module VolumeManager = struct
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
           | `Ok disk ->
+          let module Eraser = Lvm.EraseBlock.Make(Vg_IO.Volume) in
+          Eraser.erase ~pattern:(Printf.sprintf "xenvmd erased the %s volume" toLVM) disk
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to erase %s" toLVM))
+          | `Ok () ->
           ToLVM.create ~disk ()
           >>= fun () ->
           Vg_IO.Volume.disconnect disk
           >>= fun () ->
+
           ( match Vg_IO.find vg fromLVM with
             | Some lv -> return lv
             | None -> assert false ) >>= fun v ->
@@ -216,6 +223,10 @@ module VolumeManager = struct
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
           | `Ok disk ->
+          Eraser.erase ~pattern:(Printf.sprintf "xenvmd erased the %s volume" fromLVM) disk
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to erase %s" fromLVM))
+          | `Ok () ->
           FromLVM.create ~disk ()
           >>= fun () ->
           Vg_IO.Volume.disconnect disk >>= fun () ->

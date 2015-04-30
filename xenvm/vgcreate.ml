@@ -31,6 +31,18 @@ let vgcreate vg_name devices =
     >>|= fun (_, op) ->
     Vg_IO.update vg [ op ]
     >>|= fun () ->
+    let module Eraser = EraseBlock.Make(Vg_IO.Volume) in
+    let open Lwt in
+    ( match Vg_IO.find vg _journal_name with
+    | None -> Lwt.return (`Error (`Msg "Failed to find the xenvmd journal LV to erase it"))
+    | Some lv ->
+      Vg_IO.Volume.connect lv
+      >>= function
+      | `Ok disk ->
+         let open IO in
+         Eraser.erase ~pattern:"Block erased because this is the xenvmd journal" disk
+      | `Error _ -> Lwt.return (`Error (`Msg "Failed to open the xenvmd journal to erase it"))
+    ) >>|= fun () ->
     return () in
   Lwt_main.run t
 
