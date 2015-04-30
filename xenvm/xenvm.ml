@@ -139,8 +139,25 @@ let host_list config =
 
 let shutdown config =
   set_uri config None;
-  Lwt_main.run
-    (Client.shutdown ())
+  let t =
+    Client.shutdown ()
+    >>= fun () ->
+    (* wait for the daemon to disappear *)
+    let finished = ref false in
+    let rec wait () =
+      Lwt.catch
+        (fun () ->
+          Client.Host.all ()
+          >>= fun _ ->
+          Printf.fprintf stderr "Xenvmd is still alive: will sleep 5s and try again\n%!";
+          Lwt_unix.sleep 5.
+        ) (fun _ ->
+          finished := true;
+          return ())
+      >>= fun () ->
+      if !finished then return () else wait () in
+    wait () in
+  Lwt_main.run t
 
 let benchmark config =
   set_uri config None;
