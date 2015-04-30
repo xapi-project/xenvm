@@ -42,8 +42,8 @@ module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let attach ~disk () =
-    fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~disk ())
+  let attach ~name ~disk () =
+    fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~queue:(name ^ " ToLVM Consumer") ~client:"xenvmd" ~disk ())
   let state t =
     fatal_error "querying ToLVM state" (R.Consumer.state t)
   let rec suspend t =
@@ -103,12 +103,12 @@ module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let rec attach ~disk () = R.Producer.attach ~disk () >>= function
+  let rec attach ~name ~disk () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
   | `Error `Suspended ->
     debug "FromLVM.attach got `Suspended; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
-    attach ~disk ()
+    attach ~name ~disk ()
   | x -> fatal_error "FromLVM.attach" (return x)
   let state t = fatal_error "FromLVM.state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
@@ -255,7 +255,7 @@ module VolumeManager = struct
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
-      ToLVM.attach ~disk ()
+      ToLVM.attach ~name ~disk ()
       >>= fun to_LVM ->
       ToLVM.state to_LVM
       >>= fun state ->
@@ -269,7 +269,7 @@ module VolumeManager = struct
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
-      FromLVM.attach ~disk ()
+      FromLVM.attach ~name ~disk ()
       >>= fun from_LVM ->
       FromLVM.state from_LVM
       >>= fun state ->

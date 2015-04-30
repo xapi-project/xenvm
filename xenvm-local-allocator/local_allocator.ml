@@ -70,7 +70,7 @@ let query_lvm config =
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let rec attach ~disk () =
-    fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~disk ()) 
+    fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~queue:"FromLVM Consumer" ~client:"xenvm-local-allocator" ~disk ()) 
   let state t =
     fatal_error "querying FromLVM state" (R.Consumer.state t)
   let rec suspend t =
@@ -116,7 +116,7 @@ end
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let rec attach ~disk () =
-    R.Producer.attach ~disk ()
+    R.Producer.attach ~queue:"ToLVM Producer" ~client:"xenvm-local-allocator" ~disk ()
     >>= function
     | `Ok x -> return x
     | _ ->
