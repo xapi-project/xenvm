@@ -1,9 +1,9 @@
 # OASIS_START
-# DO NOT EDIT (digest: 798568431db55f5a6dcaff164adbe75d)
+# DO NOT EDIT (digest: c6b1ef075eec04a5c6fad660e74dad2f)
 version = "0.1"
 description = "LVM-like volume manager supporting thinly provisioned LVs"
 requires =
-"rpclib rpclib.syntax sexplib sexplib.syntax lvm cohttp.lwt threads bisect mirage-block-unix devmapper"
+"rpclib rpclib.syntax sexplib sexplib.syntax lvm cohttp.lwt threads mirage-block-unix devmapper bisect"
 archive(byte) = "xenvmidl.cma"
 archive(byte, plugin) = "xenvmidl.cma"
 archive(native) = "xenvmidl.cmxa"
