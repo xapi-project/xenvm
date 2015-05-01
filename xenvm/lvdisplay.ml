@@ -62,11 +62,18 @@ let lvdisplay copts colon (vg_name,lv_display_opt) =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     Client.get () >>= fun vg ->
-    
-    Lvm.Vg.LVs.iter (fun _ lv ->
-      (if colon then print_colon else print_verbose) vg lv
+    let print = if colon then print_colon else print_verbose in
+    let success = ref false in
+    Lvm.Vg.LVs.iter (fun _ lv -> match lv_display_opt with
+      | None ->
+        print vg lv;
+        success := true
+      | Some lv' when lv.Lvm.Lv.name = lv' ->
+        print vg lv;
+        success := true
+      | Some _ -> ()
     ) vg.Lvm.Vg.lvs;
-
+    if not !success then failwith "Failed to find any matching logical volumes";
     Lwt.return () in
   Lwt_main.run t
 
