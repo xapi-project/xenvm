@@ -23,7 +23,7 @@ let print_verbose vg lv =
     Printf.sprintf "LV Creation host, time unknown, unknown";
     Printf.sprintf "LV Status              %s" (if List.mem Lvm.Lv.Status.Visible lv.Lvm.Lv.status then "available" else "");
     Printf.sprintf "# open                 uknown";
-    Printf.sprintf "LV Size                %LdB" size;
+    Printf.sprintf "LV Size                %Lds" size;
     Printf.sprintf "Current LE             %Ld" (Lvm.Lv.size_in_extents lv);
     Printf.sprintf "Segments               %d" (List.length lv.Lvm.Lv.segments);
     Printf.sprintf "Allocation:            inherit";
@@ -36,6 +36,25 @@ let print_verbose vg lv =
   ] in
   List.iter (fun line -> Printf.printf "  %s\n" line) lines
 
+let print_colon vg lv =
+  let sectors = Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv) in
+  let parts = [
+    Printf.sprintf "/dev/%s/%s" vg.Lvm.Vg.name lv.Lvm.Lv.name;
+    vg.Lvm.Vg.name;
+    "?"; (* access *)
+    "?"; (* volume status *)
+    "?"; (* internal logical volume number *)
+    "?"; (* open count *)
+    Int64.to_string sectors; (* size in sectors *)
+    "?"; (* current size in extents *)
+    "?"; (* allocated extents *)
+    "?"; (* allocation policy *)
+    "?"; (* read ahead sectors *)
+    "?"; (* major *)
+    "?"; (* minor *)
+  ] in
+  Printf.printf "  %s\n" (String.concat ":" parts)
+
 let lvdisplay copts colon (vg_name,lv_display_opt) =
   let open Xenvm_common in
 
@@ -45,7 +64,7 @@ let lvdisplay copts colon (vg_name,lv_display_opt) =
     Client.get () >>= fun vg ->
     
     Lvm.Vg.LVs.iter (fun _ lv ->
-      print_verbose vg lv
+      (if colon then print_colon else print_verbose) vg lv
     ) vg.Lvm.Vg.lvs;
 
     Lwt.return () in
