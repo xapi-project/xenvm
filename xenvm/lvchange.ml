@@ -10,6 +10,22 @@ type action = Activate | Deactivate
 let dev_path_of vg_name lv_name =
   Printf.sprintf "/dev/%s/%s" vg_name lv_name
 
+let activate vg lv local_device =
+  let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
+  Lwt.catch (fun () -> Lwt_unix.mkdir (Filename.dirname path) 0x755) (fun _ -> Lwt.return ()) >>= fun () -> 
+  Mapper.read [ local_device ]
+  >>= fun devices ->
+  let targets = Mapper.to_targets devices vg lv in
+  let name = Mapper.name_of vg lv in
+  (* Don't recreate it if it already exists *)
+  let all = Devmapper.ls () in
+  if not(List.mem name all)
+  then Devmapper.create name targets;
+  (* Recreate the device node *)
+  Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
+  Devmapper.mknod name path 0o0600;
+  return ()
+
 let lvchange_activate copts vg_name lv_name physical_device =
   let open Xenvm_common in
   Lwt_main.run (
@@ -22,20 +38,18 @@ let lvchange_activate copts vg_name lv_name physical_device =
       | Some info, None -> info.local_device (* If we've got a default, use that *)
       | None, None -> failwith "Need to know the local device!"
     in
-    let path = dev_path_of vg_name lv_name in
-    Lwt.catch (fun () -> Lwt_unix.mkdir (Filename.dirname path) 0x755) (fun _ -> Lwt.return ()) >>= fun () -> 
-    Mapper.read [ local_device ]
-    >>= fun devices ->
-    let targets = Mapper.to_targets devices vg lv in
-    let name = Mapper.name_of vg lv in
-    (* Don't recreate it if it already exists *)
-    let all = Devmapper.ls () in
-    if not(List.mem name all)
-    then Devmapper.create name targets;
-    (* Recreate the device node *)
-    Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
-    Devmapper.mknod name path 0o0600;
-    return ())
+    activate vg lv local_device
+  )
+
+let deactivate vg lv =
+  let name = Mapper.name_of vg lv in
+  let all = Devmapper.ls () in
+  if List.mem name all
+  then Devmapper.remove name;
+  (* Delete the device node *)
+  let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
+  Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
+  return ()
 
 let lvchange_deactivate copts vg_name lv_name =
   let open Xenvm_common in
@@ -43,14 +57,8 @@ let lvchange_deactivate copts vg_name lv_name =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
-    let name = Mapper.name_of vg lv in
-    let all = Devmapper.ls () in
-    if List.mem name all
-    then Devmapper.remove name;
-    (* Delete the device node *)
-    let path = dev_path_of vg_name lv_name in
-    Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
-    return ())
+    deactivate vg lv
+  )
 
 let lvchange copts (vg_name,lv_name_opt) physical_device action perm =
   let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need LV name" in
