@@ -354,6 +354,7 @@ let cmds = [
   Pvremove.pvremove_cmd;
   Lvremove.lvremove_cmd;
   Lvrename.lvrename_cmd;
+  Lvdisplay.lvdisplay_cmd;
 ]
 
 let () =
