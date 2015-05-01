@@ -42,6 +42,7 @@ let lvchange_activate copts vg_name lv_name physical_device =
   )
 
 let deactivate vg lv =
+  let open Xenvm_common in
   let name = Mapper.name_of vg lv in
   let all = Devmapper.ls () in
   if List.mem name all
@@ -49,7 +50,7 @@ let deactivate vg lv =
   (* Delete the device node *)
   let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
-  return ()
+  Client.flush ~name:lv.Lvm.Lv.name
 
 let lvchange_deactivate copts vg_name lv_name =
   let open Xenvm_common in
