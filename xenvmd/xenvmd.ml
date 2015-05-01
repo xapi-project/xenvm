@@ -279,7 +279,10 @@ module VolumeManager = struct
       free_LVs := (name, (freeLVM,freeLVMid)) :: !free_LVs;
       return ()
 
-    let flush name =
+    (* Hold this mutex when actively flushing from the ToLVM queues *)
+    let flush_m = Lwt_mutex.create ()
+
+    let flush_already_locked name =
       if not(List.mem_assoc name !to_LVMs)
       then return ()
       else begin
@@ -309,7 +312,7 @@ module VolumeManager = struct
         ToLVM.suspend to_lvm
         >>= fun () ->
         (* There may still be updates in the ToLVM queue *)
-        flush name
+        Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
         >>= fun () ->
         debug "ToLVM queue for %s has been suspended and flushed" name;
         to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
@@ -357,6 +360,15 @@ module VolumeManager = struct
           return { Xenvm_interface.name; fromLVM; toLVM; freeExtents }
         ) !to_LVMs
   end
+
+  let flush_all () =
+    Lwt_mutex.with_lock Host.flush_m
+      (fun () ->
+        Lwt_list.iter_s
+          (fun (host, _) ->
+            Host.flush_already_locked host
+          ) !to_LVMs
+      )
 
   let shutdown () =
     Lwt_list.iter_s
@@ -566,6 +578,10 @@ module Impl = struct
         return (`Ok ({ vg with Vg.lvs = Vg.LVs.empty }, lv))
       ))
 
+  let flush context ~name =
+    (* We don't know where [name] is attached so we have to flush everything *)
+    VolumeManager.flush_all ()
+
   let shutdown context () =
     VolumeManager.shutdown ()
     >>= fun () ->
@@ -616,10 +632,7 @@ let run port config daemon =
       >>= fun () ->
 
       (* 2. Are there any pending LVM updates from hosts? *)
-      Lwt_list.iter_s
-        (fun (host, _) ->
-          VolumeManager.Host.flush host
-        ) !VolumeManager.to_LVMs
+      VolumeManager.flush_all ()
       >>= fun () ->
 
       debug "sleeping for 5s";

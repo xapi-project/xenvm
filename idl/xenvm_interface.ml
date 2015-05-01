@@ -16,6 +16,10 @@ external remove : name:string -> unit = ""
 external resize : name:string -> size:int64 -> unit = ""
 external set_status : name:string -> readonly:bool -> unit = ""
 
+external flush : name:string -> unit = ""
+(** [flush lv] processes all pending allocations for this LV, such that
+    future calls to [get_lv] will return accurate metadata. *)
+
 external shutdown : unit -> unit = ""
 
 type queue = {
