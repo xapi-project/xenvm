@@ -1,5 +1,17 @@
 open Cohttp_lwt_unix
 
+let _ =
+  let service svc =
+    match svc with
+    | "file" -> Lwt.return (Some {Resolver.name="file"; port=0; tls=false})
+    | _ -> Resolver_lwt_unix.system_service svc
+  in
+  Resolver_lwt.set_service ~f:service Resolver_lwt_unix.system;
+  Resolver_lwt.add_rewrite ~host:"local" ~f:(fun svc uri ->
+      match svc.Resolver.name with
+      | "file" -> Lwt.return (`Unix_domain_socket (Uri.path uri) : Conduit.endp)
+      | _ -> Resolver_lwt_unix.system_resolver svc uri) Resolver_lwt_unix.system
+
 module Rpc = struct
   include Lwt
 
