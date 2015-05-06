@@ -1,5 +1,7 @@
 open Cohttp_lwt_unix
 
+let unix_domain_socket_path = ref "/var/run/xenvm.sock"
+
 let _ =
   let service svc =
     match svc with
@@ -9,7 +11,7 @@ let _ =
   Resolver_lwt.set_service ~f:service Resolver_lwt_unix.system;
   Resolver_lwt.add_rewrite ~host:"local" ~f:(fun svc uri ->
       match svc.Resolver.name with
-      | "file" -> Lwt.return (`Unix_domain_socket (Uri.path uri) : Conduit.endp)
+      | "file" -> Lwt.return (`Unix_domain_socket !unix_domain_socket_path : Conduit.endp)
       | _ -> Resolver_lwt_unix.system_resolver svc uri) Resolver_lwt_unix.system
 
 module Rpc = struct
