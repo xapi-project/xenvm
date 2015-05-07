@@ -20,6 +20,8 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
     | Some info -> info.local_device (* If we've got a default, use that *)
     | None -> failwith "Need to know the local device!" in
 
+    let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
+
     let device_is_active =
       let name = Mapper.name_of vg lv in
       let all = Devmapper.ls () in
@@ -49,17 +51,24 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeRequest.sexp_of_t r))
       >>= fun () ->
       Lwt_io.close oc in
-
     match live, info with
     | true, Some { Xenvm_common.local_allocator_path = Some allocator } ->
-      if device_is_active
-      then resize_locally allocator
-      else resize_remotely ()
+      if device_is_active then begin
+        match size with
+        | `Absolute size ->
+          (* The local allocator can only allocate. When in this state we cannot shrink:
+             deactivate the device first. *)
+          if size < existing_size
+          then failwith (Printf.sprintf "Existing size is %Ld: cannot decrease to %Ld" existing_size size);
+          if size = existing_size
+          then return ()
+          else resize_locally allocator
+        | _ -> resize_locally allocator
+      end else resize_remotely ()
     | _, _ ->
       (* safe to allocate remotely *)
       resize_remotely ()
   )
-
 let live_arg =
   let doc = "Resize a live device using the local allocator" in
   Arg.(value & flag & info ["live"] ~doc)
