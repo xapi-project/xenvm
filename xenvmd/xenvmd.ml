@@ -618,6 +618,13 @@ let run port sock_path config daemon =
   let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> x } in
   let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
   if daemon then Lwt_daemon.daemonize ();
+  ( match config.Config.listenPath with
+    | None ->
+      (* don't need a lock file because we'll fail to bind to the port *)
+      ()
+    | Some path ->
+      info "Writing pidfile to %s" path;
+      Pidfile.write_pid (path ^ ".lock") );
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
     VolumeManager.vgopen ~devices:config.Config.devices
