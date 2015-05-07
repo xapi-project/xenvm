@@ -278,7 +278,7 @@ let extend_volume device vg lv extents =
             (Lvm.Pv.Name.to_string pvname);
           next_sector, segments, targets
       ) (next_sector, [], []) extents in
-   segments, targets
+   List.rev segments, List.rev targets
 
 let stat x =
   match Devmapper.stat x with
