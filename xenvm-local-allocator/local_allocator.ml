@@ -151,6 +151,8 @@ module FreePool = struct
         return ()
       )
 
+  (* Allocate up to [nr_extents]. Blocks if there is no space free. Can return
+     a partial allocation. *)
   let remove nr_extents =
     Lwt_mutex.with_lock m
       (fun () ->
@@ -161,10 +163,17 @@ module FreePool = struct
           | `Ok x ->
             free := Lvm.Pv.Allocator.sub !free x;
             return x
-          | _ ->
+          | `Error (`OnlyThisMuchFree 0L) ->
             Lwt_condition.wait ~mutex:m c
             >>= fun () ->
-            wait () in
+            wait ()
+          | `Error (`OnlyThisMuchFree n) ->
+            begin match Lvm.Pv.Allocator.find !free n with
+            | `Ok x ->
+              free := Lvm.Pv.Allocator.sub !free x;
+              return x
+            | _ -> assert false
+            end in
         wait ()
       )
 
@@ -392,7 +401,8 @@ let main config daemon socket journal fromLVM toLVM =
       fun { ResizeRequest.local_dm_name = device; action } ->
         Lwt_mutex.with_lock m
           (fun () ->
-            ( match Devmapper.stat device with
+            (* We may need to enlarge in multiple chunks if the free pool is depleted *)
+            let rec expand action = match Devmapper.stat device with
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
@@ -414,6 +424,8 @@ let main config daemon socket journal fromLVM toLVM =
                 end else begin
                   FreePool.remove nr_extents
                   >>= fun extents ->
+                  (* This may have allocated short *)
+                  let nr_extents' = Lvm.Pv.Allocator.size extents in
                   let segments, targets = extend_volume vg_device metadata data_volume extents in
                   let _, volume = Mapper.vg_lv_of_name device in
                   let volume = { ExpandVolume.volume; segments } in
@@ -424,9 +436,14 @@ let main config daemon socket journal fromLVM toLVM =
                   wait ()
                   (* The operation is now complete *)
                   >>= fun () ->
-                  return ResizeResponse.Success
-                end
-            )
+                  let action = match action with
+                  | `Absolute x -> `Absolute x
+                  | `IncreaseBy x -> `IncreaseBy Int64.(sub x (mul nr_extents' (mul sector_size extent_size))) in
+                  if nr_extents = nr_extents'
+                  then return ResizeResponse.Success
+                  else expand action
+                end in
+            expand action
           ) in
 
     let ls = Devmapper.ls () in
