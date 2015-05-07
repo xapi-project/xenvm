@@ -50,7 +50,21 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       let r = { ResizeRequest.local_dm_name = name; action = size } in
       Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeRequest.sexp_of_t r))
       >>= fun () ->
-      Lwt_io.close oc in
+      let ic = Lwt_io.of_fd ~mode:Lwt_io.input ~close:return s in
+      Lwt_io.read_line ic
+      >>= fun txt ->
+      let resp = ResizeResponse.t_of_sexp (Sexplib.Sexp.of_string txt) in
+      Lwt_io.close oc
+      >>= fun () ->
+      match resp with
+      | ResizeResponse.Device_mapper_device_does_not_exist name ->
+        Printf.fprintf stderr "Device mapper device does not exist: %s\n%!" name;
+        exit 1
+      | ResizeResponse.Request_for_no_segments nr ->
+        Printf.fprintf stderr "Request for an illegal number of segments: %Ld\n%!" nr;
+        exit 2
+      | ResizeResponse.Success ->
+        return () in
     match live, info with
     | true, Some { Xenvm_common.local_allocator_path = Some allocator } ->
       if device_is_active then begin

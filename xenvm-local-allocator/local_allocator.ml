@@ -395,7 +395,7 @@ let main config daemon socket journal fromLVM toLVM =
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
                 error "Couldn't find device mapper device: %s" device;
-                return ()
+                return (ResizeResponse.Device_mapper_device_does_not_exist device)
               | Some data_volume ->
                 let sector_size = Int64.of_int sector_size in
                 let current = Int64.mul sector_size (sizeof data_volume) in
@@ -408,7 +408,7 @@ let main config daemon socket journal fromLVM toLVM =
                   Int64.(div (add x extent_b) extent_b) in
                 if nr_extents <= 0L then begin
                   error "Request for %Ld (<= 0) segments" nr_extents;
-                  return ()
+                  return (ResizeResponse.Request_for_no_segments nr_extents)
                 end else begin
                   FreePool.remove nr_extents
                   >>= fun extents ->
@@ -421,6 +421,8 @@ let main config daemon socket journal fromLVM toLVM =
                   (* The operation is now in the journal *)
                   wait ()
                   (* The operation is now complete *)
+                  >>= fun () ->
+                  return ResizeResponse.Success
                 end
             )
           ) in
@@ -433,6 +435,8 @@ let main config daemon socket journal fromLVM toLVM =
       >>= fun device ->
       let r = { ResizeRequest.local_dm_name = device; action = `IncreaseBy 1L } in
       handler r
+      >>= fun resp ->
+      Lwt_io.write_line Lwt_io.stdout (Sexplib.Sexp.to_string_hum (ResizeResponse.sexp_of_t resp))
       >>= fun () ->
       stdin () in
     debug "Creating Unix domain socket %s" config.Config.socket;
@@ -448,11 +452,16 @@ let main config daemon socket journal fromLVM toLVM =
       Lwt_unix.accept s
       >>= fun (fd, _) ->
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
+      let oc = Lwt_io.of_fd ~mode:Lwt_io.output ~close:return fd in
       (* read one line *)
       Lwt_io.read_line ic
       >>= fun message ->
       let r = ResizeRequest.t_of_sexp (Sexplib.Sexp.of_string message) in
       handler r
+      >>= fun resp ->
+      Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeResponse.sexp_of_t resp))
+      >>= fun () ->
+      Lwt_io.flush oc
       >>= fun () ->
       Lwt_io.close ic
       >>= fun () ->
