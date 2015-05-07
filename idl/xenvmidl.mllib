@@ -1,9 +1,11 @@
 # OASIS_START
-# DO NOT EDIT (digest: d1d1ec0a025cbfc9d6a3157d3e0422d2)
+# DO NOT EDIT (digest: 57b376d9a9ea46b70acab11aab5f012c)
 Xenvm_interface
 Xenvm_client
 Log
 Result
 Errors
 ResizeRequest
+ResizeResponse
+Pidfile
 # OASIS_STOP

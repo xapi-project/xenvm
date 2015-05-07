@@ -151,6 +151,8 @@ module FreePool = struct
         return ()
       )
 
+  (* Allocate up to [nr_extents]. Blocks if there is no space free. Can return
+     a partial allocation. *)
   let remove nr_extents =
     Lwt_mutex.with_lock m
       (fun () ->
@@ -161,10 +163,17 @@ module FreePool = struct
           | `Ok x ->
             free := Lvm.Pv.Allocator.sub !free x;
             return x
-          | _ ->
+          | `Error (`OnlyThisMuchFree 0L) ->
             Lwt_condition.wait ~mutex:m c
             >>= fun () ->
-            wait () in
+            wait ()
+          | `Error (`OnlyThisMuchFree n) ->
+            begin match Lvm.Pv.Allocator.find !free n with
+            | `Ok x ->
+              free := Lvm.Pv.Allocator.sub !free x;
+              return x
+            | _ -> assert false
+            end in
         wait ()
       )
 
@@ -269,7 +278,7 @@ let extend_volume device vg lv extents =
             (Lvm.Pv.Name.to_string pvname);
           next_sector, segments, targets
       ) (next_sector, [], []) extents in
-   segments, targets
+   List.rev segments, List.rev targets
 
 let stat x =
   match Devmapper.stat x with
@@ -288,6 +297,8 @@ let main config daemon socket journal fromLVM toLVM =
   } in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
   if daemon then Lwt_daemon.daemonize ();
+
+  Pidfile.write_pid (config.Config.socket ^ ".lock");
 
   let t =
     Device.read_sector_size config.Config.devices
@@ -390,26 +401,31 @@ let main config daemon socket journal fromLVM toLVM =
       fun { ResizeRequest.local_dm_name = device; action } ->
         Lwt_mutex.with_lock m
           (fun () ->
-            ( match Devmapper.stat device with
+            (* We may need to enlarge in multiple chunks if the free pool is depleted *)
+            let rec expand action = match Devmapper.stat device with
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
                 error "Couldn't find device mapper device: %s" device;
-                return ()
+                return (ResizeResponse.Device_mapper_device_does_not_exist device)
               | Some data_volume ->
                 let sector_size = Int64.of_int sector_size in
                 let current = Int64.mul sector_size (sizeof data_volume) in
+                let extent_b = Int64.mul sector_size extent_size in
+                (* NB: make sure we round up to the next extent *)
                 let nr_extents = match action with
                 | `Absolute x ->
-                  Int64.(div (div (sub x current) sector_size) extent_size)
+                  Int64.(div (add (sub x current) (sub extent_b 1L)) extent_b)
                 | `IncreaseBy x ->
-                  Int64.(div (div x sector_size) extent_size) in
-                if nr_extents < 0L then begin
-                  error "Request for -ve number of extents";
-                  return ()
+                  Int64.(div (add x extent_b) extent_b) in
+                if nr_extents <= 0L then begin
+                  error "Request for %Ld (<= 0) segments" nr_extents;
+                  return (ResizeResponse.Request_for_no_segments nr_extents)
                 end else begin
                   FreePool.remove nr_extents
                   >>= fun extents ->
+                  (* This may have allocated short *)
+                  let nr_extents' = Lvm.Pv.Allocator.size extents in
                   let segments, targets = extend_volume vg_device metadata data_volume extents in
                   let _, volume = Mapper.vg_lv_of_name device in
                   let volume = { ExpandVolume.volume; segments } in
@@ -419,8 +435,15 @@ let main config daemon socket journal fromLVM toLVM =
                   (* The operation is now in the journal *)
                   wait ()
                   (* The operation is now complete *)
-                end
-            )
+                  >>= fun () ->
+                  let action = match action with
+                  | `Absolute x -> `Absolute x
+                  | `IncreaseBy x -> `IncreaseBy Int64.(sub x (mul nr_extents' (mul sector_size extent_size))) in
+                  if nr_extents = nr_extents'
+                  then return ResizeResponse.Success
+                  else expand action
+                end in
+            expand action
           ) in
 
     let ls = Devmapper.ls () in
@@ -431,6 +454,8 @@ let main config daemon socket journal fromLVM toLVM =
       >>= fun device ->
       let r = { ResizeRequest.local_dm_name = device; action = `IncreaseBy 1L } in
       handler r
+      >>= fun resp ->
+      Lwt_io.write_line Lwt_io.stdout (Sexplib.Sexp.to_string_hum (ResizeResponse.sexp_of_t resp))
       >>= fun () ->
       stdin () in
     debug "Creating Unix domain socket %s" config.Config.socket;
@@ -446,11 +471,16 @@ let main config daemon socket journal fromLVM toLVM =
       Lwt_unix.accept s
       >>= fun (fd, _) ->
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
+      let oc = Lwt_io.of_fd ~mode:Lwt_io.output ~close:return fd in
       (* read one line *)
       Lwt_io.read_line ic
       >>= fun message ->
       let r = ResizeRequest.t_of_sexp (Sexplib.Sexp.of_string message) in
       handler r
+      >>= fun resp ->
+      Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeResponse.sexp_of_t resp))
+      >>= fun () ->
+      Lwt_io.flush oc
       >>= fun () ->
       Lwt_io.close ic
       >>= fun () ->

@@ -104,13 +104,19 @@ module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let rec attach ~name ~disk () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
-  | `Error `Suspended ->
-    debug "FromLVM.attach got `Suspended; sleeping";
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    attach ~name ~disk ()
-  | x -> fatal_error "FromLVM.attach" (return x)
+  let attach ~name ~disk () =
+    let initial_state = ref `Running in
+    let rec loop () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
+      | `Error `Suspended ->
+        debug "FromLVM.attach got `Suspended; sleeping";
+        Lwt_unix.sleep 5.
+        >>= fun () ->
+        initial_state := `Suspended;
+        loop ()
+      | x -> fatal_error "FromLVM.attach" (return x) in
+    loop ()
+    >>= fun x ->
+    return (!initial_state, x)
   let state t = fatal_error "FromLVM.state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
@@ -271,7 +277,25 @@ module VolumeManager = struct
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
       | `Ok disk ->
       FromLVM.attach ~name ~disk ()
-      >>= fun from_LVM ->
+      >>= fun (initial_state, from_LVM) ->
+      ( if initial_state = `Suspended then begin
+        debug "The FromLVM queue was already suspended: resending the free blocks";
+        ( match Vg_IO.find vg freeLVM with
+          | Some lv -> return lv
+          | None -> assert false ) >>= fun lv ->
+        let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of lv) in
+        FromLVM.push from_LVM allocation
+        >>= fun pos ->
+        FromLVM.advance from_LVM pos
+        >>= fun () ->
+        debug "Free blocks pushed";
+        return ()
+      end else begin
+        debug "The FromLVM queue was running: no need to resend the free blocks";
+        return ()
+      end )
+      >>= fun () ->
+      debug "querying state";
       FromLVM.state from_LVM
       >>= fun state ->
       debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
@@ -290,12 +314,15 @@ module VolumeManager = struct
         let to_lvm = List.assoc name !to_LVMs in
         ToLVM.pop to_lvm
         >>= fun (pos, items) ->
+        debug "FromLVM queue %s has %d items" name (List.length items);
         Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
           write (fun vg ->
+              debug "Expanding volume %s" volume;
 	      let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
             Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(id, { lvex_segments = segments })))
           ) >>= fun () ->
           write (fun vg ->
+            debug "Removing free blocks from %s free LV" name;
             let (_,freeid) = (List.assoc name !free_LVs) in
             Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(freeid, { lvc_segments = segments })))
           )
@@ -618,6 +645,13 @@ let run port sock_path config daemon =
   let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> x } in
   let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
   if daemon then Lwt_daemon.daemonize ();
+  ( match config.Config.listenPath with
+    | None ->
+      (* don't need a lock file because we'll fail to bind to the port *)
+      ()
+    | Some path ->
+      info "Writing pidfile to %s" path;
+      Pidfile.write_pid (path ^ ".lock") );
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
     VolumeManager.vgopen ~devices:config.Config.devices
