@@ -6,6 +6,7 @@ open Errors
 module Config = struct
   type t = {
     listenPort: int; (* TCP port number to listen on *)
+    listenPath: string option; (* path of a unix-domain socket to listen on *)
     host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)
     host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
     vg: string; (* name of the volume group *)
@@ -612,9 +613,10 @@ let handler ~info (ch,conn) req body =
   XenvmServer.process () (Jsonrpc.call_of_string bodystr) >>= fun result ->
   Server.respond_string ~status:`OK ~body:(Jsonrpc.string_of_response result) ()
 
-let run port config daemon =
+let run port sock_path config daemon =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> x } in
+  let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
   if daemon then Lwt_daemon.daemonize ();
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
@@ -640,17 +642,35 @@ let run port config daemon =
       >>= fun () ->
       service_queues () in
 
-    let service_http () =
-      Printf.printf "Listening for HTTP request on: %d\n" config.Config.listenPort;
-      let info = Printf.sprintf "Served by Cohttp/Lwt listening on port %d" config.Config.listenPort in
+    let service_http mode =
+      let ty = match mode with
+        | `TCP (`Port x) -> Printf.sprintf "TCP port %d" x
+        | `Unix_domain_socket (`File p) -> Printf.sprintf "Unix domain socket '%s'" p
+        | _ -> "<unknown>"
+      in
+      Printf.printf "Listening for HTTP request on: %s\n" ty;
+      let info = Printf.sprintf "Served by Cohttp/Lwt listening on %s" ty in
       let conn_closed (ch,conn) = () in
       let callback = handler ~info in
       let c = Server.make ~callback ~conn_closed () in
-      let mode = `TCP (`Port config.Config.listenPort) in
       (* Listen for regular API calls *)
       Server.create ~mode c in
 
-    Lwt.join [ service_queues (); service_http () ] in
+    let tcp_mode = `TCP (`Port config.Config.listenPort) in
+
+    begin
+      match config.Config.listenPath with
+      | Some p ->
+        (* Remove the socket first, if it already exists *)
+        Lwt.catch (fun () -> Lwt_unix.unlink p) (fun _ -> Lwt.return ()) >>= fun () -> 
+        Lwt.return [ tcp_mode; `Unix_domain_socket (`File p) ]            
+      | None ->
+        Lwt.return [ tcp_mode ]
+    end >>= fun service_modes ->
+
+    let threads = List.map service_http service_modes in
+    
+    Lwt.join ((service_queues ())::threads) in
 
   Lwt_main.run t
 
@@ -669,6 +689,10 @@ let port =
   let doc = "TCP port of xenvmd server" in
   Arg.(value & opt (some int) None & info [ "port" ] ~docv:"PORT" ~doc)
 
+let sock_path =
+  let doc = "Path to create unix-domain socket for server" in
+  Arg.(value & opt (some string) None & info [ "path" ] ~docv:"PATH" ~doc)
+
 let config =
   let doc = "Path to the config file" in
   Arg.(value & opt file "remoteConfig" & info [ "config" ] ~docv:"CONFIG" ~doc)
@@ -683,7 +707,7 @@ let cmd =
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.(pure run $ port $ config $ daemon),
+  Term.(pure run $ port $ sock_path $ config $ daemon),
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
