@@ -21,14 +21,17 @@ module Rpc = struct
 
   (* Retry up to 5 times with 1s intervals *)
   let rpc call =
-    let body = Jsonrpc.string_of_call call |> Cohttp_lwt_body.of_string in
+    let body_str = Jsonrpc.string_of_call call in
+    let body = Cohttp_lwt_body.of_string body_str in
     let rec retry attempts_remaining last_exn = match attempts_remaining, last_exn with
     | 0, Some e -> fail e
     | _, _ ->
       begin
         Lwt.catch
           (fun () ->
-            Client.post (Uri.of_string !uri) ~body
+            let headers = Cohttp.Header.init () in
+            let headers = Cohttp.Header.add headers "content-length" (String.length body_str |> string_of_int) in
+            Client.post (Uri.of_string !uri) ~headers ~chunked:false ~body
             >>= fun x ->
             return (`Ok x))
           (function
