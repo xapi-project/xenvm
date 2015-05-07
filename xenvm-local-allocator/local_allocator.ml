@@ -399,13 +399,15 @@ let main config daemon socket journal fromLVM toLVM =
               | Some data_volume ->
                 let sector_size = Int64.of_int sector_size in
                 let current = Int64.mul sector_size (sizeof data_volume) in
+                let extent_b = Int64.mul sector_size extent_size in
+                (* NB: make sure we round up to the next extent *)
                 let nr_extents = match action with
                 | `Absolute x ->
-                  Int64.(div (div (sub x current) sector_size) extent_size)
+                  Int64.(div (add (sub x current) (sub extent_b 1L)) extent_b)
                 | `IncreaseBy x ->
-                  Int64.(div (div x sector_size) extent_size) in
-                if nr_extents < 0L then begin
-                  error "Request for -ve number of extents";
+                  Int64.(div (add x extent_b) extent_b) in
+                if nr_extents <= 0L then begin
+                  error "Request for %Ld (<= 0) segments" nr_extents;
                   return ()
                 end else begin
                   FreePool.remove nr_extents
