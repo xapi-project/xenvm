@@ -13,7 +13,7 @@ Library xenvmidl
   CompiledObject:     best
   Path:               idl
   Findlibname:        xenvmidl
-  Modules:            Xenvm_interface, Xenvm_client, Log, Result, Errors, ResizeRequest, ResizeResponse
+  Modules:            Xenvm_interface, Xenvm_client, Log, Result, Errors, ResizeRequest, ResizeResponse, Pidfile
   BuildDepends:       rpclib, rpclib.syntax, sexplib, sexplib.syntax, lvm, cohttp.lwt, threads, mirage-block-unix, devmapper, bisect
 
 Executable "xenvmd"

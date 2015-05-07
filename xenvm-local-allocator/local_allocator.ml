@@ -287,6 +287,8 @@ let main config daemon socket journal fromLVM toLVM =
     fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
   } in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+  Pidfile.write_pid (config.Config.socket ^ ".lock");
+
   if daemon then Lwt_daemon.daemonize ();
 
   let t =
