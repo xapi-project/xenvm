@@ -5,7 +5,7 @@ open Errors
 
 module Config = struct
   type t = {
-    listenPort: int; (* TCP port number to listen on *)
+    listenPort: int option; (* TCP port number to listen on *)
     listenPath: string option; (* path of a unix-domain socket to listen on *)
     host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)
     host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
@@ -642,7 +642,7 @@ let handler ~info (ch,conn) req body =
 
 let run port sock_path config daemon =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
-  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> x } in
+  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
   let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
   if daemon then Lwt_daemon.daemonize ();
   ( match config.Config.listenPath with
@@ -690,19 +690,24 @@ let run port sock_path config daemon =
       (* Listen for regular API calls *)
       Server.create ~mode c in
 
-    let tcp_mode = `TCP (`Port config.Config.listenPort) in
-
+    
+    let tcp_mode =
+      match config.Config.listenPort with
+      | Some port -> [`TCP (`Port port)]
+      | None -> []
+    in
+    
     begin
       match config.Config.listenPath with
       | Some p ->
         (* Remove the socket first, if it already exists *)
         Lwt.catch (fun () -> Lwt_unix.unlink p) (fun _ -> Lwt.return ()) >>= fun () -> 
-        Lwt.return [ tcp_mode; `Unix_domain_socket (`File p) ]            
+        Lwt.return [ `Unix_domain_socket (`File p) ]            
       | None ->
-        Lwt.return [ tcp_mode ]
-    end >>= fun service_modes ->
+        Lwt.return []
+    end >>= fun unix_mode ->
 
-    let threads = List.map service_http service_modes in
+    let threads = List.map service_http (tcp_mode @ unix_mode) in
     
     Lwt.join ((service_queues ())::threads) in
 
