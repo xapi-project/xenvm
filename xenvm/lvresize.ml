@@ -22,24 +22,27 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
 
     let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
 
+    let name = Mapper.name_of vg lv in
     let device_is_active =
-      let name = Mapper.name_of vg lv in
       let all = Devmapper.ls () in
       List.mem name all in
 
     let resize_remotely () =
-      ( if device_is_active
-        then Lvchange.deactivate vg lv
-        else return () )
-      >>= fun () ->
+      if device_is_active then Devmapper.suspend name;
       ( match size with
         | `Absolute size -> Client.resize lv_name size
         | `IncreaseBy delta -> Client.resize lv_name Int64.(add delta (mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv))) )
       >>= fun () ->
-      ( if device_is_active then begin
-          Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
-          Lvchange.activate vg lv local_device
-        end else return () ) in
+      if device_is_active then begin
+        Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
+        Mapper.read [ local_device ]
+        >>= fun devices ->
+        let targets = Mapper.to_targets devices vg lv in
+        let name = Mapper.name_of vg lv in
+        Devmapper.reload name targets;
+        Devmapper.resume name;
+        return ()
+      end else return () in
 
     let resize_locally allocator =
       let name = Mapper.name_of vg lv in
