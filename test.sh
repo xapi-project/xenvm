@@ -7,9 +7,10 @@ make
 # Making a 1G disk
 rm -f bigdisk _build/xenvm*.out
 dd if=/dev/zero of=bigdisk bs=1 seek=256G count=0
+cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|`pwd`/bigdisk|g" > test.xenvmd.conf
 
 BISECT_FILE=_build/xenvm.coverage ./xenvm.native format bigdisk --vg djstest
-BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf &
+BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
 
 export BISECT_FILE=_build/xenvm.coverage
 
