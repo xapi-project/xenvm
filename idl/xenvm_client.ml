@@ -44,13 +44,14 @@ module Rpc = struct
           Cohttp_lwt_body.to_string body >>= fun body ->
           return (Jsonrpc.response_of_string body)
         | `Retry e ->
-          Lwt_unix.sleep 1.
+          let attempts_remaining = max 0 (attempts_remaining - 1) in
+          (if attempts_remaining > 0 then Lwt_unix.sleep 1. else return ())
           >>= fun () ->
-          retry (max 0 (attempts_remaining - 1)) (Some e)
+          retry attempts_remaining (Some e)
         | `Error e ->
           fail e
       end in
-    retry 5 None
+    retry 1 None
 end
 
 module Client = Xenvm_interface.ClientM(Rpc)

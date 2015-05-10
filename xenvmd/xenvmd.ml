@@ -598,6 +598,16 @@ module Impl = struct
       Lvm.Vg.set_status vg name Lvm.Lv.Status.(if readonly then [Read] else [Read; Write])
     )
 
+  let add_tag context ~name ~tag =
+    VolumeManager.write (fun vg ->
+      Lvm.Vg.add_tag vg name tag
+    )
+
+  let remove_tag context ~name ~tag =
+    VolumeManager.write (fun vg ->
+      Lvm.Vg.remove_tag vg name tag
+    )
+
   let get_lv context ~name =
     let open Lvm in
     fatal_error "get_lv"
@@ -644,6 +654,47 @@ let run port sock_path config daemon =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
   let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
+
+  (* Ideally we would bind our sockets before daemonizing to avoid racing
+     with the next command, but the conduit API doesn't let us pass a socket
+     in. Instead we daemonize in a fork()ed child, and in the parent we wait
+     for a connect() to succeed. *)
+  if Unix.fork () <> 0 then begin
+    let started = ref false in
+    let rec wait remaining =
+      if remaining = 0 then begin
+        Printf.fprintf stderr "Failed to communicate with xenvmd: check the configuration and try again.\n%!";
+        exit 1;
+      end;
+      begin match config.Config.listenPort with
+      | Some port ->
+        let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+        (try
+          Unix.connect s (Unix.ADDR_INET(Unix.inet_addr_of_string "127.0.0.1", port));
+          Unix.close s;
+          started := true
+        with _ ->
+          Unix.close s)
+      | None -> ()
+      end;
+      begin match config.Config.listenPath with
+      | Some path ->
+        let s = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+        (try
+          Unix.connect s (Unix.ADDR_UNIX path);
+          Unix.close s;
+          started := true
+        with e ->
+          Unix.close s)
+      | None -> ()
+      end;
+      if not !started then begin
+        Unix.sleep 1;
+        wait (remaining - 1)
+      end in
+    wait 30;
+    exit 0
+  end;
   if daemon then Lwt_daemon.daemonize ();
   ( match config.Config.listenPath with
     | None ->

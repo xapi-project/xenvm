@@ -37,7 +37,13 @@ let lvs copts noheadings nosuffix units fields (vg_name,lv_name_opt) =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     let dev = match info with | Some i -> i.local_device | None -> "<unknown>" in
-    Client.get () >>= fun vg ->
+    Lwt.catch
+      (Client.get)
+      (fun _ ->
+        Printf.fprintf stderr "  Volume group \"%s\" not found\n" vg_name;
+        Printf.fprintf stderr "  Skipping volume group %s\n%!" vg_name;
+        exit 1)
+    >>= fun vg ->
 
     let headings = headings_of fields in
     let rows =

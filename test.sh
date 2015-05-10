@@ -7,16 +7,19 @@ make
 # Making a 1G disk
 rm -f bigdisk _build/xenvm*.out
 dd if=/dev/zero of=bigdisk bs=1 seek=256G count=0
-
+cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|`pwd`/bigdisk|g" > test.xenvmd.conf
+sudo mkdir -p /etc/xenvm.d
 BISECT_FILE=_build/xenvm.coverage ./xenvm.native format bigdisk --vg djstest
-BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf &
+BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
 
 export BISECT_FILE=_build/xenvm.coverage
 
-./xenvm.native create --lv live
-./xenvm.native benchmark
+sudo ./xenvm.native set-vg-info --pvpath ./bigdisk -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
 
-./xenvm.native shutdown
+./xenvm.native benchmark /dev/djstest
+
+./xenvm.native shutdown /dev/djstest
+
 wait $(pidof xenvmd.native)
 echo Generating bisect report-- this fails on travis
 (cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
