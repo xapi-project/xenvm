@@ -105,22 +105,34 @@ let activate config lvname path pv =
      Devmapper.mknod name path 0o0600;
      return ())
 
-let host_create config host =
-  set_uri config None;
-  Lwt_main.run (Client.Host.create host)
-let host_connect config host =
-  set_uri config None;
-  Lwt_main.run (Client.Host.connect host)
-let host_disconnect config host =
-  set_uri config None;
-  Lwt_main.run (Client.Host.disconnect host)
-let host_destroy config host =
-  set_uri config None;
-  Lwt_main.run (Client.Host.destroy host)
-
-let host_list config =
-  set_uri config None;
+let host_create copts (vg_name,_) host =
   let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
+    Client.Host.create host in
+  Lwt_main.run t
+let host_connect copts (vg_name,_) host =
+  let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
+    Client.Host.connect host in
+  Lwt_main.run t
+let host_disconnect copts (vg_name,_) host =
+  let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
+    Client.Host.disconnect host in
+  Lwt_main.run t 
+let host_destroy copts (vg_name,_) host =
+  let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
+    Client.Host.destroy host in
+  Lwt_main.run t 
+let host_list copts (vg_name,_) =
+  let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
     Client.Host.all () >>= fun hosts ->
     let open Xenvm_interface in
     let table_of_queue q = [
@@ -137,9 +149,10 @@ let host_list config =
     return () in
   Lwt_main.run t
 
-let shutdown config =
-  set_uri config None;
+let shutdown copts (vg_name,_) =
   let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
     Client.shutdown ()
     >>= fun () ->
     (* wait for the daemon to disappear *)
@@ -159,9 +172,10 @@ let shutdown config =
     wait () in
   Lwt_main.run t
 
-let benchmark config =
-  set_uri config None;
+let benchmark copts (vg_name,_) =
   let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
     let mib = Int64.mul 1048576L 4L in
     let number = 40000 in
     let start = Unix.gettimeofday () in
@@ -204,7 +218,7 @@ let info =
 
 let hostname =
   let doc = "Unique name of client host" in
-  Arg.(required & pos 0 (some string) None & info [] ~docv:"HOSTNAME" ~doc)
+  Arg.(required & pos 1 (some string) None & info [] ~docv:"HOSTNAME" ~doc)
 
 let filenames =
   let doc = "Path to the files" in
@@ -276,7 +290,7 @@ let host_connect_cmd =
     `S "DESCRIPTION";
     `P "Register a host with the daemon. The daemon will start servicing block updates from the shared queues.";
   ] in
-  Term.(pure host_connect $ copts_t $ hostname),
+  Term.(pure host_connect $ copts_t $ name_arg $ hostname),
   Term.info "host-connect" ~sdocs:copts_sect ~doc ~man
 
 let host_disconnect_cmd =
@@ -285,7 +299,7 @@ let host_disconnect_cmd =
     `S "DESCRIPTION";
     `P "Dergister a host with the daemon. The daemon will suspend the block queues and stop listening to requests.";
   ] in
-  Term.(pure host_disconnect $ copts_t $ hostname),
+  Term.(pure host_disconnect $ copts_t $ name_arg $ hostname),
   Term.info "host-disconnect" ~sdocs:copts_sect ~doc ~man
 
 let host_create_cmd =
@@ -294,7 +308,7 @@ let host_create_cmd =
     `S "DESCRIPTION";
     `P "Creates the metadata volumes needed for a host to connect and make disk updates.";
   ] in
-  Term.(pure host_create $ copts_t $ hostname),
+  Term.(pure host_create $ copts_t $ name_arg $ hostname),
   Term.info "host-create" ~sdocs:copts_sect ~doc ~man
 
 let host_destroy_cmd =
@@ -303,7 +317,7 @@ let host_destroy_cmd =
     `S "DESCRIPTION";
     `P "Disconnects the metadata volumes cleanly and destroys them.";
   ] in
-  Term.(pure host_destroy $ copts_t $ hostname),
+  Term.(pure host_destroy $ copts_t $ name_arg $ hostname),
   Term.info "host-destroy" ~sdocs:copts_sect ~doc ~man
 
 let host_list_cmd =
@@ -312,7 +326,7 @@ let host_list_cmd =
     `S "DESCRIPTION";
     `P "Lists all the hosts known to Xenvmd and displays the state of the metadata volumes.";
   ] in
-  Term.(pure host_list $ copts_t),
+  Term.(pure host_list $ copts_t $ name_arg),
   Term.info "host-list" ~sdocs:copts_sect ~doc ~man
 
 let shutdown_cmd =
@@ -321,7 +335,7 @@ let shutdown_cmd =
     `S "DESCRIPTION";
     `P "Flushes the redo log and shuts down, leaving the system in a consistent state.";
   ] in
-  Term.(pure shutdown $ copts_t),
+  Term.(pure shutdown $ copts_t $ name_arg),
   Term.info "shutdown" ~sdocs:copts_sect ~doc ~man
 
 let benchmark_cmd =
@@ -330,7 +344,7 @@ let benchmark_cmd =
     `S "DESCRIPTION";
     `P "Perform some microbenchmarks and print the results.";
   ] in
-  Term.(pure benchmark $ copts_t),
+  Term.(pure benchmark $ copts_t $ name_arg),
   Term.info "benchmark" ~sdocs:copts_sect ~doc ~man
 
 let default_cmd =
