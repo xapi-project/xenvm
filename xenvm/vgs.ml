@@ -35,7 +35,13 @@ let vgs copts noheadings nosuffix units fields vg_names =
     Lwt_list.map_s (fun (vg_name,_) ->
 	get_vg_info_t copts vg_name >>= fun info ->
 	set_uri copts info;
-      Client.get () >>= fun vg ->
+        Lwt.catch
+          (Client.get)
+          (fun _ ->
+            Printf.fprintf stderr "  Volume group \"%s\" not found\n" vg_name;
+            Printf.fprintf stderr "  Skipping volume group %s\n%!" vg_name;
+            exit 1)
+        >>= fun vg ->
       Lwt.return (info,vg)) vg_names >>= fun vgs ->
     let rows = List.concat (List.map do_row vgs) in
     print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows);
