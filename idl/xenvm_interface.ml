@@ -16,6 +16,14 @@ external remove : name:string -> unit = ""
 external resize : name:string -> size:int64 -> unit = ""
 external set_status : name:string -> readonly:bool -> unit = ""
 
+external add_tag: name:string -> tag:string -> unit = ""
+(** [add_tag name tag]: adds the tag to the named LV. If the tag already
+    exists then this operation succeeds anyway. *)
+
+external remove_tag: name:string -> tag:string -> unit = ""
+(** [remove_tag name tag]: removes the tag from the named LV. If the LV
+    hasn't got the tag then the operation succeeds anywya. *)
+
 external flush : name:string -> unit = ""
 (** [flush lv] processes all pending allocations for this LV, such that
     future calls to [get_lv] will return accurate metadata. *)

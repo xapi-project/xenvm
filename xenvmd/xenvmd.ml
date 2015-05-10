@@ -598,6 +598,16 @@ module Impl = struct
       Lvm.Vg.set_status vg name Lvm.Lv.Status.(if readonly then [Read] else [Read; Write])
     )
 
+  let add_tag context ~name ~tag =
+    VolumeManager.write (fun vg ->
+      Lvm.Vg.add_tag vg name tag
+    )
+
+  let remove_tag context ~name ~tag =
+    VolumeManager.write (fun vg ->
+      Lvm.Vg.remove_tag vg name tag
+    )
+
   let get_lv context ~name =
     let open Lvm in
     fatal_error "get_lv"

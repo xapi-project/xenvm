@@ -87,13 +87,29 @@ let lvchange_refresh copts vg_name lv_name physical_device =
     reload vg lv local_device
   )
 
-let lvchange copts (vg_name,lv_name_opt) physical_device action perm refresh =
+let lvchange copts (vg_name,lv_name_opt) physical_device action perm refresh add_tag del_tag =
   let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need LV name" in
   (match action with
   | Some Activate -> lvchange_activate copts vg_name lv_name physical_device
   | Some Deactivate -> lvchange_deactivate copts vg_name lv_name
   | None -> ());
   (if refresh then lvchange_refresh copts vg_name lv_name physical_device);
+  (match add_tag with
+  | Some tag ->
+    Lwt_main.run (
+      let open Xenvm_common in
+      get_vg_info_t copts vg_name >>= fun info ->
+      set_uri copts info;
+      Client.add_tag ~name:lv_name ~tag)
+  | None -> ());
+  (match del_tag with
+  | Some tag ->
+    Lwt_main.run (
+      let open Xenvm_common in
+      get_vg_info_t copts vg_name >>= fun info ->
+      set_uri copts info;
+      Client.remove_tag ~name:lv_name ~tag)
+  | None -> ());
   (match perm with
   | Some x ->
     let readonly =
@@ -130,12 +146,20 @@ let perm_arg =
 let refresh_arg =
   let doc = "If the logical volume is active, reload its metadata" in
   Arg.(value & flag & info ["refresh"] ~docv:"REFRESH" ~doc)
-    
+
+let add_tag_arg =
+  let doc = "Add the given tag to the LV" in
+  Arg.(value & opt (some string) None & info ["addtag"] ~docv:"ADDTAG" ~doc)
+
+let del_tag_arg =
+  let doc = "Remove the given tag from the LV" in
+  Arg.(value & opt (some string) None & info ["deltag"] ~docv:"DELTAG" ~doc)
+  
 let lvchange_cmd =
   let doc = "Change the attributes of a logical volume" in
   let man = [
     `S "DESCRIPTION";
     `P "lvchange allows you to change the attributes of a logical volume including making them known to the kernel ready for use."
   ] in
-  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg $ refresh_arg),
+  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg $ refresh_arg $ add_tag_arg $ del_tag_arg),
   Term.info "lvchange" ~sdocs:"COMMON OPTIONS" ~doc ~man
