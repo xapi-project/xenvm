@@ -177,7 +177,7 @@ let benchmark copts (vg_name,_) =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     let mib = Int64.mul 1048576L 4L in
-    let number = 40000 in
+    let number = 1000 in
     let start = Unix.gettimeofday () in
     let rec fori acc f = function
     | 0 -> return acc
