@@ -13,10 +13,12 @@ BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf &
 
 export BISECT_FILE=_build/xenvm.coverage
 
-./xenvm.native create --lv live
-./xenvm.native benchmark
+./xenvm.native set-vg-info --pvpath ./bigdisk -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
 
-./xenvm.native shutdown
+./xenvm.native benchmark /dev/djstest
+
+./xenvm.native shutdown /dev/djstest
+
 wait $(pidof xenvmd.native)
 echo Generating bisect report-- this fails on travis
 (cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
