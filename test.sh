@@ -14,7 +14,7 @@ BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf -
 
 export BISECT_FILE=_build/xenvm.coverage
 
-./xenvm.native set-vg-info --pvpath ./bigdisk -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
+sudo ./xenvm.native set-vg-info --pvpath ./bigdisk -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
 
 ./xenvm.native benchmark /dev/djstest
 
