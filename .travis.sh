@@ -3,7 +3,9 @@ set -e
 eval `opam config env`
 #opam pin add ocveralls git://github.com/djs55/ocveralls#fix-vector-combine -y
 export BISECT_FILE=_build/xenvm.coverage
-make test
+# Needed to support Unix domain sockets:
+sudo opam pin add conduit git://github.com/mirage/ocaml-conduit -y
+sudo make test
 
 echo Generating bisect report-- this fails on travis
 (cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
