@@ -3,6 +3,8 @@
 open Cmdliner
 open Lwt
 open Xenvm_common
+open Lvm
+module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock)
   
 let default_fields = [
   "vg_name";
@@ -32,11 +34,21 @@ let vgs copts noheadings nosuffix units fields vg_names =
   in
   Lwt_main.run (
     let headings = headings_of fields in
+
     Lwt_list.map_s (fun (vg_name,_) ->
 	get_vg_info_t copts vg_name >>= fun info ->
 	set_uri copts info;
+        let local_device = match info with
+        | Some info -> info.local_device (* If we've got a default, use that *)
+        | None -> failwith "Need to know the local device!" in
         Lwt.catch
-          (Client.get)
+          (fun () ->
+            with_block local_device
+              (fun x ->
+                Vg_IO.connect [ x ] `RO >>|= fun vg ->
+                return (Vg_IO.metadata_of vg) 
+              )
+          )
           (fun _ ->
             Printf.fprintf stderr "  Volume group \"%s\" not found\n" vg_name;
             Printf.fprintf stderr "  Skipping volume group %s\n%!" vg_name;

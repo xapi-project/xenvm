@@ -177,15 +177,17 @@ let benchmark copts (vg_name,_) =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     let mib = Int64.mul 1048576L 4L in
-    let number = 40000 in
+    let number = 1000 in
     let start = Unix.gettimeofday () in
-    let rec fori acc f = function
+    let rec fori test_name acc f = function
     | 0 -> return acc
     | n ->
       f n
       >>= fun () ->
-      fori ((number - n, Unix.gettimeofday () -. start) :: acc) f (n - 1) in
-    fori [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
+      if ((n * 100) / number) <> (((n + 1) * 100) / number)
+      then Printf.fprintf stderr "%s %d %% complete\n%!" test_name (100 - (n * 100) / number);
+      fori test_name ((number - n, Unix.gettimeofday () -. start) :: acc) f (n - 1) in
+    fori "Creating volumes" [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
     >>= fun creates ->
     let time = Unix.gettimeofday () -. start in
     let oc = open_out "benchmark.dat" in
@@ -193,7 +195,7 @@ let benchmark copts (vg_name,_) =
     Printf.fprintf oc "# %d creates in %.1f s\n" number time;
     Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int number /. time);
     let start = Unix.gettimeofday () in
-    fori [] (fun i -> Client.remove ~name:(Printf.sprintf "test-lv-%d" i)) number
+    fori "Removing volumes" [] (fun i -> Client.remove ~name:(Printf.sprintf "test-lv-%d" i)) number
     >>= fun destroys ->
     let time = Unix.gettimeofday () -. start in
     List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" (number + n) t) (List.rev destroys);
