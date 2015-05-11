@@ -37,6 +37,14 @@ let finally f g =
     g ();
     raise e
 
+let file_of_string filename string =
+  let oc = open_out filename in
+  finally
+    (fun () ->
+      debug "write >%s" filename;
+      output oc string 0 (String.length string)
+    ) (fun () -> close_out oc)
+
 let startswith prefix x =
   let prefix' = String.length prefix in
   let x' = String.length x in
@@ -51,6 +59,24 @@ let endswith suffix x =
   let suffix' = String.length suffix in
   let x' = String.length x in
   x' >= suffix' && (String.sub x (x' - suffix') suffix' = suffix)
+
+let mkdir_rec dir perm =
+  let mkdir_safe dir perm =
+    try Unix.mkdir dir perm with Unix.Unix_error (Unix.EEXIST, _, _) -> () in
+  let rec p_mkdir dir =
+    let p_name = Filename.dirname dir in
+    if p_name <> "/" && p_name <> "."
+    then p_mkdir p_name;
+    mkdir_safe dir perm in
+  p_mkdir dir
+
+let rm_f x =
+  try
+    Unix.unlink x;
+    debug "rm %s" x
+   with _ ->
+    debug "%s already deleted" x;
+    ()
 
 (* From Xcp_service: *)
 let colon = Re_str.regexp_string ":"
@@ -162,4 +188,6 @@ let kib = 1024L
 let mib = Int64.(kib * kib)
 let gib = Int64.(mib * kib)
 let tib = Int64.(gib * kib)
+
+module Client = Xenvm_client.Client
 
