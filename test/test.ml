@@ -58,10 +58,18 @@ let lvcreate_L =
   fun () ->
   xenvm [ "lvcreate"; "-n"; "test"; "-L"; "4"; vg ] |> ignore_string;
   assert_lv_exists "test";
-  xenvm [ "lvchange"; "-an"; vg ^ "/test" ] |> ignore_string
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+
+let lvcreate_l =
+  "lvcreate -n <name> -l <extents> <vg>: check that we can create an LV with a size in extents" >::
+  fun () ->
+  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "1"; vg ] |> ignore_string;
+  assert_lv_exists "test";
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
 let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
+  lvcreate_l;
 ]
 
 let _ =
