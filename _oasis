@@ -45,3 +45,17 @@ Executable "xenvm-local-allocator"
   Custom:             true
   Install:            false
   BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring
+
+Executable "test"
+  ByteOpt:            -warn-error +a
+  NativeOpt:          -warn-error +a
+  CompiledObject:     best
+  Path:               test
+  MainIs:             test.ml
+  Custom:             true
+  Install:            false
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring
+
+Test xenvm_test
+  Command:            ./test.native
+  Run:                true
