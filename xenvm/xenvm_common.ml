@@ -421,5 +421,20 @@ let print_table noheadings header rows =
   if not noheadings then print_row header;
   List.iter print_row rows
 
+let (>>*=) m f = match m with
+  | `Error (`Msg e) -> fail (Failure e)
+  | `Error (`DuplicateLV x) -> fail (Failure (Printf.sprintf "%s is a duplicate LV name" x))
+  | `Error (`OnlyThisMuchFree x) -> fail (Failure (Printf.sprintf "There is only %Ld free" x))
+  | `Error (`UnknownLV x) -> fail (Failure (Printf.sprintf "I couldn't find an LV named %s" x))
+  | `Ok x -> f x
 
+let (>>|=) m f = m >>= fun x -> x >>*= f
+
+let with_block filename f =
+  let open Lwt in
+  Block.connect filename
+  >>= function
+  | `Error _ -> fail (Failure (Printf.sprintf "Unable to read %s" filename))
+  | `Ok x ->
+    Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
 

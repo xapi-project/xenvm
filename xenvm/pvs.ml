@@ -15,23 +15,6 @@ let default_fields = [
 open Lvm
 module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock)
 
-let (>>*=) m f = match m with
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Error (`DuplicateLV x) -> fail (Failure (Printf.sprintf "%s is a duplicate LV name" x))
-  | `Error (`OnlyThisMuchFree x) -> fail (Failure (Printf.sprintf "There is only %Ld free" x))
-  | `Error (`UnknownLV x) -> fail (Failure (Printf.sprintf "I couldn't find an LV named %s" x))
-  | `Ok x -> f x
-
-let (>>|=) m f = m >>= fun x -> x >>*= f
-
-let with_block filename f =
-  let open Lwt in
-  Block.connect filename
-  >>= function
-  | `Error _ -> fail (Failure (Printf.sprintf "Unable to read %s" filename))
-  | `Ok x ->
-    Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
-
 let pvs copts noheadings nosuffix units fields devices =
   let open Xenvm_common in
   Lwt_main.run (
