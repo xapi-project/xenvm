@@ -7,13 +7,18 @@ open Lwt
 (* lvcreate -n <name> vgname -l <size_in_percent> -L <size_in_mb> --addtag tag *)
 let lvcreate copts lv_name real_size percent_size tags vg_name =
   let open Xenvm_common in
-  let size = match parse_size real_size percent_size with
-  | `Absolute size -> size
-  | _ -> failwith "Initial size must be absolute" in
   let info = Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     Client.get () >>= fun vg ->
+
+    let extent_size_mib = Int64.(div (mul 512L vg.Lvm.Vg.extent_size) (mul 1024L 1024L)) in
+
+    let size = match parse_size real_size percent_size with
+    | `Absolute size -> size
+    | `Extents extents -> Int64.mul extent_size_mib extents
+    | _ -> failwith "Initial size must be absolute" in
+
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
     Client.create lv_name size tags >>= fun () -> 
     return info) in
