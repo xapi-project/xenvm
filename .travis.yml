@@ -1,6 +1,6 @@
 language: c
 install: wget https://raw.githubusercontent.com/ocaml/ocaml-travisci-skeleton/master/.travis-opam.sh
-script: bash -ex .travis-opam.sh && bash -ex .travis.sh
+script: cp .travis.oasis _oasis && bash -ex .travis-opam.sh && bash -ex .travis.sh
 env:
   - OCAML_VERSION=4.02 PACKAGE=thin_lvhd_tools EXTRA_REMOTES="git://github.com/xapi-project/thin-lvhd-opam-repo"
 sudo: required
