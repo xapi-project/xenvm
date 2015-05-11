@@ -40,13 +40,15 @@ let no_xenvmd_suite = "Commands which should work without xenvmd" >::: [
   vgcreate;
 ]
 
-let assert_lv_exists name =
+let assert_lv_exists ?expected_size_in_extents name =
   let t =
     Lwt.catch
       (fun () ->
         Client.get_lv "test"
-        >>= fun (_lv, _vg) ->
-        return ()
+        >>= fun (_, lv) ->
+        match expected_size_in_extents with
+        | None -> return ()
+        | Some size -> assert_equal ~printer:Int64.to_string size (Lvm.Lv.size_in_extents lv); return ()
       ) (fun e ->
         Printf.fprintf stderr "xenvmd claims the LV %s doesn't exist: %s\n%!" name (Printexc.to_string e);
         failwith (Printf.sprintf "LV %s doesn't exist" name)
@@ -57,14 +59,14 @@ let lvcreate_L =
   "lvcreate -n <name> -L <mib> <vg>: check that we can create an LV with a size in MiB" >::
   fun () ->
   xenvm [ "lvcreate"; "-n"; "test"; "-L"; "4"; vg ] |> ignore_string;
-  assert_lv_exists "test";
+  assert_lv_exists ~expected_size_in_extents:1L "test";
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
 let lvcreate_l =
   "lvcreate -n <name> -l <extents> <vg>: check that we can create an LV with a size in extents" >::
   fun () ->
   xenvm [ "lvcreate"; "-n"; "test"; "-l"; "1"; vg ] |> ignore_string;
-  assert_lv_exists "test";
+  assert_lv_exists ~expected_size_in_extents:1L "test";
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
 let xenvmd_suite = "Commands which require xenvmd" >::: [
