@@ -313,7 +313,13 @@ let parse_size_string =
     | Not_found ->
       failwith "Expecting a size of the form [0-9]+[mMbBkKgGtTsS]?"
 
-let parse_percent_size_string s = failwith "Unimplemented"
+(* LogicalExtentsNumber[%{VG|PVS|FREE|ORIGIN}] *)
+let parse_percent_size_string s =
+  try
+    let _ = String.index s '%' in
+    failwith "Creating an LV with a %age size is not implemented yet"
+  with Not_found ->
+    `Extents (Int64.of_string s)
 
 let parse_size real_size percent_size = match real_size, percent_size with
   | Some x, None ->

@@ -9,7 +9,8 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
   let size = match parse_size real_size percent_size with
   | `IncreaseBy x -> `IncreaseBy x
   | `Absolute x -> `Absolute x
-  | `DecreaseBy _ -> failwith "Shrinking volumes not supported" in
+  | `DecreaseBy _ -> failwith "Shrinking volumes not supported"
+  | `Extents _ -> failwith "Resizing in terms of extents not supported" in
 
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
