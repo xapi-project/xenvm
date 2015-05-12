@@ -444,3 +444,18 @@ let with_block filename f =
   | `Ok x ->
     Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
 
+type action = Activate | Deactivate
+
+let action_arg =
+  let parse_action c =
+    match c with
+    | Some 'y' -> Some Activate
+    | Some 'n' -> Some Deactivate
+    | Some _ -> failwith "Unknown activation argument"
+    | None -> None
+  in
+  let doc = "Controls the availability of the logical volumes for use.  Communicates with the kernel device-mapper driver via libdevmapper to activate (-ay) or deactivate (-an) the logical volumes.
+
+Activation  of a logical volume creates a symbolic link /dev/VolumeGroupName/LogicalVolumeName pointing to the device node.  This link is removed on deactivation.  All software and scripts should access the device through this symbolic link and present this as the name of the device.  The location and name of the underlying device node may depend on the  distribution and configuration (e.g. udev) and might change from release to release." in
+  let a = Arg.(value & opt (some char) None & info ["a"] ~docv:"ACTIVATE" ~doc) in
+  Term.(pure parse_action $ a)

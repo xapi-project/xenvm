@@ -361,12 +361,14 @@ let cmds = [
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
   Lvcreate.lvcreate_cmd;
   Lvchange.lvchange_cmd;
+  Vgchange.vgchange_cmd;
   Lvs.lvs_cmd;
   set_vg_info_cmd;
   Vgcreate.vgcreate_cmd;
   Vgs.vgs_cmd;
   Pvs.pvs_cmd;
   Vgremove.vgremove_cmd;
+  Pvcreate.pvcreate_cmd;
   Pvremove.pvremove_cmd;
   Lvremove.lvremove_cmd;
   Lvrename.lvrename_cmd;
