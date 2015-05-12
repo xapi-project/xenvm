@@ -361,6 +361,7 @@ let cmds = [
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
   Lvcreate.lvcreate_cmd;
   Lvchange.lvchange_cmd;
+  Vgchange.vgchange_cmd;
   Lvs.lvs_cmd;
   set_vg_info_cmd;
   Vgcreate.vgcreate_cmd;
