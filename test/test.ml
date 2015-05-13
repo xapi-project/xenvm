@@ -69,9 +69,40 @@ let lvcreate_l =
   assert_lv_exists ~expected_size_in_extents:1L "test";
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
+let file_exists filename =
+  try
+    Unix.LargeFile.stat filename |> ignore;
+    true
+  with Unix.Unix_error(Unix.ENOENT, _, _) -> false
+
+let dm_exists name = match Devmapper.stat name with
+  | None -> false
+  | Some _ -> true
+
+let dev_path_of name = "/dev/" ^ vg ^ "/" ^ name
+let mapper_path_of name = "/dev/mapper/" ^ vg ^ "-" ^ name
+
+let lvchange_n =
+  "lvchange -an <device>: check that we can deactivate a volume" >::
+  fun () ->
+  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L "test";
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv "test") in
+  let name = Mapper.name_of vg_metadata lv_metadata in
+  xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/test" ] |> ignore_string;
+  assert_equal ~printer:string_of_bool true (file_exists (dev_path_of "test"));
+  assert_equal ~printer:string_of_bool true (file_exists (mapper_path_of "test"));
+  assert_equal ~printer:string_of_bool true (dm_exists name);
+  xenvm [ "lvchange"; "-an"; "/dev/" ^ vg ^ "/test" ] |> ignore_string;
+  assert_equal ~printer:string_of_bool false (file_exists (dev_path_of"test"));
+  assert_equal ~printer:string_of_bool false (file_exists (mapper_path_of"test"));
+  assert_equal ~printer:string_of_bool false (dm_exists name);
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+
 let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
   lvcreate_l;
+  lvchange_n;
 ]
 
 let _ =
