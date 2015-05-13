@@ -43,9 +43,23 @@ let lvchange_activate copts vg_name lv_name physical_device =
 let deactivate vg lv =
   let open Xenvm_common in
   let name = Mapper.name_of vg lv in
-  let all = Devmapper.ls () in
-  if List.mem name all
-  then Devmapper.remove name;
+  (* This can fail with an EBUSY *)
+  let rec retry n =
+    let all = Devmapper.ls () in
+    let result =
+      try
+        if List.mem name all then Devmapper.remove name;
+        `Ok ()
+      with e ->
+        Printf.fprintf stderr "Caught %s while removing dm device %s\n%!" (Printexc.to_string e) name;
+        if n = 0 then raise e;
+        `Retry in
+    match result with
+    | `Ok () -> ()
+    | `Retry ->
+      Unix.sleep 1;
+      retry (n - 1) in
+  retry 30;
   (* Delete the device node *)
   let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
