@@ -12,13 +12,16 @@ let lvcreate copts lv_name real_size percent_size tags vg_name =
     set_uri copts info;
     Client.get () >>= fun vg ->
 
-    let extent_size_mib = Int64.(div (mul 512L vg.Lvm.Vg.extent_size) (mul 1024L 1024L)) in
+    let extent_size_bytes = Int64.(mul 512L vg.Lvm.Vg.extent_size) in
 
     let size = match parse_size real_size percent_size with
     | `Absolute size -> size
-    | `Extents extents -> Int64.mul extent_size_mib extents
+    | `Extents extents -> Int64.mul extent_size_bytes extents
+    | `Free percent ->
+      let extents = Int64.(div (mul (Lvm.Pv.Allocator.size vg.Lvm.Vg.free_space) percent) 100L) in
+      let bytes = Int64.mul extent_size_bytes extents in
+      bytes
     | _ -> failwith "Initial size must be absolute" in
-
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
     Client.create lv_name size tags >>= fun () -> 
     return info) in

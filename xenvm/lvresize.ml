@@ -9,6 +9,7 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
   let size = match parse_size real_size percent_size with
   | `IncreaseBy x -> `IncreaseBy x
   | `Absolute x -> `Absolute x
+  | `Free _ -> failwith "Resizing to a percentage of free space not supported"
   | `DecreaseBy _ -> failwith "Shrinking volumes not supported"
   | `Extents _ -> failwith "Resizing in terms of extents not supported" in
 

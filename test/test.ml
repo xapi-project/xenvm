@@ -55,19 +55,35 @@ let assert_lv_exists ?expected_size_in_extents name =
       ) in
   Lwt_main.run t
 
+let free_extents () =
+  let t =
+    Client.get ()
+    >>= fun vg ->
+    return (Lvm.Pv.Allocator.size (vg.Lvm.Vg.free_space)) in
+  Lwt_main.run t
+
 let lvcreate_L =
   "lvcreate -n <name> -L <mib> <vg>: check that we can create an LV with a size in MiB" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "4"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:1L "test";
+  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "16"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:4L "test";
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
 let lvcreate_l =
   "lvcreate -n <name> -l <extents> <vg>: check that we can create an LV with a size in extents" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "1"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:1L "test";
+  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "2"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:2L "test";
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+
+let lvcreate_percent =
+  "lvcreate -n <name> -l 100%F <vg>: check that we can fill all free space in the VG" >::
+  fun () ->
+  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "100%F"; vg ] |> ignore_string;
+  let free = free_extents () in
+  assert_equal ~printer:Int64.to_string 0L free;
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+
 
 let file_exists filename =
   try
@@ -102,6 +118,7 @@ let lvchange_n =
 let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
   lvcreate_l;
+  lvcreate_percent;
   lvchange_n;
 ]
 
