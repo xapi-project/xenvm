@@ -324,11 +324,18 @@ let parse_size_string =
     | Not_found ->
       failwith "Expecting a size of the form [0-9]+[mMbBkKgGtTsS]?"
 
-(* LogicalExtentsNumber[%{VG|PVS|FREE|ORIGIN}] *)
+(* LogicalExtentsNumber[%{VG|PVS|FREE|ORIGIN}] in the man page
+   but the command will apparently also accept '100%F' *)
 let parse_percent_size_string s =
   try
-    let _ = String.index s '%' in
-    failwith "Creating an LV with a %age size is not implemented yet"
+    let i = String.index s '%' in
+    let percent = Int64.of_string (String.sub s 0 i) in
+    match String.sub s (i + 1) (String.length s - i - 1) with
+    | "F" | "FREE" -> `Free percent
+    | "VG" -> failwith "Creating an LV with a %age of VG is not implemented yet"
+    | "PVS" -> failwith "Creating an LV with a %age of PVS is not implemented yet"
+    | "ORIGIN" -> failwith "Creating an LV with a %age of ORIGIN is not implemented yet"
+    | x -> failwith (Printf.sprintf "I don't understand the %%age size string: %s; expected [VG|PVS|FREE|ORIGIN]" x)
   with Not_found ->
     `Extents (Int64.of_string s)
 
