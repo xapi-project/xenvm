@@ -62,10 +62,12 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       >>= fun () ->
       match resp with
       | ResizeResponse.Device_mapper_device_does_not_exist name ->
-        Printf.fprintf stderr "Device mapper device does not exist: %s\n%!" name;
+        stderr "Device mapper device does not exist: %s" name
+        >>= fun () ->
         exit 1
       | ResizeResponse.Request_for_no_segments nr ->
-        Printf.fprintf stderr "Request for an illegal number of segments: %Ld\n%!" nr;
+        stderr "Request for an illegal number of segments: %Ld" nr
+        >>= fun () ->
         exit 2
       | ResizeResponse.Success ->
         return () in

@@ -32,8 +32,8 @@ let pvs copts noheadings nosuffix units fields devices =
       vg.Lvm.Vg.pvs in
     let headings = headings_of fields in
     let rows = List.concat (List.map (fun vg -> do_row (Vg_IO.metadata_of vg)) vgs) in
-    print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows);
-    Lwt.return ()
+    let lines = print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows) in
+    Lwt_list.iter_s (fun x -> stdout "%s" x) lines
   )
 
 let pvs_cmd =

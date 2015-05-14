@@ -3,6 +3,17 @@ open Cmdliner
 open Lwt
 open Errors
 
+let syslog = Lwt_log.syslog ~facility:`Daemon ()
+
+let stdout fmt = Printf.ksprintf (fun s ->
+  Printf.printf "%s\n%!" s;
+  Lwt_log.log ~logger:syslog ~level:Lwt_log.Notice ("stdout:" ^ s)
+) fmt
+let stderr fmt = Printf.ksprintf (fun s ->
+  Printf.fprintf stderr "%s\n%!" s;
+  Lwt_log.log ~logger:syslog ~level:Lwt_log.Notice ("stderr:" ^ s)
+) fmt
+
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
@@ -355,10 +366,12 @@ let set_vg_info_t copts uri local_device local_allocator_path unix_domain_sock_p
       Lwt_io.fprintf f "%s" s))
     (function
     | Unix.Unix_error(Unix.ENOENT, _, s) ->
-      Printf.fprintf stderr "Unable to open file: Does the config dir '%s' exist?\n" copts.config;
+      stderr "Unable to open file: Does the config dir '%s' exist?" copts.config
+      >>= fun () ->
       exit 1
     | Unix.Unix_error(Unix.EACCES, _, _) ->
-      Printf.fprintf stderr "Permission denied. You may need to rerun with 'sudo'\n";
+      stderr "Permission denied. You may need to rerun with 'sudo'"
+      >>= fun () ->
       exit 1
     |e -> Lwt.fail e)
 
@@ -422,10 +435,10 @@ let print_table noheadings header rows =
     List.fold_left max 0 widths in
   let widths = List.rev (snd(List.fold_left (fun (i, acc) _ -> (i + 1, (width_of_column i) :: acc)) (0, []) header)) in
   let print_row row =
-    List.iter (fun (n, s) -> Printf.printf "%s " (padto ' ' n s)) (List.combine widths row);
-    Printf.printf "\n" in
-  if not noheadings then print_row header;
-  List.iter print_row rows
+    String.concat "" (List.map (fun (n, s) -> Printf.sprintf "%s " (padto ' ' n s)) (List.combine widths row)) in
+  if noheadings
+  then List.map print_row rows
+  else print_row header :: (List.map print_row rows)
 
 let (>>*=) m f = match m with
   | `Error (`Msg e) -> fail (Failure e)

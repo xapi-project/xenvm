@@ -9,8 +9,9 @@ module Pv_IO = Pv.Make(Block)
 
 let pvcreate copts ff y metadatasize filenames =
   let open Xenvm_common in
-  Printf.fprintf stderr "NOTE: pvcreate is currently a no-op\n%!";
-  ()
+  Lwt_main.run (
+    stderr "NOTE: pvcreate is currently a no-op"
+  )
 
 let f =
   let doc = "Force the command and override safety-checks" in
