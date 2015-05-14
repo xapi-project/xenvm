@@ -49,17 +49,19 @@ let deactivate vg lv =
     let result =
       try
         if List.mem name all then Devmapper.remove name;
-        `Ok ()
+        return (`Ok ())
       with e ->
-        Printf.fprintf stderr "Caught %s while removing dm device %s\n%!" (Printexc.to_string e) name;
+        stderr "Caught %s while removing dm device %s" (Printexc.to_string e) name
+        >>= fun () ->
         if n = 0 then raise e;
-        `Retry in
-    match result with
-    | `Ok () -> ()
+        return `Retry in
+    result >>= function
+    | `Ok () -> return ()
     | `Retry ->
       Unix.sleep 1;
       retry (n - 1) in
-  retry 30;
+  retry 30
+  >>= fun () ->
   (* Delete the device node *)
   let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->

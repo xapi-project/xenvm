@@ -34,7 +34,7 @@ let print_verbose vg lv =
     *)
     "";
   ] in
-  List.iter (fun line -> Printf.printf "  %s\n" line) lines
+  Lwt_list.iter_s (fun line -> stdout "  %s" line) lines
 
 let print_colon vg lv =
   let sectors = Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv) in
@@ -53,7 +53,7 @@ let print_colon vg lv =
     "?"; (* major *)
     "?"; (* minor *)
   ] in
-  Printf.printf "  %s\n" (String.concat ":" parts)
+  stdout "  %s" (String.concat ":" parts)
 
 let lvdisplay copts colon (vg_name,lv_display_opt) =
   let open Xenvm_common in
@@ -63,17 +63,17 @@ let lvdisplay copts colon (vg_name,lv_display_opt) =
     set_uri copts info;
     Client.get () >>= fun vg ->
     let print = if colon then print_colon else print_verbose in
-    let success = ref false in
-    Lvm.Vg.LVs.iter (fun _ lv -> match lv_display_opt with
-      | None ->
-        print vg lv;
-        success := true
-      | Some lv' when lv.Lvm.Lv.name = lv' ->
-        print vg lv;
-        success := true
-      | Some _ -> ()
-    ) vg.Lvm.Vg.lvs;
-    if not !success then failwith "Failed to find any matching logical volumes";
+    let to_print =
+      Lvm.Vg.LVs.bindings vg.Lvm.Vg.lvs
+      |> List.map snd (* only interested in the LV, not the id *)
+      |> List.filter (function { Lvm.Lv.name } -> match lv_display_opt with
+        | None -> true
+        | Some lv' when lv' = name -> true
+        | _ -> false
+        ) in
+    Lwt_list.iter_s (print vg) to_print
+    >>= fun () ->
+    if to_print = [] then failwith "Failed to find any matching logical volumes";
     Lwt.return () in
   Lwt_main.run t
 

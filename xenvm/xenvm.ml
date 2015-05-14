@@ -47,13 +47,6 @@ let table_of_vg vg =
   [ "free_space"; Int64.to_string (Pv.Allocator.size vg.Vg.free_space) ];
 ]
 
-let lvs config =
-  set_uri config None;
-  Lwt_main.run 
-    (Client.get () >>= fun vg ->
-     print_table true [ "key"; "value" ] (table_of_vg vg);
-     Lwt.return ())
-
 let format config name filenames =
     let t =
       let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
@@ -145,8 +138,8 @@ let host_list copts (vg_name,_) =
       fromLVM @ toLVM @ [ [ "freeExtents"; Int64.to_string h.freeExtents ] ] in
     List.map (fun h -> add_prefix h.name (table_of_host h)) hosts
     |> List.concat
-    |> print_table true [ "key"; "value" ];
-    return () in
+    |> print_table true [ "key"; "value" ]
+    |> Lwt_list.iter_s (fun x -> stdout "%s" x) in
   Lwt_main.run t
 
 let shutdown copts (vg_name,_) =
@@ -162,7 +155,8 @@ let shutdown copts (vg_name,_) =
         (fun () ->
           Client.Host.all ()
           >>= fun _ ->
-          Printf.fprintf stderr "Xenvmd is still alive: will sleep 5s and try again\n%!";
+          stderr "Xenvmd is still alive: will sleep 5s and try again"
+          >>= fun () ->
           Lwt_unix.sleep 5.
         ) (fun _ ->
           finished := true;
@@ -184,8 +178,9 @@ let benchmark copts (vg_name,_) =
     | n ->
       f n
       >>= fun () ->
-      if ((n * 100) / number) <> (((n + 1) * 100) / number)
-      then Printf.fprintf stderr "%s %d %% complete\n%!" test_name (100 - (n * 100) / number);
+      ( if ((n * 100) / number) <> (((n + 1) * 100) / number)
+        then stderr "%s %d %% complete\n%!" test_name (100 - (n * 100) / number)
+        else return () ) >>= fun () ->
       fori test_name ((number - n, Unix.gettimeofday () -. start) :: acc) f (n - 1) in
     fori "Creating volumes" [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
     >>= fun creates ->
@@ -205,8 +200,9 @@ let benchmark copts (vg_name,_) =
   Lwt_main.run t
 
 let help config =
-  Printf.printf "help - %s %s\n" config.config (match config.uri_override with | Some u -> u | None -> "URI unset")
-
+  Lwt_main.run (
+    stdout "help - %s %s" config.config (match config.uri_override with | Some u -> u | None -> "URI unset")
+  )
 
 open Cmdliner
 let info =
@@ -241,17 +237,6 @@ let lvname =
 let size =
   let doc = "Size of the LV in megs" in
   Arg.(value & opt int64 4L & info ["size"] ~docv:"SIZE" ~doc)
-
-
-let lvs_cmd =
-  let doc = "List the logical volumes in the VG" in
-  let man = [
-    `S "DESCRIPTION";
-    `P "Contacts the XenVM LVM daemon and retreives a list of
-      all of the currently defined logical volumes";
-  ] in
-  Term.(pure lvs $ copts_t),
-  Term.info "lvs" ~sdocs:copts_sect ~doc ~man
 
 let format_cmd =
   let doc = "Format the specified file as a VG" in
@@ -377,6 +362,8 @@ let cmds = [
 
 let () =
   Random.self_init ();
+  Lwt_main.run (
+    Lwt_log.log ~logger:syslog ~level:Lwt_log.Notice (String.concat " " (Array.to_list Sys.argv))
+  );
   match Term.eval_choice default_cmd cmds with
   | `Error _ -> exit 1 | _ -> exit 0
-

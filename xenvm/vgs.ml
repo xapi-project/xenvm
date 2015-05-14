@@ -50,14 +50,16 @@ let vgs copts noheadings nosuffix units fields vg_names =
               )
           )
           (fun _ ->
-            Printf.fprintf stderr "  Volume group \"%s\" not found\n" vg_name;
-            Printf.fprintf stderr "  Skipping volume group %s\n%!" vg_name;
+            stderr "  Volume group \"%s\" not found" vg_name
+            >>= fun () ->
+            stderr "  Skipping volume group %s" vg_name
+            >>= fun () ->
             exit 1)
         >>= fun vg ->
       Lwt.return (info,vg)) vg_names >>= fun vgs ->
     let rows = List.concat (List.map do_row vgs) in
-    print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows);
-    Lwt.return ()
+    let lines = print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows) in
+    Lwt_list.iter_s (fun x -> stdout "%s" x) lines
   )
 
 let vgs_cmd =
