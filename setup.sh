@@ -31,8 +31,25 @@ export BISECT_FILE=_build/xenvm.coverage
 
 #./xenvm.native benchmark
 
+# create and connect to hosts
 ./xenvm.native host-create /dev/djstest host1
-#./xenvm.native host-connect /dev/djstest host1
+./xenvm.native host-connect /dev/djstest host1
+./xenvm.native host-create /dev/djstest host2
+./xenvm.native host-connect /dev/djstest host2
+
+./xenvm.native host-list /dev/djstest
+
+# destroy hosts
+./xenvm.native host-disconnect /dev/djstest host2
+./xenvm.native host-destroy host2
+./xenvm.native host-disconnect /dev/djstest host1
+./xenvm.native host-destroy host1
+
+./xenvm.native host-list /dev/djstest
+
+#shutdown
+./xenvm.native lvchange -an /dev/djstest/live || true
+./xenvm.native shutdown /dev/djstest
 
 #echo Run 'sudo ./xenvm.native host-connect /dev/djstest host1' to connect to the local allocator'
 #echo Run 'sudo ./local_allocator.native' and type 'djstest-live' to request an allocation
