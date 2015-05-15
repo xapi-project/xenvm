@@ -15,16 +15,18 @@ fi
 # Making a 1G disk
 rm -f bigdisk _build/xenvm*.out
 dd if=/dev/zero of=bigdisk bs=1 seek=256G count=0
-echo Using /dev/loop0
-losetup /dev/loop0 bigdisk
-cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|/dev/loop0|g" > test.xenvmd.conf
+
+LOOP=$(losetup -f)
+echo Using $LOOP
+losetup $LOOP bigdisk
+cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
 mkdir -p /etc/xenvm.d
-BISECT_FILE=_build/xenvm.coverage ./xenvm.native format /dev/loop0 --vg djstest
+BISECT_FILE=_build/xenvm.coverage ./xenvm.native format $LOOP --vg djstest
 BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
 
 export BISECT_FILE=_build/xenvm.coverage
 
-./xenvm.native set-vg-info --pvpath /dev/loop0 -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
+./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
 
 ./xenvm.native lvcreate -n live -L 4 djstest
 ./xenvm.native lvchange -ay /dev/djstest/live
