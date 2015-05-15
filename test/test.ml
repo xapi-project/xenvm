@@ -36,8 +36,20 @@ let vgcreate =
     Lwt_main.run t 
   )
 
+let vgs_offline =
+  "vgs <device>: check that we can read metadata without xenvmd." >::
+  (fun () ->
+    with_temp_file (fun filename ->
+      xenvm [ "vgcreate"; vg; filename ] |> ignore_string;
+      mkdir_rec "/etc/xenvm.d" 0o0644;
+      xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
+      xenvm [ "vgs"; vg ] |> ignore_string
+    )
+  )
+
 let no_xenvmd_suite = "Commands which should work without xenvmd" >::: [
   vgcreate;
+  vgs_offline;
 ]
 
 let assert_lv_exists ?expected_size_in_extents name =
@@ -115,11 +127,31 @@ let lvchange_n =
   assert_equal ~printer:string_of_bool false (dm_exists name);
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
+let parse_int x =
+  int_of_string (String.trim x)
+
+let vgs_online =
+  "vgs <device>: check that we can read fresh metadata with xenvmd." >::
+  (fun () ->
+    let metadata = Lwt_main.run (Client.get ()) in
+    let count = xenvm [ "vgs"; "/dev/" ^ vg; "--noheadings"; "-o"; "lv_count" ] |> parse_int in
+    let expected = Lvm.Vg.LVs.cardinal metadata.Lvm.Vg.lvs in
+    assert_equal ~printer:string_of_int expected count;
+    (* The new LV will be cached: *)
+    xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
+    (* This should use the network, not the on-disk metadata: *)
+    let count = xenvm [ "vgs"; "/dev/" ^ vg; "--noheadings"; "-o"; "lv_count" ] |> parse_int in
+    (* Did we see the new volume? *)
+    assert_equal ~printer:string_of_int (expected+1) count;
+    xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  )
+
 let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
   lvcreate_l;
   lvcreate_percent;
   lvchange_n;
+  vgs_online;
 ]
 
 let _ =
