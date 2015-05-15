@@ -32,20 +32,25 @@ export BISECT_FILE=_build/xenvm.coverage
 ./xenvm.native lvchange -ay /dev/djstest/live
 
 #./xenvm.native benchmark
-
 # create and connect to hosts
 ./xenvm.native host-create /dev/djstest host1
 ./xenvm.native host-connect /dev/djstest host1
+cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host1|g" > test.local_allocator.host1.conf
+./local_allocator.native --config ./test.local_allocator.host1.conf > /dev/null &
+
 ./xenvm.native host-create /dev/djstest host2
 ./xenvm.native host-connect /dev/djstest host2
+cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host2|g" > test.local_allocator.host2.conf
+./local_allocator.native --config ./test.local_allocator.host2.conf > /dev/null &
 
+sleep 30
 ./xenvm.native host-list /dev/djstest
 
 # destroy hosts
 ./xenvm.native host-disconnect /dev/djstest host2
-./xenvm.native host-destroy host2
+./xenvm.native host-destroy /dev/djstest host2
 ./xenvm.native host-disconnect /dev/djstest host1
-./xenvm.native host-destroy host1
+./xenvm.native host-destroy /dev/djstest host1
 
 ./xenvm.native host-list /dev/djstest
 
