@@ -41,20 +41,28 @@ let vgs copts noheadings nosuffix units fields vg_names =
         let local_device = match info with
         | Some info -> info.local_device (* If we've got a default, use that *)
         | None -> failwith "Need to know the local device!" in
-        Lwt.catch
-          (fun () ->
-            with_block local_device
-              (fun x ->
-                Vg_IO.connect [ x ] `RO >>|= fun vg ->
-                return (Vg_IO.metadata_of vg) 
+        (* First try a network connection to get the most up to date information.
+           We currently don't replay the redo log when opening the VG read/only--
+           see [mirage/mirage-block-volume#68]. *)
+        Lwt.catch Client.get
+          (fun e ->
+            stderr "WARNING: failed to contact xenvmd; falling back to reading the disk metadata"
+            >>= fun () ->
+            Lwt.catch
+              (fun () ->
+                with_block local_device
+                  (fun x ->
+                   Vg_IO.connect [ x ] `RO >>|= fun vg ->
+                    return (Vg_IO.metadata_of vg) 
+                  )
               )
+              (fun _ ->
+                stderr "  Volume group \"%s\" not found" vg_name
+                >>= fun () ->
+                stderr "  Skipping volume group %s" vg_name
+                >>= fun () ->
+                exit 1)
           )
-          (fun _ ->
-            stderr "  Volume group \"%s\" not found" vg_name
-            >>= fun () ->
-            stderr "  Skipping volume group %s" vg_name
-            >>= fun () ->
-            exit 1)
         >>= fun vg ->
       Lwt.return (info,vg)) vg_names >>= fun vgs ->
     let rows = List.concat (List.map do_row vgs) in
