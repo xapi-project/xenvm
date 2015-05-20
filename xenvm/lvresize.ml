@@ -4,6 +4,7 @@ open Cmdliner
 open Lwt
 
 let lvresize copts live (vg_name,lv_opt) real_size percent_size =
+  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
   let open Xenvm_common in
   let size = match parse_size real_size percent_size with

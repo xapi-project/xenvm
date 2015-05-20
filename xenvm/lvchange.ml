@@ -10,6 +10,7 @@ let dev_path_of vg_name lv_name =
   Printf.sprintf "/dev/%s/%s" vg_name lv_name
 
 let activate vg lv local_device =
+  let module Devmapper = (val !Xenvm_common.dm: Devmapper.S.DEVMAPPER) in
   let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   Lwt.catch (fun () -> Lwt_unix.mkdir (Filename.dirname path) 0x755) (fun _ -> Lwt.return ()) >>= fun () -> 
   Mapper.read [ local_device ]
@@ -41,6 +42,7 @@ let lvchange_activate copts vg_name lv_name physical_device =
   )
 
 let deactivate vg lv =
+  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let open Xenvm_common in
   let name = Mapper.name_of vg lv in
   (* This can fail with an EBUSY *)
@@ -68,6 +70,7 @@ let deactivate vg lv =
   Client.flush ~name:lv.Lvm.Lv.name
 
 let reload vg lv local_device =
+  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let open Xenvm_common in
   Mapper.read [ local_device ]
   >>= fun devices ->

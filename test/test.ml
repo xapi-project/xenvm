@@ -103,7 +103,7 @@ let file_exists filename =
     true
   with Unix.Unix_error(Unix.ENOENT, _, _) -> false
 
-let dm_exists name = match Devmapper.stat name with
+let dm_exists name = match Devmapper.Linux.stat name with
   | None -> false
   | Some _ -> true
 

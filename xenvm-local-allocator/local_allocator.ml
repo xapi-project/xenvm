@@ -244,6 +244,7 @@ end
 (* Return the virtual size of the volume *)
 let sizeof volume =
   let open Devmapper in
+  let open Devmapper.Linux in
   let ends = List.map (fun t -> Int64.add t.Target.start t.Target.size) volume.targets in
   List.fold_left max 0L ends
 
@@ -255,6 +256,7 @@ let extend_volume device vg lv extents =
   let next_sector = sizeof lv in
   let _, segments, targets =
     let open Devmapper in
+    let open Devmapper.Linux in
     List.fold_left
       (fun (next_sector, segments, targets) (pvname, (psegment, size)) ->
         try
@@ -281,7 +283,7 @@ let extend_volume device vg lv extents =
    List.rev segments, List.rev targets
 
 let stat x =
-  match Devmapper.stat x with
+  match Devmapper.Linux.stat x with
   | Some x -> return (`Ok x)
   | None ->
     error "The device mapper device %s has disappeared." x;
@@ -355,13 +357,13 @@ let main config daemon socket journal fromLVM toLVM =
         fatal_error msg (return x)
         >>= fun to_device ->
         (* Append the physical blocks to toLV *)
-        let to_targets = to_device.Devmapper.targets @ t.device.ExpandDevice.targets in
-        Devmapper.suspend t.device.ExpandDevice.device;
+        let to_targets = to_device.Devmapper.Linux.targets @ t.device.ExpandDevice.targets in
+        Devmapper.Linux.suspend t.device.ExpandDevice.device;
         print_endline "Suspend local dm device";
-        Devmapper.reload t.device.ExpandDevice.device to_targets;
+        Devmapper.Linux.reload t.device.ExpandDevice.device to_targets;
         ToLVM.advance tolvm position
         >>= fun () ->
-        Devmapper.resume t.device.ExpandDevice.device;
+        Devmapper.Linux.resume t.device.ExpandDevice.device;
         print_endline "Resume local dm device";
         return ()
       ) ops
@@ -402,7 +404,7 @@ let main config daemon socket journal fromLVM toLVM =
         Lwt_mutex.with_lock m
           (fun () ->
             (* We may need to enlarge in multiple chunks if the free pool is depleted *)
-            let rec expand action = match Devmapper.stat device with
+            let rec expand action = match Devmapper.Linux.stat device with
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
@@ -446,7 +448,7 @@ let main config daemon socket journal fromLVM toLVM =
             expand action
           ) in
 
-    let ls = Devmapper.ls () in
+    let ls = Devmapper.Linux.ls () in
     debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls);
 
     let rec stdin () =
