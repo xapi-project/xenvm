@@ -3,6 +3,8 @@ open Cmdliner
 open Lwt
 open Errors
 
+let dm = ref (module Devmapper.Linux : Devmapper.S.DEVMAPPER)
+
 let syslog = Lwt_log.syslog ~facility:`Daemon ()
 
 let stdout fmt = Printf.ksprintf (fun s ->
@@ -40,24 +42,28 @@ type field = { key: string; name: string; fn:fieldfn }
 (* see https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/metadata/lv.c?id=v2_02_117#n643 
    for canonical description of this field. *)
 
-(* Since we're single-shot, cache the active devices here *)
-let devmapper_ls =
-  let cache = ref None in
-  fun () ->
-    match !cache with
-    | None ->
-      let ls = Devmapper.ls () in
-      cache := Some ls;
-      ls
-    | Some ls ->
-      ls
-
-let devmapper_stat name =
-  if List.mem name (devmapper_ls ())
-  then Devmapper.stat name
-  else None
-
 let attr_of_lv vg lv =
+  let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
+
+  (* Since we're single-shot, cache the active devices here *)
+  let devmapper_ls =
+    let cache = ref None in
+    fun () ->
+      match !cache with
+      | None ->
+        let ls = Devmapper.ls () in
+        cache := Some ls;
+        ls
+      | Some ls ->
+        ls
+  in
+
+  let devmapper_stat name =
+    if List.mem name (devmapper_ls ())
+    then Devmapper.stat name
+    else None
+  in
+
   let name = Mapper.name_of vg lv in
   let info = devmapper_stat name in
   Printf.sprintf "%c%c%c%c%c%c%c%c%c%c"
@@ -208,7 +214,9 @@ type copts_t = {
   config : string;
 }
 
-let make_copts config uri_override sockpath_override = {uri_override; config; sockpath_override }
+let make_copts config uri_override sockpath_override mock_dm =
+  dm := if mock_dm then (module Devmapper.Mock : Devmapper.S.DEVMAPPER) else (module Devmapper.Linux : Devmapper.S.DEVMAPPER);
+  { uri_override; config; sockpath_override }
 
 let config =
   let doc = "Path to the config directory" in
@@ -295,8 +303,12 @@ let output_arg default_fields =
   let a = Arg.(value & opt (some string) None & info ["o";"options"] ~doc) in
   Term.(pure (parse_output default_fields) $ a)
 
+let mock_dm_arg =
+  let doc = "Enable mock interfaces on device mapper." in
+  Arg.(value & flag & info ["mock-devmapper"] ~doc)
+
 let copts_t =
-  Term.(pure make_copts $ config $ uri_arg $ sock_path_arg)
+  Term.(pure make_copts $ config $ uri_arg $ sock_path_arg $ mock_dm_arg)
 
 let kib = 1024L
 let sectors = 512L
@@ -382,8 +394,8 @@ let set_vg_info_t copts uri local_device local_allocator_path unix_domain_sock_p
       exit 1
     |e -> Lwt.fail e)
 
-let run_set_vg_info_t config uri local_allocator_path local_device unix_domain_sock_path vg_name =
-  let copts = make_copts config (Some uri) unix_domain_sock_path in
+let run_set_vg_info_t config uri local_allocator_path local_device unix_domain_sock_path vg_name mock_dm =
+  let copts = make_copts config (Some uri) unix_domain_sock_path mock_dm in
   Lwt_main.run (set_vg_info_t copts uri local_device local_allocator_path unix_domain_sock_path vg_name)
   
 let get_vg_info_t copts vg_name =
@@ -405,7 +417,7 @@ let set_vg_info_cmd =
     `P "This command takes a physical device path and a URI, and will write these to the
 filesystem. Subsequent xenvm commands will use these as defaults.";
   ] in
-  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ local_allocator_path $ physical_device_arg_required $ sock_path_arg $ name_arg),
+  Term.(pure run_set_vg_info_t $ config $ uri_arg_required $ local_allocator_path $ physical_device_arg_required $ sock_path_arg $ name_arg $ mock_dm_arg),
   Term.info "set-vg-info" ~sdocs:copts_sect ~doc ~man
 
 

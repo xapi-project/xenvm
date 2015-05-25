@@ -4,6 +4,7 @@ open Cmdliner
 open Lwt
 
 let lvrename copts (vg_name,lv_opt) newname physical_device =
+  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
   (* It seems you can say "vg/lv" or "lv" *)
   let newname = match newname with

@@ -84,6 +84,7 @@ let create config name size =
      Client.create ~name ~size:size_in_bytes ~tags:[])
 
 let activate config lvname path pv =
+  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   set_uri config None;
   Lwt_main.run
     (Client.get_lv ~name:lvname
