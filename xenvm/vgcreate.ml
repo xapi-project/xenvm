@@ -3,7 +3,7 @@ open Lwt
 open Xenvm_common
 open Errors
 
-let vgcreate vg_name devices =
+let vgcreate _ vg_name devices =
   let open Lvm in
   let t =
     let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
@@ -61,5 +61,5 @@ let vgcreate_cmd =
     `S "DESCRIPTION";
     `P "vgcreate creates a volume group on the specified physical block devices";
   ] in
-  Term.(pure vgcreate $ vg_name_arg $ devices_arg),
+  Term.(pure vgcreate $ Xenvm_common.copts_t $ vg_name_arg $ devices_arg),
   Term.info "vgcreate" ~sdocs:copts_sect ~doc ~man
