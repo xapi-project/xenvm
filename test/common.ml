@@ -17,8 +17,8 @@ open Lvm
 open Vg
 open Lwt
 
-(* Use the --mock-devmapper argument. This allows us to run on travis. *)
-let mock_devmapper = ref true
+(* Mock kernel devices so we can run as a regular user *)
+let use_mock = ref true
 
 module Log = struct
   let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
@@ -230,7 +230,7 @@ let with_temp_file fn =
   result
   (* NB we leak the file on error, but this is quite useful *)
 
-let with_loop_device path f =
+let with_loop_device path f = if !use_mock then f path else begin
   ignore_string (run "losetup" [ "-f"; path ]);
   (* /dev/loop0: [fd00]:1973802 (/tmp/SR.createc04251volume) *)
   let line = run "losetup" [ "-j"; path ] in
@@ -244,6 +244,7 @@ let with_loop_device path f =
     error "Failed to parse output of losetup -j: [%s]" line;
     ignore_string (run "losetup" [ "-d"; path ]);
     failwith (Printf.sprintf "Failed to parse output of losetup -j: [%s]" line)
+end
 
 let with_block filename f =
   let open Lwt in
@@ -257,6 +258,6 @@ let with_block filename f =
 let xenvm = function
   | [] -> run "./xenvm.native" []
   | cmd :: args ->
-    let args = if !mock_devmapper then "--mock-devmapper" :: args else args in
+    let args = if !use_mock then "--mock-devmapper" :: "--configdir" :: "/tmp/xenvm.d" :: args else args in
     run "./xenvm.native" (cmd :: args)
 let xenvmd = run "./xenvmd.native"
