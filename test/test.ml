@@ -41,7 +41,7 @@ let vgs_offline =
   (fun () ->
     with_temp_file (fun filename ->
       xenvm [ "vgcreate"; vg; filename ] |> ignore_string;
-      mkdir_rec "/etc/xenvm.d" 0o0644;
+      mkdir_rec "/tmp/xenvm.d" 0o0755;
       xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       xenvm [ "vgs"; vg ] |> ignore_string
     )
@@ -159,7 +159,7 @@ let _ =
   with_temp_file (fun filename' ->
     with_loop_device filename' (fun loop ->
       xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
-      mkdir_rec "/etc/xenvm.d" 0o0644;
+      mkdir_rec "/tmp/xenvm.d" 0o0755;
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
