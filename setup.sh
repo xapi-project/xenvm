@@ -8,55 +8,64 @@ set -x
 # already included in the RPM.
 
 if [ "$EUID" -ne "0" ]; then
-  echo "Please run me as uid 0. I need to create a loop device and device mapper devices"
-  exit 1
+  echo "I am not running with EUID 0. I will use the mock device mapper interface"
+  USE_MOCK=1
+  MOCK_ARG="--mock-devmapper"
+else
+  echo "I am running with EUID 0. I will use the real device mapper interface"
+  USE_MOCK=0
+  MOCK_ARG=""
 fi
 
 # Making a 1G disk
-rm -f bigdisk _build/xenvm*.out
+rm -f bigdisk
 dd if=/dev/zero of=bigdisk bs=1 seek=256G count=0
 
-LOOP=$(losetup -f)
-echo Using $LOOP
-losetup $LOOP bigdisk
+if [ "$USE_MOCK" -eq "0" ]; then
+  LOOP=$(losetup -f)
+  echo Using $LOOP
+  losetup $LOOP bigdisk
+else
+  LOOP=`pwd`/bigdisk
+fi
 cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
-mkdir -p /etc/xenvm.d
-BISECT_FILE=_build/xenvm.coverage ./xenvm.native format $LOOP --vg djstest
+mkdir -p /tmp/xenvm.d
+BISECT_FILE=_build/xenvm.coverage ./xenvm.native format $LOOP --vg djstest --configdir /tmp/xenvm.d $MOCK_ARG
 BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
 
 export BISECT_FILE=_build/xenvm.coverage
 
-./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest
+./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
-./xenvm.native lvcreate -n live -L 4 djstest
-./xenvm.native lvchange -ay /dev/djstest/live
+./xenvm.native lvcreate -n live -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvchange -ay /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
 
 #./xenvm.native benchmark
 # create and connect to hosts
-./xenvm.native host-create /dev/djstest host1
-./xenvm.native host-connect /dev/djstest host1
+./xenvm.native host-create /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
 cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host1|g" > test.local_allocator.host1.conf
-./local_allocator.native --config ./test.local_allocator.host1.conf > /dev/null &
+./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > /dev/null &
 
-./xenvm.native host-create /dev/djstest host2
-./xenvm.native host-connect /dev/djstest host2
+./xenvm.native host-create /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native host-connect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
 cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host2|g" > test.local_allocator.host2.conf
-./local_allocator.native --config ./test.local_allocator.host2.conf > /dev/null &
+./local_allocator.native --config ./test.local_allocator.host2.conf $MOCK_ARG > /dev/null &
 
 sleep 30
-./xenvm.native host-list /dev/djstest
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 # destroy hosts
-./xenvm.native host-disconnect /dev/djstest host2
-./xenvm.native host-destroy /dev/djstest host2
-./xenvm.native host-disconnect /dev/djstest host1
-./xenvm.native host-destroy /dev/djstest host1
+./xenvm.native host-disconnect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native host-destroy /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native host-destroy /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
 
-./xenvm.native host-list /dev/djstest
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 #shutdown
-./xenvm.native lvchange -an /dev/djstest/live || true
-./xenvm.native shutdown /dev/djstest
+./xenvm.native lvchange -an /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG || true
+./xenvm.native shutdown /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 #echo Run 'sudo ./xenvm.native host-connect /dev/djstest host1' to connect to the local allocator'
 #echo Run 'sudo ./local_allocator.native' and type 'djstest-live' to request an allocation
