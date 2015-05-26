@@ -18,4 +18,4 @@ addons:
     - camlp4-extra
     - libdevmapper-dev
 env:
-  - FORK_USER=talex5 FORK_BRANCH=containers OPAMYES=true OCAML_VERSION=4.02 PACKAGE=thin_lvhd_tools EXTRA_REMOTES="git://github.com/xapi-project/thin-lvhd-opam-repo" TESTS=true PINS="conduit:git://github.com/mirage/conduit" EXTRA_REMOTES="git://github.com/xapi-project/opam-repo-dev" POST_INSTALL_HOOK="bash -eux .travis-post-install.sh"
+  - FORK_USER=talex5 FORK_BRANCH=containers OPAMYES=true OCAML_VERSION=4.02 PACKAGE=thin_lvhd_tools EXTRA_REMOTES="git://github.com/xapi-project/thin-lvhd-opam-repo" TESTS=true PINS="conduit:git://github.com/mirage/ocaml-conduit" EXTRA_REMOTES="git://github.com/xapi-project/opam-repo-dev" POST_INSTALL_HOOK="bash -eux .travis-post-install.sh"
