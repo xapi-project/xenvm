@@ -131,7 +131,7 @@ let canonicalise x =
 
 exception Bad_exit of int * string * string list * string * string
 
-let run ?(env= [| |]) ?stdin cmd args =
+let run ?(env= Unix.environment()) ?stdin cmd args =
   let cmd = canonicalise cmd in
   debug "%s %s" cmd (String.concat " " args);
   let null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
