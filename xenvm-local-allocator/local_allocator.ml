@@ -19,6 +19,8 @@ module Time = struct
   let sleep = Lwt_unix.sleep
 end
 
+let dm = ref (module Devmapper.Linux : Devmapper.S.DEVMAPPER)
+
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
 
 let rec try_forever msg f =
@@ -242,21 +244,19 @@ module Op = struct
 end
 
 (* Return the virtual size of the volume *)
-let sizeof volume =
+let sizeof dm_targets =
   let open Devmapper in
-  let open Devmapper.Linux in
-  let ends = List.map (fun t -> Int64.add t.Target.start t.Target.size) volume.targets in
+  let ends = List.map (fun t -> Int64.add t.Target.start t.Target.size) dm_targets in
   List.fold_left max 0L ends
 
 (* Compute the new segments and device mapper targets if [extents] are appended onto [lv] *)
-let extend_volume device vg lv extents =
+let extend_volume device vg existing_targets extents =
   let open Lvm in
   let to_sector pv segment = Int64.(add pv.Pv.pe_start (mul segment vg.Vg.extent_size)) in
   (* We will extend the LV, so find the next 'virtual segment' *)
-  let next_sector = sizeof lv in
+  let next_sector = sizeof existing_targets in
   let _, segments, targets =
     let open Devmapper in
-    let open Devmapper.Linux in
     List.fold_left
       (fun (next_sector, segments, targets) (pvname, (psegment, size)) ->
         try
@@ -282,14 +282,15 @@ let extend_volume device vg lv extents =
       ) (next_sector, [], []) extents in
    List.rev segments, List.rev targets
 
-let stat x =
-  match Devmapper.Linux.stat x with
-  | Some x -> return (`Ok x)
+let targets_of x =
+  let module D = (val !dm: Devmapper.S.DEVMAPPER) in
+  match D.stat x with
+  | Some x -> return (`Ok x.D.targets)
   | None ->
     error "The device mapper device %s has disappeared." x;
     return (`Error `Retry)
 
-let main config daemon socket journal fromLVM toLVM =
+let main use_mock config daemon socket journal fromLVM toLVM =
   let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
     Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
@@ -298,6 +299,10 @@ let main config daemon socket journal fromLVM toLVM =
     fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
   } in
   debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+  dm := if use_mock then (module Devmapper.Mock: Devmapper.S.DEVMAPPER) else (module Devmapper.Linux: Devmapper.S.DEVMAPPER);
+
+  let module D = (val !dm: Devmapper.S.DEVMAPPER) in
+
   if daemon then Lwt_daemon.daemonize ();
 
   Pidfile.write_pid (config.Config.socket ^ ".lock");
@@ -352,18 +357,18 @@ let main config daemon socket journal fromLVM toLVM =
         ToLVM.push tolvm t.volume
         >>= fun position ->
         let msg = Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device in
-        try_forever msg (fun () -> stat t.device.ExpandDevice.device)
+        try_forever msg (fun () -> targets_of t.device.ExpandDevice.device)
         >>= fun x ->
         fatal_error msg (return x)
-        >>= fun to_device ->
+        >>= fun to_device_targets ->
         (* Append the physical blocks to toLV *)
-        let to_targets = to_device.Devmapper.Linux.targets @ t.device.ExpandDevice.targets in
-        Devmapper.Linux.suspend t.device.ExpandDevice.device;
+        let to_targets = to_device_targets @ t.device.ExpandDevice.targets in
+        D.suspend t.device.ExpandDevice.device;
         print_endline "Suspend local dm device";
-        Devmapper.Linux.reload t.device.ExpandDevice.device to_targets;
+        D.reload t.device.ExpandDevice.device to_targets;
         ToLVM.advance tolvm position
         >>= fun () ->
-        Devmapper.Linux.resume t.device.ExpandDevice.device;
+        D.resume t.device.ExpandDevice.device;
         print_endline "Resume local dm device";
         return ()
       ) ops
@@ -404,7 +409,7 @@ let main config daemon socket journal fromLVM toLVM =
         Lwt_mutex.with_lock m
           (fun () ->
             (* We may need to enlarge in multiple chunks if the free pool is depleted *)
-            let rec expand action = match Devmapper.Linux.stat device with
+            let rec expand action = match D.stat device with
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
@@ -412,7 +417,7 @@ let main config daemon socket journal fromLVM toLVM =
                 return (ResizeResponse.Device_mapper_device_does_not_exist device)
               | Some data_volume ->
                 let sector_size = Int64.of_int sector_size in
-                let current = Int64.mul sector_size (sizeof data_volume) in
+                let current = Int64.mul sector_size (sizeof data_volume.D.targets) in
                 let extent_b = Int64.mul sector_size extent_size in
                 (* NB: make sure we round up to the next extent *)
                 let nr_extents = match action with
@@ -428,7 +433,7 @@ let main config daemon socket journal fromLVM toLVM =
                   >>= fun extents ->
                   (* This may have allocated short *)
                   let nr_extents' = Lvm.Pv.Allocator.size extents in
-                  let segments, targets = extend_volume vg_device metadata data_volume extents in
+                  let segments, targets = extend_volume vg_device metadata data_volume.D.targets extents in
                   let _, volume = Mapper.vg_lv_of_name device in
                   let volume = { ExpandVolume.volume; segments } in
                   let device = { ExpandDevice.extents; device; targets } in
@@ -448,7 +453,7 @@ let main config daemon socket journal fromLVM toLVM =
             expand action
           ) in
 
-    let ls = Devmapper.Linux.ls () in
+    let ls = D.ls () in
     debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls);
 
     let rec stdin () =
@@ -533,8 +538,12 @@ let fromLVM =
   let doc = "Path to the device or file which contains new free blocks from LVM" in
   Arg.(value & opt (some file) None & info [ "fromLVM" ] ~docv:"FROMLVM" ~doc)
 
+let mock_dm_arg =
+  let doc = "Enable mock interfaces on device mapper." in
+  Arg.(value & flag & info ["mock-devmapper"] ~doc)
+
 let () =
-  let t = Term.(pure main $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0

@@ -5,7 +5,10 @@ eval `opam config env`
 export BISECT_FILE=_build/xenvm.coverage
 # Needed to support Unix domain sockets:
 sudo opam pin add conduit git://github.com/mirage/ocaml-conduit -y
+# run the OCaml test suite
 make test
+# run the bash test suite
+./setup.sh
 
 echo Generating bisect report-- this fails on travis
 (cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
