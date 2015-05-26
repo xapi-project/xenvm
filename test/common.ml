@@ -17,6 +17,9 @@ open Lvm
 open Vg
 open Lwt
 
+(* Use the --mock-devmapper argument. This allows us to run on travis. *)
+let mock_devmapper = ref true
+
 module Log = struct
   let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
   let info  fmt = Printf.ksprintf (fun s -> print_endline s) fmt
@@ -251,5 +254,9 @@ let with_block filename f =
   | `Ok x ->
     f x (* no point catching errors here *)
 
-let xenvm = run "./xenvm.native"
+let xenvm = function
+  | [] -> run "./xenvm.native" []
+  | cmd :: args ->
+    let args = if !mock_devmapper then "--mock-devmapper" :: args else args in
+    run "./xenvm.native" (cmd :: args)
 let xenvmd = run "./xenvmd.native"
