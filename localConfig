@@ -1,9 +1,0 @@
-(
- (socket socket)
- (allocation_quantum 16)
- (localJournal localJournal)
- (devices (/dev/loop0))
- (toLVM host1-toLVM)
- (fromLVM host1-fromLVM)
-)
-
