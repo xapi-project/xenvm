@@ -1,0 +1,9 @@
+(
+ (socket @HOST@-socket)
+ (allocation_quantum 16)
+ (localJournal localJournal)
+ (devices (@BIGDISK@))
+ (toLVM @HOST@-toLVM)
+ (fromLVM @HOST@-fromLVM)
+)
+
