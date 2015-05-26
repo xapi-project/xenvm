@@ -30,10 +30,8 @@ else
 fi
 cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
 mkdir -p /tmp/xenvm.d
-BISECT_FILE=_build/xenvm.coverage ./xenvm.native format $LOOP --vg djstest --configdir /tmp/xenvm.d $MOCK_ARG
-BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
-
-export BISECT_FILE=_build/xenvm.coverage
+./xenvm.native format $LOOP --vg djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvmd.native --config ./test.xenvmd.conf --daemon
 
 ./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
