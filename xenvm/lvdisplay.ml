@@ -13,6 +13,13 @@ let print_verbose vg lv =
        then [ "write" ] else []) in
     String.concat "/" all in
   let size = Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv) in
+  let creation_time =
+    let open Unix in
+    let tm = gmtime (Int64.to_float lv.Lvm.Lv.creation_time) in
+    Printf.sprintf "%d-%02d-%02d %02d:%02d:%02d +0000"
+      (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+      tm.tm_hour tm.tm_min tm.tm_sec in
+
   let lines = [
     "--- Logical volume ---";
     Printf.sprintf "LV Path                /dev/%s/%s" vg.Lvm.Vg.name lv.Lvm.Lv.name;
@@ -20,7 +27,7 @@ let print_verbose vg lv =
     Printf.sprintf "VG Name                %s" vg.Lvm.Vg.name;
     Printf.sprintf "LV UUID                %s" (Lvm.Uuid.to_string lv.Lvm.Lv.id);
     Printf.sprintf "LV Write Access        %s" read_write;
-    Printf.sprintf "LV Creation host, time unknown, unknown";
+    Printf.sprintf "LV Creation host, time %s, %s" lv.Lvm.Lv.creation_host creation_time;
     Printf.sprintf "LV Status              %s" (if List.mem Lvm.Lv.Status.Visible lv.Lvm.Lv.status then "available" else "");
     Printf.sprintf "# open                 uknown";
     Printf.sprintf "LV Size                %Lds" size;
