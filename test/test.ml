@@ -102,6 +102,13 @@ let gib = Int64.mul mib 1024L
 let tib = Int64.mul mib 1024L
 let xib = Int64.mul tib 1024L
 
+let contains s1 s2 =
+    let re = Str.regexp_string s2 in
+    try 
+       ignore (Str.search_forward re s1 0); 
+       true
+    with Not_found -> false
+
 let lvcreate_toobig =
   "lvcreate -n <name> -l <too many>: check that we fail nicely" >::
   fun () ->
@@ -110,7 +117,17 @@ let lvcreate_toobig =
       (fun () -> Client.create "toobig" xib "unknown" 0L [])
       (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
        | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
-  )
+  );
+  try
+    xenvm [ "lvcreate"; "-n"; "test"; "-l"; Int64.to_string xib; vg ] |> ignore_string;
+    failwith "Did not get Insufficient_free_space"
+  with
+    | Bad_exit(5, _, _, stdout, stderr) ->
+      let expected = "insufficient free space" in
+      if not (contains stderr expected)
+      then failwith (Printf.sprintf "stderr [%s] did not have expected string [%s]" stderr expected)
+    | _ ->
+      failwith "Expected exit code 5"
 
 let file_exists filename =
   try
