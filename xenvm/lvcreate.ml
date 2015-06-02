@@ -23,7 +23,9 @@ let lvcreate copts lv_name real_size percent_size tags vg_name =
       bytes
     | _ -> failwith "Initial size must be absolute" in
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
-    Client.create lv_name size tags >>= fun () -> 
+    let creation_host = Unix.gethostname () in
+    let creation_time = Unix.gettimeofday () |> Int64.of_float in
+    Client.create lv_name size creation_host creation_time tags >>= fun () -> 
     return info) in
   match info with | Some i -> Lvchange.lvchange_activate copts vg_name lv_name (Some i.local_device) | None -> ()
 

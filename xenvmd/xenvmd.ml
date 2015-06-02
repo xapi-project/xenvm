@@ -196,11 +196,13 @@ module VolumeManager = struct
       | None -> begin
 	  debug "No freeLVM volume";
 	  let size = Int64.(mul 4L (mul 1024L 1024L)) in
+          let creation_host = Unix.gethostname () in
+          let creation_time = Unix.gettimeofday () |> Int64.of_float in
           write (fun vg ->
-            Lvm.Vg.create vg toLVM size
+            Lvm.Vg.create vg toLVM size ~creation_host ~creation_time
           ) >>= fun () ->
           write (fun vg ->
-            Lvm.Vg.create vg fromLVM size
+            Lvm.Vg.create vg fromLVM size ~creation_host ~creation_time
           ) >>= fun () ->
           (* The local allocator needs to see the volumes now *)
           sync () >>= fun () ->
@@ -240,7 +242,7 @@ module VolumeManager = struct
           (* Create the freeLVM LV at the end - we can use the existence
              of this as a flag to show that we've finished host creation *)
           write (fun vg ->
-            Lvm.Vg.create vg freeLVM size
+            Lvm.Vg.create vg freeLVM size ~creation_host ~creation_time
           ) >>= fun () ->
           sync ()
 	end
@@ -573,9 +575,9 @@ module Impl = struct
   let get context () =
     fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
   
-  let create context ~name ~size ~tags =
+  let create context ~name ~size ~creation_host ~creation_time ~tags =
     VolumeManager.write (fun vg ->
-      Lvm.Vg.create vg name ~tags size
+      Lvm.Vg.create vg name ~creation_host ~creation_time ~tags size
     )
 
   let rename context ~oldname ~newname = 

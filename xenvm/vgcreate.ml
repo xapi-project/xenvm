@@ -24,7 +24,9 @@ let vgcreate _ vg_name devices =
           | `Error (`Msg x) -> failwith x in
         (name,block)
       ) blocks in
-    Vg_IO.format vg_name ~magic:`Journalled pvs >>|= fun () ->
+    let creation_host = Unix.gethostname () in
+    let creation_time = Unix.gettimeofday () |> Int64.of_float in
+    Vg_IO.format vg_name ~creation_host ~creation_time ~magic:`Journalled pvs >>|= fun () ->
     Vg_IO.connect (List.map snd pvs) `RW
     >>|= fun vg ->
     (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size))

@@ -10,7 +10,7 @@ external get_lv: name:string -> (Vg_wrapper.t * Lv_wrapper.t) = ""
     and metadata for the LV in question. *)
 
 external get : unit -> Vg_wrapper.t = ""
-external create : name:string -> size:int64 -> tags:string list -> unit = ""
+external create : name:string -> size:int64 -> creation_host:string -> creation_time:int64 -> tags:string list -> unit = ""
 external rename : oldname:string -> newname:string -> unit = ""
 external remove : name:string -> unit = ""
 external resize : name:string -> size:int64 -> unit = ""
