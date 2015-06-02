@@ -25,7 +25,15 @@ let lvcreate copts lv_name real_size percent_size tags vg_name =
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
     let creation_host = Unix.gethostname () in
     let creation_time = Unix.gettimeofday () |> Int64.of_float in
-    Client.create lv_name size creation_host creation_time tags >>= fun () -> 
+    Lwt.catch
+      (fun () ->
+        Client.create lv_name size creation_host creation_time tags
+      ) (function
+        | Xenvm_interface.Insufficient_free_space(needed, available) ->
+          Printf.fprintf Pervasives.stderr "Volume group \"%s\" has insufficient free space (%Ld extents): %Ld required.\n%!" vg.Lvm.Vg.name available needed;
+          exit 5
+        | e -> fail e
+    ) >>= fun () ->
     return info) in
   match info with | Some i -> Lvchange.lvchange_activate copts vg_name lv_name (Some i.local_device) | None -> ()
 
