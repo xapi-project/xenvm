@@ -96,6 +96,21 @@ let lvcreate_percent =
   assert_equal ~printer:Int64.to_string 0L free;
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
+let kib = 1024L
+let mib = Int64.mul kib 1024L
+let gib = Int64.mul mib 1024L
+let tib = Int64.mul mib 1024L
+let xib = Int64.mul tib 1024L
+
+let lvcreate_toobig =
+  "lvcreate -n <name> -l <too many>: check that we fail nicely" >::
+  fun () ->
+  Lwt_main.run (
+    Lwt.catch
+      (fun () -> Client.create "toobig" xib "unknown" 0L [])
+      (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
+       | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
+  )
 
 let file_exists filename =
   try
@@ -154,6 +169,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
   lvcreate_l;
   lvcreate_percent;
+  lvcreate_toobig;
   lvchange_n;
   vgs_online;
 ]

@@ -13,6 +13,10 @@ external get : unit -> Vg_wrapper.t = ""
 external create : name:string -> size:int64 -> creation_host:string -> creation_time:int64 -> tags:string list -> unit = ""
 external rename : oldname:string -> newname:string -> unit = ""
 external remove : name:string -> unit = ""
+
+exception Insufficient_free_space of (int64 (* extents needed *) * int64 (* extents available *))
+(** There's not enough space to create or resize the LV *)
+
 external resize : name:string -> size:int64 -> unit = ""
 external set_status : name:string -> readonly:bool -> unit = ""
 
