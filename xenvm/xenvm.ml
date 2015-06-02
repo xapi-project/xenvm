@@ -83,22 +83,6 @@ let create config name size =
     (let size_in_bytes = Int64.mul 1048576L size in
      Client.create ~name ~size:size_in_bytes ~tags:[])
 
-let activate config lvname path pv =
-  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
-  set_uri config None;
-  Lwt_main.run
-    (Client.get_lv ~name:lvname
-     >>= fun (vg, lv) ->
-     (* To compute the targets, I need to be able to map PV ids
-        onto local block devices. *)
-     Mapper.read [ pv ]
-     >>= fun devices ->
-     let targets = Mapper.to_targets devices vg lv in
-     let name = Mapper.name_of vg lv in
-     Devmapper.create name targets;
-     Devmapper.mknod name path 0o0600;
-     return ())
-
 let host_create copts (vg_name,_) host =
   let t =
     get_vg_info_t copts vg_name >>= fun info ->
@@ -257,21 +241,6 @@ let create_cmd =
   Term.(pure create $ copts_t $ lvname $ size),
   Term.info "create" ~sdocs:copts_sect ~doc ~man
 
-let activate_cmd = 
-  let doc = "Activate a logical volume on the host on which the daemon is running" in
-  let man = [
-    `S "DESCRIPTION";
-    `P "Activates a logical volume";
-  ] in
-  let path =
-    let doc = "Path to the new device node" in
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH" ~doc) in
-  let physical =
-    let doc = "Path to the (single) physical PV" in
-    Arg.(required & pos 1 (some string) None & info [] ~docv:"PV" ~doc) in
-  Term.(pure activate $ copts_t $ lvname $ path $ physical),
-  Term.info "activate" ~sdocs:copts_sect ~doc ~man
-
 let host_connect_cmd =
   let doc = "Connect to a host" in
   let man = [
@@ -341,7 +310,7 @@ let default_cmd =
 let cmds = [
   Lvresize.lvresize_cmd;
   Lvresize.lvextend_cmd;
-  format_cmd; create_cmd; activate_cmd;
+  format_cmd; create_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
