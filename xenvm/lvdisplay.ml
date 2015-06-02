@@ -20,6 +20,15 @@ let print_verbose vg lv =
       (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
       tm.tm_hour tm.tm_min tm.tm_sec in
 
+  let device =
+    let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
+    let name = Mapper.name_of vg lv in
+    match Devmapper.stat name with
+    | Some info ->
+      Some (Printf.sprintf "%ld:%ld" info.Devmapper.major info.Devmapper.minor)
+    | None ->
+      None in
+
   let lines = [
     "--- Logical volume ---";
     Printf.sprintf "LV Path                /dev/%s/%s" vg.Lvm.Vg.name lv.Lvm.Lv.name;
@@ -37,14 +46,27 @@ let print_verbose vg lv =
     Printf.sprintf "Read ahead sectors:    auto";
     (*
     - currently set to     256
-    Block device           253:0
     *)
+  ] @ (match device with
+       | Some device -> [ Printf.sprintf "Block device:          %s" device ]
+       | None -> []) @ [
     "";
   ] in
   Lwt_list.iter_s (fun line -> stdout "  %s" line) lines
 
+(* Example output:
+  /dev/packer-virtualbox-iso-vg/root:packer-virtualbox-iso-vg:3:1:-1:1:132661248:16194:-1:0:-1:252:0
+*)
 let print_colon vg lv =
   let sectors = Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv) in
+  let major, minor =
+    let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
+    let name = Mapper.name_of vg lv in
+    match Devmapper.stat name with
+    | Some info ->
+      Int32.to_string info.Devmapper.major, Int32.to_string info.Devmapper.minor
+    | None ->
+      "-1", "-1" in
   let parts = [
     Printf.sprintf "/dev/%s/%s" vg.Lvm.Vg.name lv.Lvm.Lv.name;
     vg.Lvm.Vg.name;
@@ -57,8 +79,8 @@ let print_colon vg lv =
     "?"; (* allocated extents *)
     "?"; (* allocation policy *)
     "?"; (* read ahead sectors *)
-    "?"; (* major *)
-    "?"; (* minor *)
+    major;
+    minor;
   ] in
   stdout "  %s" (String.concat ":" parts)
 
