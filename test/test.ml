@@ -129,6 +129,30 @@ let lvcreate_toobig =
     | _ ->
       failwith "Expected exit code 5"
 
+let lvextend_toobig =
+  "lvextend packer-virtualbox-iso-vg/swap_1 -L 1T: check that the failure is nice" >::
+  fun () ->
+  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "100%F"; vg ] |> ignore_string;
+  begin
+    Lwt_main.run (
+      Lwt.catch
+        (fun () -> Client.resize "test" xib)
+        (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
+         | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
+    );
+    try
+      xenvm [ "lvextend"; vg ^ "/test"; "-L"; Int64.to_string xib ] |> ignore_string;
+      failwith "Did not get Insufficient_free_space"
+    with
+      | Bad_exit(5, _, _, stdout, stderr) ->
+        let expected = "Insufficient free space" in
+        if not (contains stderr expected)
+        then failwith (Printf.sprintf "stderr [%s] did not have expected string [%s]" stderr expected)
+      | e ->
+        failwith (Printf.sprintf "Expected exit code 5: %s" (Printexc.to_string e))
+  end;
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+
 let file_exists filename =
   try
     Unix.LargeFile.stat filename |> ignore;
@@ -188,6 +212,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_percent;
   lvcreate_toobig;
   lvchange_n;
+  lvextend_toobig;
   vgs_online;
 ]
 
