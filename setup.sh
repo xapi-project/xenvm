@@ -38,6 +38,9 @@ mkdir -p /tmp/xenvm.d
 ./xenvm.native lvcreate -n live -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native lvchange -ay /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
 
+./xenvm.native lvdisplay /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvdisplay /dev/djstest -c --configdir /tmp/xenvm.d $MOCK_ARG
+
 #./xenvm.native benchmark
 # create and connect to hosts
 ./xenvm.native host-create /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
