@@ -473,10 +473,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     debug "Binding and listening on the socket";
     Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.Config.socket));
     Lwt_unix.listen s 5;
-    let rec unix () =
-      debug "Calling accept on the socket";
-      Lwt_unix.accept s
-      >>= fun (fd, _) ->
+    let conn_handler fd () =
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
       let oc = Lwt_io.of_fd ~mode:Lwt_io.output ~close:return fd in
       (* read one line *)
@@ -490,7 +487,12 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       Lwt_io.flush oc
       >>= fun () ->
       Lwt_io.close ic
-      >>= fun () ->
+    in
+    let rec unix () =
+      debug "Calling accept on the socket";
+      Lwt_unix.accept s
+      >>= fun (fd, _) ->
+      async (conn_handler fd);
       unix () in
     let listen_unix = unix () in
     debug "Waiting forever for requests";
