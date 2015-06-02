@@ -42,13 +42,13 @@ let print_verbose vg lv =
     Printf.sprintf "LV Size                %Lds" size;
     Printf.sprintf "Current LE             %Ld" (Lvm.Lv.size_in_extents lv);
     Printf.sprintf "Segments               %d" (List.length lv.Lvm.Lv.segments);
-    Printf.sprintf "Allocation:            inherit";
-    Printf.sprintf "Read ahead sectors:    auto";
+    Printf.sprintf "Allocation             inherit";
+    Printf.sprintf "Read ahead sectors     auto";
     (*
     - currently set to     256
     *)
   ] @ (match device with
-       | Some device -> [ Printf.sprintf "Block device:          %s" device ]
+       | Some device -> [ Printf.sprintf "Block device           %s" device ]
        | None -> []) @ [
     "";
   ] in
