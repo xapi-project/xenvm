@@ -67,21 +67,17 @@ let format config name filenames =
         | `Error (`Msg x) -> failwith x in
         (name,block)
       ) blocks in
-      Vg_IO.format name ~magic:`Journalled pvs >>|= fun () ->
+      let creation_host = Unix.gethostname () in
+      let creation_time = Unix.gettimeofday () |> Int64.of_float in
+      Vg_IO.format name ~creation_host ~creation_time ~magic:`Journalled pvs >>|= fun () ->
       Vg_IO.connect (List.map snd pvs) `RW
       >>|= fun vg ->
-      (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size))
+      (return (Vg.create (Vg_IO.metadata_of vg) _journal_name size ~creation_host ~creation_time))
       >>|= fun (_, op) ->
       Vg_IO.update vg [ op ]
       >>|= fun () ->
       return () in
   Lwt_main.run t
-
-let create config name size =
-  set_uri config None;
-  Lwt_main.run
-    (let size_in_bytes = Int64.mul 1048576L size in
-     Client.create ~name ~size:size_in_bytes ~tags:[])
 
 let host_create copts (vg_name,_) host =
   let t =
@@ -153,6 +149,7 @@ let shutdown copts (vg_name,_) =
 
 let benchmark copts (vg_name,_) =
   let t =
+    let creation_host = Unix.gethostname () in
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     let mib = Int64.mul 1048576L 4L in
@@ -167,7 +164,7 @@ let benchmark copts (vg_name,_) =
         then stderr "%s %d %% complete\n%!" test_name (100 - (n * 100) / number)
         else return () ) >>= fun () ->
       fori test_name ((number - n, Unix.gettimeofday () -. start) :: acc) f (n - 1) in
-    fori "Creating volumes" [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~tags:[]) number
+    fori "Creating volumes" [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~creation_host ~creation_time:(Unix.gettimeofday () |> Int64.of_float) ~tags:[]) number
     >>= fun creates ->
     let time = Unix.gettimeofday () -. start in
     let oc = open_out "benchmark.dat" in
@@ -231,15 +228,6 @@ let format_cmd =
   ] in
   Term.(pure format $ copts_t $ vgname $ filenames),
   Term.info "format" ~sdocs:copts_sect ~doc ~man
-
-let create_cmd =
-  let doc = "Create a logical volume" in
-  let man = [
-    `S "DESCRIPTION";
-    `P "Creates a logical volume";
-  ] in
-  Term.(pure create $ copts_t $ lvname $ size),
-  Term.info "create" ~sdocs:copts_sect ~doc ~man
 
 let host_connect_cmd =
   let doc = "Connect to a host" in
@@ -310,7 +298,7 @@ let default_cmd =
 let cmds = [
   Lvresize.lvresize_cmd;
   Lvresize.lvextend_cmd;
-  format_cmd; create_cmd;
+  format_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
