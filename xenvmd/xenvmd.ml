@@ -541,7 +541,7 @@ module FreePool = struct
                freename size_mib config.Config.host_low_water_mark config.Config.host_allocation_quantum;
              (* find free space in the VG *)
              begin match !journal, Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.Config.host_allocation_quantum extent_size_mib) with
-             | _, `Error (`OnlyThisMuchFree free_extents) ->
+             | _, `Error (`OnlyThisMuchFree (needed_extents, free_extents)) ->
                info "LV %s is %Ld MiB but total space free (%Ld MiB) is less than allocation quantum (%Ld MiB)"
                  freename size_mib Int64.(mul free_extents extent_size_mib) config.Config.host_allocation_quantum;
                (* try again later *)

@@ -96,6 +96,62 @@ let lvcreate_percent =
   assert_equal ~printer:Int64.to_string 0L free;
   xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
+let kib = 1024L
+let mib = Int64.mul kib 1024L
+let gib = Int64.mul mib 1024L
+let tib = Int64.mul mib 1024L
+let xib = Int64.mul tib 1024L
+
+let contains s1 s2 =
+    let re = Str.regexp_string s2 in
+    try 
+       ignore (Str.search_forward re s1 0); 
+       true
+    with Not_found -> false
+
+let lvcreate_toobig =
+  "lvcreate -n <name> -l <too many>: check that we fail nicely" >::
+  fun () ->
+  Lwt_main.run (
+    Lwt.catch
+      (fun () -> Client.create "toobig" xib "unknown" 0L [])
+      (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
+       | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
+  );
+  try
+    xenvm [ "lvcreate"; "-n"; "test"; "-l"; Int64.to_string xib; vg ] |> ignore_string;
+    failwith "Did not get Insufficient_free_space"
+  with
+    | Bad_exit(5, _, _, stdout, stderr) ->
+      let expected = "insufficient free space" in
+      if not (contains stderr expected)
+      then failwith (Printf.sprintf "stderr [%s] did not have expected string [%s]" stderr expected)
+    | _ ->
+      failwith "Expected exit code 5"
+
+let lvextend_toobig =
+  "lvextend packer-virtualbox-iso-vg/swap_1 -L 1T: check that the failure is nice" >::
+  fun () ->
+  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "100%F"; vg ] |> ignore_string;
+  begin
+    Lwt_main.run (
+      Lwt.catch
+        (fun () -> Client.resize "test" xib)
+        (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
+         | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
+    );
+    try
+      xenvm [ "lvextend"; vg ^ "/test"; "-L"; Int64.to_string xib ] |> ignore_string;
+      failwith "Did not get Insufficient_free_space"
+    with
+      | Bad_exit(5, _, _, stdout, stderr) ->
+        let expected = "Insufficient free space" in
+        if not (contains stderr expected)
+        then failwith (Printf.sprintf "stderr [%s] did not have expected string [%s]" stderr expected)
+      | e ->
+        failwith (Printf.sprintf "Expected exit code 5: %s" (Printexc.to_string e))
+  end;
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
 
 let file_exists filename =
   try
@@ -154,7 +210,9 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
   lvcreate_l;
   lvcreate_percent;
+  lvcreate_toobig;
   lvchange_n;
+  lvextend_toobig;
   vgs_online;
 ]
 
