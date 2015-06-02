@@ -32,9 +32,20 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
 
     let resize_remotely () =
       if device_is_active then Devmapper.suspend name;
-      ( match size with
-        | `Absolute size -> Client.resize lv_name size
-        | `IncreaseBy delta -> Client.resize lv_name Int64.(add delta (mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv))) )
+      Lwt.catch
+        (fun () ->
+          match size with
+          | `Absolute size -> Client.resize lv_name size
+          | `IncreaseBy delta -> Client.resize lv_name Int64.(add delta (mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv))) 
+        ) (function
+          | Xenvm_interface.Insufficient_free_space(needed, available) ->
+            Printf.fprintf Pervasives.stderr "Insufficient free space: %Ld extents needed, but only %Ld available\n%!" needed available;
+            if device_is_active then Devmapper.resume name;
+            exit 5
+          | e ->
+            if device_is_active then Devmapper.resume name;
+            fail e
+        )
       >>= fun () ->
       if device_is_active then begin
         Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
