@@ -16,7 +16,7 @@ open Lwt
 let (>>*=) m f = match m with
   | `Error (`Msg e) -> fail (Failure e)
   | `Error (`DuplicateLV lv) -> fail (Failure (Printf.sprintf "An LV with name %s already exists" lv))
-  | `Error (`OnlyThisMuchFree space) -> fail (Failure (Printf.sprintf "Only this much space is available: %Ld" space))
+  | `Error (`OnlyThisMuchFree (needed, available)) -> fail (Xenvm_interface.Insufficient_free_space(needed, available))
   | `Error (`UnknownLV lv) -> fail (Failure (Printf.sprintf "The LV with name %s was not found" lv))
   | `Ok x -> f x
 let (>>|=) m f = m >>= fun x -> x >>*= f

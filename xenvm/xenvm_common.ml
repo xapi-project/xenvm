@@ -462,7 +462,7 @@ let print_table noheadings header rows =
 let (>>*=) m f = match m with
   | `Error (`Msg e) -> fail (Failure e)
   | `Error (`DuplicateLV x) -> fail (Failure (Printf.sprintf "%s is a duplicate LV name" x))
-  | `Error (`OnlyThisMuchFree x) -> fail (Failure (Printf.sprintf "There is only %Ld free" x))
+  | `Error (`OnlyThisMuchFree (needed, available)) -> fail (Xenvm_interface.Insufficient_free_space(needed, available))
   | `Error (`UnknownLV x) -> fail (Failure (Printf.sprintf "I couldn't find an LV named %s" x))
   | `Ok x -> f x
 

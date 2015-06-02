@@ -165,11 +165,11 @@ module FreePool = struct
           | `Ok x ->
             free := Lvm.Pv.Allocator.sub !free x;
             return x
-          | `Error (`OnlyThisMuchFree 0L) ->
+          | `Error (`OnlyThisMuchFree (_, 0L)) ->
             Lwt_condition.wait ~mutex:m c
             >>= fun () ->
             wait ()
-          | `Error (`OnlyThisMuchFree n) ->
+          | `Error (`OnlyThisMuchFree (_, n)) ->
             begin match Lvm.Pv.Allocator.find !free n with
             | `Ok x ->
               free := Lvm.Pv.Allocator.sub !free x;
