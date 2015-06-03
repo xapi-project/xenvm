@@ -430,6 +430,8 @@ module VolumeManager = struct
       (fun (host, _) ->
         Host.disconnect host
       ) !from_LVMs
+    >>= fun () ->
+    sync ()
 end
 
 module FreePool = struct
