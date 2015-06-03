@@ -186,6 +186,18 @@ let dm_exists name = match Devmapper.Linux.stat name with
 let dev_path_of name = "/dev/" ^ vg ^ "/" ^ name
 let mapper_path_of name = "/dev/mapper/" ^ vg ^ "-" ^ name
 
+let lvchange_addtag =
+  "lvchange vg/lv [--addtag|--removetag]: check that we can add and remove tags" >::
+  fun () ->
+  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L "test";
+  xenvm [ "lvchange"; vg ^ "/test"; "--addtag"; "hidden" ] |> ignore_string;
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv "test") in
+  let tags = List.map Lvm.Name.Tag.to_string lv_metadata.Lvm.Lv.tags in
+  if not(List.mem "hidden" tags)
+  then failwith "Failed to add 'hidden' tag";
+  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+
 let lvchange_n =
   "lvchange -an <device>: check that we can deactivate a volume" >::
   fun () ->
@@ -231,6 +243,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_l;
   lvcreate_percent;
   lvcreate_toobig;
+  lvchange_addtag;
   lvchange_n;
   lvextend_toobig;
   vgs_online;
