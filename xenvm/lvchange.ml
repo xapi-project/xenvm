@@ -26,18 +26,28 @@ let activate vg lv local_device =
   Devmapper.mknod name path 0o0600;
   return ()
 
-let lvchange_activate copts vg_name lv_name physical_device =
+let lvchange_activate copts vg_name lv_name physical_device (offline:bool) : unit =
   let open Xenvm_common in
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
-    if vg.Lvm.Vg.name <> vg_name then failwith "Invalid URI";
-    let local_device = match (info,physical_device) with
+    let local_device : string = match (info,physical_device) with
       | _, Some d -> d (* cmdline overrides default for the VG *)
       | Some info, None -> info.local_device (* If we've got a default, use that *)
-      | None, None -> failwith "Need to know the local device!"
-    in
+      | None, None -> failwith "Need to know the local device!" in
+    ( if offline then begin
+        with_block local_device
+          (fun x ->
+            let module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock) in
+            Vg_IO.connect [ x ] `RO >>|= fun vg ->
+            match Vg_IO.find vg lv_name with
+            | None -> failwith (Printf.sprintf "Failed to find LV %s" lv_name)
+            | Some vol ->
+              return (Vg_IO.metadata_of vg, Vg_IO.Volume.metadata_of vol)
+         )
+      end else Client.get_lv ~name:lv_name 
+    ) >>= fun (vg, lv) ->
+    if vg.Lvm.Vg.name <> vg_name then failwith "Invalid URI";
     activate vg lv local_device
   )
 
@@ -105,10 +115,10 @@ let lvchange_refresh copts vg_name lv_name physical_device =
     reload vg lv local_device
   )
 
-let lvchange copts (vg_name,lv_name_opt) physical_device action perm refresh add_tag del_tag =
+let lvchange copts (vg_name,lv_name_opt) physical_device action perm refresh add_tag del_tag offline =
   let lv_name = match lv_name_opt with Some l -> l | None -> failwith "Need LV name" in
   (match action with
-  | Some Activate -> lvchange_activate copts vg_name lv_name physical_device
+  | Some Activate -> lvchange_activate copts vg_name lv_name physical_device offline
   | Some Deactivate -> lvchange_deactivate copts vg_name lv_name
   | None -> ());
   (if refresh then lvchange_refresh copts vg_name lv_name physical_device);
@@ -158,12 +168,16 @@ let add_tag_arg =
 let del_tag_arg =
   let doc = "Remove the given tag from the LV" in
   Arg.(value & opt (some string) None & info ["deltag"] ~docv:"DELTAG" ~doc)
-  
+
+let offline_arg =
+  let doc = "Assume xenvmd is offline and read metadata from the disk" in
+  Arg.(value & flag & info [ "offline" ] ~docv:"OFFLINE" ~doc)
+ 
 let lvchange_cmd =
   let doc = "Change the attributes of a logical volume" in
   let man = [
     `S "DESCRIPTION";
     `P "lvchange allows you to change the attributes of a logical volume including making them known to the kernel ready for use."
   ] in
-  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg $ refresh_arg $ add_tag_arg $ del_tag_arg),
+  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg $ refresh_arg $ add_tag_arg $ del_tag_arg $ offline_arg),
   Term.info "lvchange" ~sdocs:"COMMON OPTIONS" ~doc ~man

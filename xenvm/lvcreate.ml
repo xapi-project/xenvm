@@ -35,7 +35,7 @@ let lvcreate copts lv_name real_size percent_size tags vg_name =
         | e -> fail e
     ) >>= fun () ->
     return info) in
-  match info with | Some i -> Lvchange.lvchange_activate copts vg_name lv_name (Some i.local_device) | None -> ()
+  match info with | Some i -> Lvchange.lvchange_activate copts vg_name lv_name (Some i.local_device) false | None -> ()
 
 let lv_name_arg =
   let doc = "Gives the name of the LV to be created. This must be unique within the volume group. " in
