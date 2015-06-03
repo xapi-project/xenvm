@@ -146,6 +146,26 @@ module VolumeManager = struct
         | `Ok x -> return x
       ) devices'
     >>= fun devices' ->
+    let module Label_IO = Lvm.Label.Make(Block) in
+    Lwt_list.iter_s
+      (fun device ->
+        Label_IO.read device >>= function
+        | `Error (`Msg m) ->
+          error "Failed to read PV label from device: %s" m;
+          fail (Failure "Failed to read PV label from device")
+        | `Ok label ->
+          begin match Lvm.Label.Label_header.magic_of label.Lvm.Label.label_header with
+          | Some `Lvm ->
+            error "Device has normal LVM PV label. I will only open devices with the new PV label.";
+            fail (Failure "Device has wrong LVM PV label")
+          | Some `Journalled ->
+            return ()
+          | _ ->
+            error "Device has an unrecognised LVM PV label. I will only open devices with the new PV label.";
+            fail (Failure "Device has wrong PV label")
+          end
+      ) devices'
+    >>= fun () ->
     Vg_IO.connect ~flush_interval:5. devices' `RW >>|= fun vg ->
     Lwt.wakeup_later myvg_u vg;
     return ()
