@@ -47,6 +47,27 @@ let vgs_offline =
     )
   )
 
+let lvchange_offline =
+  "lvchange vg/lv --offline: check that we can activate volumes offline" >::
+  fun () ->
+  with_temp_file (fun filename' ->
+    with_loop_device filename' (fun loop ->
+      xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
+      xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
+      file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
+      xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
+      Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
+      Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
+      finally
+        (fun () ->
+          xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
+        ) (fun () ->
+          xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string
+        );
+      xenvm [ "lvchange"; "-ay"; vg ^ "/test"; "--offline" ] |> ignore_string;
+    )
+  )
+
 let pvremove =
   "pvremove <device>: check that we can make a PV unrecognisable" >::
   (fun () ->
@@ -69,6 +90,7 @@ let pvremove =
 let no_xenvmd_suite = "Commands which should work without xenvmd" >::: [
   vgcreate;
   vgs_offline;
+  lvchange_offline;
   pvremove;
 ]
 
