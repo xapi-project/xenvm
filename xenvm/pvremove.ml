@@ -7,20 +7,6 @@ open Lwt
 open Lvm
 module Pv_IO = Pv.Make(Block)
 
-let (>>*=) m f = match m with
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Ok x -> f x
-
-let (>>|=) m f = m >>= fun x -> x >>*= f
-
-let with_block filename f =
-  let open Lwt in
-  Block.connect filename
-  >>= function
-  | `Error _ -> fail (Failure (Printf.sprintf "Unable to read %s" filename))
-  | `Ok x ->
-    Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
-
 let pvremove copts undo filenames =
   let open Xenvm_common in
   Lwt_main.run (
