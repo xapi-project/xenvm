@@ -13,7 +13,7 @@ let vgchange copts (vg_name,_) physical_device action =
     let names = List.map (fun (_, lv) -> lv.Lvm.Lv.name) @@ Lvm.Vg.LVs.bindings vg.Lvm.Vg.lvs in
     Lwt_list.iter_s (fun lv_name ->
       (match action with
-      | Some Activate -> Lvchange.lvchange_activate copts vg_name lv_name physical_device
+      | Some Activate -> Lvchange.lvchange_activate copts vg_name lv_name physical_device false
       | Some Deactivate -> Lvchange.lvchange_deactivate copts vg_name lv_name
       | None -> ());
       return ()
