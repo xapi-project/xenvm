@@ -33,7 +33,7 @@ mkdir -p /tmp/xenvm.d
 ./xenvm.native format $LOOP --vg djstest --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvmd.native --config ./test.xenvmd.conf --daemon
 
-./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/host1-socket --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 ./xenvm.native lvcreate -n live -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native lvchange -ay /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
@@ -46,7 +46,11 @@ mkdir -p /tmp/xenvm.d
 ./xenvm.native host-create /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
 cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host1|g" > test.local_allocator.host1.conf
-./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > /dev/null &
+./local_allocator.native --daemon --config ./test.local_allocator.host1.conf $MOCK_ARG
+
+sleep 30 # the local allocator daemonizes too soon
+
+./xenvm.native lvextend /dev/djstest/live -L 128M --live --configdir /tmp/xenvm.d $MOCK_ARG
 
 ./xenvm.native host-create /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-connect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
