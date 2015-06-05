@@ -35,11 +35,18 @@ mkdir -p /tmp/xenvm.d
 
 ./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/host1-socket --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
-./xenvm.native lvcreate -n live -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvcreate -n badname -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvrename /dev/djstest/badname /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
+
+./xenvm.native vgchange /dev/djstest -ay --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native vgchange /dev/djstest -an --configdir /tmp/xenvm.d $MOCK_ARG
+
 ./xenvm.native lvchange -ay /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
 
 ./xenvm.native lvdisplay /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native lvdisplay /dev/djstest -c --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvs /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native pvs ./bigdisk --configdir /tmp/xenvm.d $MOCK_ARG
 
 #./xenvm.native benchmark
 # create and connect to hosts
