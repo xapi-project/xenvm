@@ -36,6 +36,10 @@ mkdir -p /tmp/xenvm.d
 ./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/host1-socket --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 ./xenvm.native lvcreate -n live -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
+
+./xenvm.native vgchange /dev/djstest -ay --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native vgchange /dev/djstest -an --configdir /tmp/xenvm.d $MOCK_ARG
+
 ./xenvm.native lvchange -ay /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
 
 ./xenvm.native lvdisplay /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
