@@ -40,6 +40,8 @@ mkdir -p /tmp/xenvm.d
 
 ./xenvm.native lvdisplay /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native lvdisplay /dev/djstest -c --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvs /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native pvs ./bigdisk --configdir /tmp/xenvm.d $MOCK_ARG
 
 #./xenvm.native benchmark
 # create and connect to hosts
