@@ -1,7 +1,7 @@
 (
  (socket /tmp/@HOST@-socket)
  (allocation_quantum 16)
- (localJournal /tmp/@HOST@-localJournal)
+ (localJournal @HOST@-localJournal)
  (devices (@BIGDISK@))
  (toLVM @HOST@-toLVM)
  (fromLVM @HOST@-fromLVM)

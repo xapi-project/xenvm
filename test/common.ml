@@ -218,7 +218,7 @@ let tib = Int64.(gib * kib)
 module Client = Xenvm_client.Client
 
 let with_temp_file fn =
-  let filename = "/tmp/vg" in
+  let filename = Filename.concat (Unix.getcwd ()) "vg" in
   let f = Unix.openfile filename [Unix.O_CREAT; Unix.O_RDWR; Unix.O_TRUNC] 0o644 in
   (* approximately 10000 4MiB extents for volumes, 100MiB for metadata and
      overhead *)
