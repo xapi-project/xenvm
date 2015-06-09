@@ -36,7 +36,6 @@ cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
 mkdir -p /etc/xenvm.d
 BISECT_FILE=_build/xenvm.coverage ./xenvm.native format $LOOP --vg djstest  $MOCK_ARG
 BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
-
 export BISECT_FILE=_build/xenvm.coverage
 
 ./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest $MOCK_ARG
@@ -88,20 +87,28 @@ sleep 30
 
 ./xenvm.native host-list /dev/djstest $MOCK_ARG
 
+xenvmdpid=`pidof xenvmd.native`
 #shutdown
 ./xenvm.native lvchange -an /dev/djstest/live $MOCK_ARG
 ./xenvm.native shutdown /dev/djstest $MOCK_ARG
 
 
-wait $(pidof xenvmd.native)
+while [ -d /proc/$xenvmdpid ];
+do
+  sleep 1;
+done
+
 echo Generating bisect report-- this fails on travis
 (cd _build; bisect-report xenvm*.out -summary-only -html /vagrant/report/ || echo Ignoring bisect-report failure)
 echo Sending to coveralls-- this only works on travis
 `opam config var bin`/ocveralls --prefix _build _build/xenvm*.out --send || echo "Failed to upload to coveralls"
 
-dmsetup remove_all
-dd if=/dev/zero of=$LOOP bs=1M count=128
-losetup -d $LOOP
-dd if=/dev/zero of=$CHENGZLOOP bs=1M count=128
-losetup -d $CHENGZLOOP
+if [ "$USE_MOCK" -eq "0" ]; then
+  dmsetup remove_all
+  dd if=/dev/zero of=$LOOP bs=1M count=128
+  losetup -d $LOOP
+  dd if=/dev/zero of=$CHENGZLOOP bs=1M count=128
+  losetup -d $CHENGZLOOP
+fi
+
 rm -f localJournal bigdisk *.out chengzDisk
