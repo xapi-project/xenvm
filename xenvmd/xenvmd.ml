@@ -597,7 +597,9 @@ module Impl = struct
   let fail = Lwt.fail
   let handle_failure = Lwt.catch
 
-  type context = unit
+  type context = {
+    stoppers : (unit Lwt.u) list
+  }
 
   let get context () =
     fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
@@ -650,6 +652,7 @@ module Impl = struct
     VolumeManager.flush_all ()
 
   let shutdown context () =
+    List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
     VolumeManager.shutdown ()
     >>= fun () ->
     FreePool.shutdown ()
@@ -674,9 +677,9 @@ module XenvmServer = Xenvm_interface.ServerM(Impl)
 
 open Cohttp_lwt_unix
 
-let handler ~info (ch,conn) req body =
+let handler ~info stoppers (ch,conn) req body =
   Cohttp_lwt_body.to_string body >>= fun bodystr ->
-  XenvmServer.process () (Jsonrpc.call_of_string bodystr) >>= fun result ->
+  XenvmServer.process {Impl.stoppers} (Jsonrpc.call_of_string bodystr) >>= fun result ->
   Server.respond_string ~status:`OK ~body:(Jsonrpc.string_of_response result) ()
 
 let run port sock_path config daemon =
@@ -756,7 +759,8 @@ let run port sock_path config daemon =
       >>= fun () ->
       service_queues () in
 
-    let service_http mode =
+    (* See below for a description of 'stoppers' and 'stop' *)
+    let service_http stoppers mode stop =
       let ty = match mode with
         | `TCP (`Port x) -> Printf.sprintf "TCP port %d" x
         | `Unix_domain_socket (`File p) -> Printf.sprintf "Unix domain socket '%s'" p
@@ -765,10 +769,10 @@ let run port sock_path config daemon =
       Printf.printf "Listening for HTTP request on: %s\n" ty;
       let info = Printf.sprintf "Served by Cohttp/Lwt listening on %s" ty in
       let conn_closed (ch,conn) = () in
-      let callback = handler ~info in
+      let callback = handler ~info stoppers in
       let c = Server.make ~callback ~conn_closed () in
       (* Listen for regular API calls *)
-      Server.create ~mode c in
+      Server.create ~mode ~stop c in
 
     
     let tcp_mode =
@@ -787,7 +791,17 @@ let run port sock_path config daemon =
         Lwt.return []
     end >>= fun unix_mode ->
 
-    let threads = List.map service_http (tcp_mode @ unix_mode) in
+    let services = tcp_mode @ unix_mode in
+
+    (* stoppers here is a list of type (unit Lwt.u) list, and 'stops'
+       is a list of type (unit Lwt.t). Each of the listening Cohttp
+       servers is given one of the 'stop' threads, and the whole
+       'stoppers' list is passed to every handler. When a 'shutdown'
+       is issued, whichever server received the call to shutdown can
+       use the 'stoppers' list to shutdown each of the listeners so
+       they no longer react to API calls. *)
+    let stops,stoppers = List.map (fun _ -> Lwt.wait ()) services |> List.split in
+    let threads = List.map2 (service_http stoppers) (tcp_mode @ unix_mode) stops in
     
     Lwt.join ((service_queues ())::threads) in
 
