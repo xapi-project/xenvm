@@ -661,7 +661,7 @@ module Impl = struct
       Lwt_unix.sleep 1.
       >>= fun () ->
       exit 0 in
-    return ()
+    return (Unix.getpid ())
 
   module Host = struct
     let create context ~name = VolumeManager.Host.create name
