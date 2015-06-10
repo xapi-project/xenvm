@@ -84,3 +84,6 @@ sleep 30
 #echo Run 'sudo ./xenvm.native host-connect /dev/djstest host1' to connect to the local allocator'
 #echo Run 'sudo ./local_allocator.native' and type 'djstest-live' to request an allocation
 echo Run './cleanup.sh' to remove all volumes and devices
+
+sleep 10
+
