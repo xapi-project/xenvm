@@ -35,8 +35,10 @@ fi
 cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
 mkdir -p /etc/xenvm.d
 BISECT_FILE=_build/xenvm.coverage ./xenvm.native format $LOOP --vg djstest  $MOCK_ARG
-BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf --daemon
+BISECT_FILE=_build/xenvmd.coverage ./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log &
 export BISECT_FILE=_build/xenvm.coverage
+
+sleep 2
 
 ./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/xenvm-local-allocator --uri file://local/services/xenvmd/djstest $MOCK_ARG
 

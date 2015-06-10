@@ -32,7 +32,10 @@ external flush : name:string -> unit = ""
 (** [flush lv] processes all pending allocations for this LV, such that
     future calls to [get_lv] will return accurate metadata. *)
 
-external shutdown : unit -> unit = ""
+(** [shutdown ()] will cause xenvmd to exit shortly after returning.
+    The returned value is the pid of the process to enable the caller
+    to wait until the process has actually exitted. *)
+external shutdown : unit -> int = ""
 
 type queue = {
   lv: string;

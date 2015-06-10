@@ -597,7 +597,9 @@ module Impl = struct
   let fail = Lwt.fail
   let handle_failure = Lwt.catch
 
-  type context = unit
+  type context = {
+    stoppers : (unit Lwt.u) list
+  }
 
   let get context () =
     fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
@@ -650,6 +652,7 @@ module Impl = struct
     VolumeManager.flush_all ()
 
   let shutdown context () =
+    List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
     VolumeManager.shutdown ()
     >>= fun () ->
     FreePool.shutdown ()
@@ -658,7 +661,7 @@ module Impl = struct
       Lwt_unix.sleep 1.
       >>= fun () ->
       exit 0 in
-    return ()
+    return (Unix.getpid ())
 
   module Host = struct
     let create context ~name = VolumeManager.Host.create name
@@ -674,16 +677,96 @@ module XenvmServer = Xenvm_interface.ServerM(Impl)
 
 open Cohttp_lwt_unix
 
-let handler ~info (ch,conn) req body =
+let handler ~info stoppers (ch,conn) req body =
   Cohttp_lwt_body.to_string body >>= fun bodystr ->
-  XenvmServer.process () (Jsonrpc.call_of_string bodystr) >>= fun result ->
+  XenvmServer.process {Impl.stoppers} (Jsonrpc.call_of_string bodystr) >>= fun result ->
   Server.respond_string ~status:`OK ~body:(Jsonrpc.string_of_response result) ()
 
-let run port sock_path config daemon =
-  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
-  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
-  let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
+let maybe_write_pid config =
+  match config.Config.listenPath with
+  | None ->
+      (* don't need a lock file because we'll fail to bind to the port *)
+    ()
+  | Some path ->
+    info "Writing pidfile to %s" path;
+    Pidfile.write_pid (path ^ ".lock")
 
+let run port sock_path config =
+  maybe_write_pid config;
+  
+  let t =
+    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+    VolumeManager.vgopen ~devices:config.Config.devices
+    >>= fun () ->
+    FreePool.start Xenvm_interface._journal_name
+    >>= fun () ->
+
+    let rec service_queues () =
+      (* 0. Have any local allocators restarted? *)
+      FreePool.resend_free_volumes config
+      >>= fun () ->
+      (* 1. Do any of the host free LVs need topping up? *)
+      FreePool.top_up_free_volumes config
+      >>= fun () ->
+
+      (* 2. Are there any pending LVM updates from hosts? *)
+      VolumeManager.flush_all ()
+      >>= fun () ->
+
+      debug "sleeping for 5s";
+      Lwt_unix.sleep 5.
+      >>= fun () ->
+      service_queues () in
+
+    (* See below for a description of 'stoppers' and 'stop' *)
+    let service_http stoppers mode stop =
+      let ty = match mode with
+        | `TCP (`Port x) -> Printf.sprintf "TCP port %d" x
+        | `Unix_domain_socket (`File p) -> Printf.sprintf "Unix domain socket '%s'" p
+        | _ -> "<unknown>"
+      in
+      Printf.printf "Listening for HTTP request on: %s\n" ty;
+      let info = Printf.sprintf "Served by Cohttp/Lwt listening on %s" ty in
+      let conn_closed (ch,conn) = () in
+      let callback = handler ~info stoppers in
+      let c = Server.make ~callback ~conn_closed () in
+      (* Listen for regular API calls *)
+      Server.create ~mode ~stop c in
+
+    
+    let tcp_mode =
+      match config.Config.listenPort with
+      | Some port -> [`TCP (`Port port)]
+      | None -> []
+    in
+    
+    begin
+      match config.Config.listenPath with
+      | Some p ->
+        (* Remove the socket first, if it already exists *)
+        Lwt.catch (fun () -> Lwt_unix.unlink p) (fun _ -> Lwt.return ()) >>= fun () -> 
+        Lwt.return [ `Unix_domain_socket (`File p) ]            
+      | None ->
+        Lwt.return []
+    end >>= fun unix_mode ->
+
+    let services = tcp_mode @ unix_mode in
+
+    (* stoppers here is a list of type (unit Lwt.u) list, and 'stops'
+       is a list of type (unit Lwt.t). Each of the listening Cohttp
+       servers is given one of the 'stop' threads, and the whole
+       'stoppers' list is passed to every handler. When a 'shutdown'
+       is issued, whichever server received the call to shutdown can
+       use the 'stoppers' list to shutdown each of the listeners so
+       they no longer react to API calls. *)
+    let stops,stoppers = List.map (fun _ -> Lwt.wait ()) services |> List.split in
+    let threads = List.map2 (service_http stoppers) (tcp_mode @ unix_mode) stops in
+    
+    Lwt.join ((service_queues ())::threads) in
+
+  Lwt_main.run t
+
+let daemonize config =
   (* Ideally we would bind our sockets before daemonizing to avoid racing
      with the next command, but the conduit API doesn't let us pass a socket
      in. Instead we daemonize in a fork()ed child, and in the parent we wait
@@ -724,75 +807,17 @@ let run port sock_path config daemon =
     wait 30;
     exit 0
   end;
-  if daemon then Lwt_daemon.daemonize ();
-  ( match config.Config.listenPath with
-    | None ->
-      (* don't need a lock file because we'll fail to bind to the port *)
-      ()
-    | Some path ->
-      info "Writing pidfile to %s" path;
-      Pidfile.write_pid (path ^ ".lock") );
-  let t =
-    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
-    VolumeManager.vgopen ~devices:config.Config.devices
-    >>= fun () ->
-    FreePool.start Xenvm_interface._journal_name
-    >>= fun () ->
+  Lwt_daemon.daemonize ()
+  
+let main port sock_path config daemon =
+  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
+  let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
 
-    let rec service_queues () =
-      (* 0. Have any local allocators restarted? *)
-      FreePool.resend_free_volumes config
-      >>= fun () ->
-      (* 1. Do any of the host free LVs need topping up? *)
-      FreePool.top_up_free_volumes config
-      >>= fun () ->
+  if daemon then daemonize config;
 
-      (* 2. Are there any pending LVM updates from hosts? *)
-      VolumeManager.flush_all ()
-      >>= fun () ->
-
-      debug "sleeping for 5s";
-      Lwt_unix.sleep 5.
-      >>= fun () ->
-      service_queues () in
-
-    let service_http mode =
-      let ty = match mode with
-        | `TCP (`Port x) -> Printf.sprintf "TCP port %d" x
-        | `Unix_domain_socket (`File p) -> Printf.sprintf "Unix domain socket '%s'" p
-        | _ -> "<unknown>"
-      in
-      Printf.printf "Listening for HTTP request on: %s\n" ty;
-      let info = Printf.sprintf "Served by Cohttp/Lwt listening on %s" ty in
-      let conn_closed (ch,conn) = () in
-      let callback = handler ~info in
-      let c = Server.make ~callback ~conn_closed () in
-      (* Listen for regular API calls *)
-      Server.create ~mode c in
-
+  run port sock_path config
     
-    let tcp_mode =
-      match config.Config.listenPort with
-      | Some port -> [`TCP (`Port port)]
-      | None -> []
-    in
-    
-    begin
-      match config.Config.listenPath with
-      | Some p ->
-        (* Remove the socket first, if it already exists *)
-        Lwt.catch (fun () -> Lwt_unix.unlink p) (fun _ -> Lwt.return ()) >>= fun () -> 
-        Lwt.return [ `Unix_domain_socket (`File p) ]            
-      | None ->
-        Lwt.return []
-    end >>= fun unix_mode ->
-
-    let threads = List.map service_http (tcp_mode @ unix_mode) in
-    
-    Lwt.join ((service_queues ())::threads) in
-
-  Lwt_main.run t
-
 open Cmdliner
 
 let info =
@@ -826,7 +851,7 @@ let cmd =
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.(pure run $ port $ sock_path $ config $ daemon),
+  Term.(pure main $ port $ sock_path $ config $ daemon),
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
