@@ -128,24 +128,7 @@ let shutdown copts (vg_name,_) =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     Client.shutdown ()
-    >>= fun () ->
-    (* wait for the daemon to disappear *)
-    let finished = ref false in
-    let rec wait () =
-      Lwt.catch
-        (fun () ->
-          Client.Host.all ()
-          >>= fun _ ->
-          stderr "Xenvmd is still alive: will sleep 5s and try again"
-          >>= fun () ->
-          Lwt_unix.sleep 5.
-        ) (fun _ ->
-          finished := true;
-          return ())
-      >>= fun () ->
-      if !finished then return () else wait () in
-    wait () in
-  Lwt_main.run t
+  in Lwt_main.run t
 
 let benchmark copts (vg_name,_) =
   let t =
