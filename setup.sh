@@ -31,7 +31,9 @@ fi
 cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
 mkdir -p /tmp/xenvm.d
 ./xenvm.native format $LOOP --vg djstest --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvmd.native --config ./test.xenvmd.conf --daemon
+./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log &
+
+sleep 2
 
 ./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/host1-socket --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 

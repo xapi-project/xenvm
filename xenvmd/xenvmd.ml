@@ -682,59 +682,18 @@ let handler ~info stoppers (ch,conn) req body =
   XenvmServer.process {Impl.stoppers} (Jsonrpc.call_of_string bodystr) >>= fun result ->
   Server.respond_string ~status:`OK ~body:(Jsonrpc.string_of_response result) ()
 
-let run port sock_path config daemon =
-  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
-  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
-  let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
-
-  (* Ideally we would bind our sockets before daemonizing to avoid racing
-     with the next command, but the conduit API doesn't let us pass a socket
-     in. Instead we daemonize in a fork()ed child, and in the parent we wait
-     for a connect() to succeed. *)
-  if Unix.fork () <> 0 then begin
-    let started = ref false in
-    let rec wait remaining =
-      if remaining = 0 then begin
-        Printf.fprintf stderr "Failed to communicate with xenvmd: check the configuration and try again.\n%!";
-        exit 1;
-      end;
-      begin match config.Config.listenPort with
-      | Some port ->
-        let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-        (try
-          Unix.connect s (Unix.ADDR_INET(Unix.inet_addr_of_string "127.0.0.1", port));
-          Unix.close s;
-          started := true
-        with _ ->
-          Unix.close s)
-      | None -> ()
-      end;
-      begin match config.Config.listenPath with
-      | Some path ->
-        let s = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-        (try
-          Unix.connect s (Unix.ADDR_UNIX path);
-          Unix.close s;
-          started := true
-        with e ->
-          Unix.close s)
-      | None -> ()
-      end;
-      if not !started then begin
-        Unix.sleep 1;
-        wait (remaining - 1)
-      end in
-    wait 30;
-    exit 0
-  end;
-  if daemon then Lwt_daemon.daemonize ();
-  ( match config.Config.listenPath with
-    | None ->
+let maybe_write_pid config =
+  match config.Config.listenPath with
+  | None ->
       (* don't need a lock file because we'll fail to bind to the port *)
-      ()
-    | Some path ->
-      info "Writing pidfile to %s" path;
-      Pidfile.write_pid (path ^ ".lock") );
+    ()
+  | Some path ->
+    info "Writing pidfile to %s" path;
+    Pidfile.write_pid (path ^ ".lock")
+
+let run port sock_path config =
+  maybe_write_pid config;
+  
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
     VolumeManager.vgopen ~devices:config.Config.devices
@@ -807,6 +766,58 @@ let run port sock_path config daemon =
 
   Lwt_main.run t
 
+let daemonize config =
+  (* Ideally we would bind our sockets before daemonizing to avoid racing
+     with the next command, but the conduit API doesn't let us pass a socket
+     in. Instead we daemonize in a fork()ed child, and in the parent we wait
+     for a connect() to succeed. *)
+  if Unix.fork () <> 0 then begin
+    let started = ref false in
+    let rec wait remaining =
+      if remaining = 0 then begin
+        Printf.fprintf stderr "Failed to communicate with xenvmd: check the configuration and try again.\n%!";
+        exit 1;
+      end;
+      begin match config.Config.listenPort with
+      | Some port ->
+        let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+        (try
+          Unix.connect s (Unix.ADDR_INET(Unix.inet_addr_of_string "127.0.0.1", port));
+          Unix.close s;
+          started := true
+        with _ ->
+          Unix.close s)
+      | None -> ()
+      end;
+      begin match config.Config.listenPath with
+      | Some path ->
+        let s = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+        (try
+          Unix.connect s (Unix.ADDR_UNIX path);
+          Unix.close s;
+          started := true
+        with e ->
+          Unix.close s)
+      | None -> ()
+      end;
+      if not !started then begin
+        Unix.sleep 1;
+        wait (remaining - 1)
+      end in
+    wait 30;
+    exit 0
+  end;
+  Lwt_daemon.daemonize ()
+  
+let main port sock_path config daemon =
+  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
+  let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
+
+  if daemon then daemonize config;
+
+  run port sock_path config
+    
 open Cmdliner
 
 let info =
@@ -840,7 +851,7 @@ let cmd =
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.(pure run $ port $ sock_path $ config $ daemon),
+  Term.(pure main $ port $ sock_path $ config $ daemon),
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
