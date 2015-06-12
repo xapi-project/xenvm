@@ -114,9 +114,10 @@ let host_list copts (vg_name,_) =
       [ "suspended"; string_of_bool q.suspended ]
     ] in
     let table_of_host h =
+      let connection_state = [ "state"; match h.connection_state with Some x -> Jsonrpc.to_string (rpc_of_connection_state x) | None -> "None" ] in
       let fromLVM = add_prefix "fromLVM" (table_of_queue h.fromLVM) in
       let toLVM = add_prefix "toLVM" (table_of_queue h.toLVM) in
-      fromLVM @ toLVM @ [ [ "freeExtents"; Int64.to_string h.freeExtents ] ] in
+      [ connection_state ] @ fromLVM @ toLVM @ [ [ "freeExtents"; Int64.to_string h.freeExtents ] ] in
     List.map (fun h -> add_prefix h.name (table_of_host h)) hosts
     |> List.concat
     |> print_table true [ "key"; "value" ]

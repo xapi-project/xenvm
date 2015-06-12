@@ -44,8 +44,15 @@ type queue = {
   suspended: bool;
 }
 
+type connection_state =
+  | Resuming_to_LVM
+  | Resending_free_blocks
+  | Connected
+  | Failed of string
+
 type host = {
   name: string;
+  connection_state: connection_state option;
   fromLVM: queue;
   toLVM: queue;
   freeExtents: int64;

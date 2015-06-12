@@ -269,13 +269,6 @@ module VolumeManager = struct
    
     let sexp_of_exn e = Sexplib.Sexp.Atom (Printexc.to_string e)
  
-    type connection_state =
-      | Resuming_to_LVM
-      | Resending_free_blocks
-      | Connected
-      | Failed of exn
-    with sexp_of
-  
     let host_connections = Hashtbl.create 7
 
     let connect name =
@@ -288,11 +281,11 @@ module VolumeManager = struct
       let try_again =
         if Hashtbl.mem host_connections name then begin
           match Hashtbl.find host_connections name with
-          | Failed exn ->
-            info "Connection to host %s has failed with %s: retrying" name (Printexc.to_string exn);
+          | Xenvm_interface.Failed msg ->
+            info "Connection to host %s has failed with %s: retrying" name msg;
             true
           | x ->
-            info "Connction to host %s in state %s" name (Sexplib.Sexp.to_string (sexp_of_connection_state x));
+            info "Connction to host %s in state %s" name (Jsonrpc.to_string (Xenvm_interface.rpc_of_connection_state x));
             false
         end else true in
 
@@ -301,7 +294,7 @@ module VolumeManager = struct
       end else begin
         match Vg_IO.find vg toLVM, Vg_IO.find vg fromLVM, Vg_IO.find vg freeLVM with
         | Some toLVM_id, Some fromLVM_id, Some freeLVM_id ->
-          Hashtbl.replace host_connections name Resuming_to_LVM;
+          Hashtbl.replace host_connections name Xenvm_interface.Resuming_to_LVM;
           let background_t () = 
             Vg_IO.Volume.connect toLVM_id
             >>= function
@@ -323,7 +316,7 @@ module VolumeManager = struct
             FromLVM.attach ~name ~disk ()
             >>= fun (initial_state, fromLVM_q) ->
             ( if initial_state = `Suspended then begin
-              Hashtbl.replace host_connections name Resending_free_blocks;
+              Hashtbl.replace host_connections name Xenvm_interface.Resending_free_blocks;
 
               debug "The FromLVM queue was already suspended: resending the free blocks";
               let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of freeLVM_id) in
@@ -351,15 +344,16 @@ module VolumeManager = struct
                 (fun () ->
                   background_t ()
                   >>= fun (toLVM_q, fromLVM_q, freeLVM_id) ->
-                  Hashtbl.replace host_connections name Connected;
+                  Hashtbl.replace host_connections name Xenvm_interface.Connected;
                   to_LVMs := (name, toLVM_q) :: !to_LVMs;
                   from_LVMs := (name, fromLVM_q) :: !from_LVMs;
                   let freeLVM_uuid = (Vg_IO.Volume.metadata_of freeLVM_id).Lvm.Lv.id in
                   free_LVs := (name, (freeLVM,freeLVM_uuid)) :: !free_LVs;
                   return ()
                 ) (fun e ->
-                  error "Connecting to %s failed with: %s" name (Printexc.to_string e);
-                  Hashtbl.replace host_connections name (Failed e);
+                  let msg = Printexc.to_string e in
+                  error "Connecting to %s failed with: %s" name msg;
+                  Hashtbl.replace host_connections name (Xenvm_interface.Failed msg);
                   return ())
             );
           return ()
@@ -399,7 +393,7 @@ module VolumeManager = struct
     let disconnect name =
       if Hashtbl.mem host_connections name then begin
         match Hashtbl.find host_connections name with
-        | Connected ->
+        | Xenvm_interface.Connected ->
           let to_lvm = List.assoc name !to_LVMs in
           debug "Suspending ToLVM queue for %s" name;
           ToLVM.suspend to_lvm
@@ -414,7 +408,7 @@ module VolumeManager = struct
           Hashtbl.remove host_connections name;
           return ()
         | x ->
-          fail (Xenvm_interface.HostStillConnecting (Sexplib.Sexp.to_string (sexp_of_connection_state x)))
+          fail (Xenvm_interface.(HostStillConnecting (Jsonrpc.to_string (rpc_of_connection_state x))))
       end else return ()
 
     let destroy name =
@@ -454,7 +448,11 @@ module VolumeManager = struct
               return (Lvm.Lv.size_in_extents lv)
             with Not_found -> return 0L
           ) >>= fun freeExtents ->
-          return { Xenvm_interface.name; fromLVM; toLVM; freeExtents }
+          let connection_state =
+            if Hashtbl.mem host_connections name
+            then Some (Hashtbl.find host_connections name)
+            else None in
+          return { Xenvm_interface.name; connection_state; fromLVM; toLVM; freeExtents }
         ) !to_LVMs
   end
 
