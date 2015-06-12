@@ -266,69 +266,101 @@ module VolumeManager = struct
           ) >>= fun () ->
           sync ()
 	end
-      
+   
+    let sexp_of_exn e = Sexplib.Sexp.Atom (Printexc.to_string e)
+ 
+    let host_connections = Hashtbl.create 7
+
     let connect name =
       myvg >>= fun vg ->
       info "Registering host %s" name;
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
       let freeLVM = freeLVM name in
-      if List.mem_assoc name !to_LVMs then begin
-        info "Host-specific volumes (%s, %s, %s) already connected" toLVM fromLVM freeLVM;
+
+      let try_again =
+        if Hashtbl.mem host_connections name then begin
+          match Hashtbl.find host_connections name with
+          | Xenvm_interface.Failed msg ->
+            info "Connection to host %s has failed with %s: retrying" name msg;
+            true
+          | x ->
+            info "Connction to host %s in state %s" name (Jsonrpc.to_string (Xenvm_interface.rpc_of_connection_state x));
+            false
+        end else true in
+
+      if not try_again then begin
         return ()
       end else begin
-        ( try
-            Lwt.return (Lvm.Vg.LVs.find_by_name freeLVM (Vg_IO.metadata_of vg).Lvm.Vg.lvs).Lvm.Lv.id
-          with _ ->
-            fail Xenvm_interface.HostNotCreated ) >>= fun freeLVMid ->
-        ( match Vg_IO.find vg toLVM with
-          | Some lv -> return lv
-          | None -> assert false ) >>= fun v ->
-        Vg_IO.Volume.connect v
-        >>= function
-        | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
-        | `Ok disk ->
-        ToLVM.attach ~name ~disk ()
-        >>= fun to_LVM ->
-        ToLVM.state to_LVM
-        >>= fun state ->
-        debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
-        ToLVM.resume to_LVM
-        >>= fun () ->
-        ( match Vg_IO.find vg fromLVM with
-          | Some lv -> return lv
-          | None -> assert false ) >>= fun v ->
-        Vg_IO.Volume.connect v
-        >>= function
-        | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
-        | `Ok disk ->
-        FromLVM.attach ~name ~disk ()
-        >>= fun (initial_state, from_LVM) ->
-        ( if initial_state = `Suspended then begin
-          debug "The FromLVM queue was already suspended: resending the free blocks";
-          ( match Vg_IO.find vg freeLVM with
-            | Some lv -> return lv
-            | None -> assert false ) >>= fun lv ->
-          let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of lv) in
-          FromLVM.push from_LVM allocation
-          >>= fun pos ->
-          FromLVM.advance from_LVM pos
-          >>= fun () ->
-          debug "Free blocks pushed";
+        match Vg_IO.find vg toLVM, Vg_IO.find vg fromLVM, Vg_IO.find vg freeLVM with
+        | Some toLVM_id, Some fromLVM_id, Some freeLVM_id ->
+          Hashtbl.replace host_connections name Xenvm_interface.Resuming_to_LVM;
+          let background_t () = 
+            Vg_IO.Volume.connect toLVM_id
+            >>= function
+            | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
+            | `Ok disk ->
+            ToLVM.attach ~name ~disk ()
+            >>= fun toLVM_q ->
+            ToLVM.state toLVM_q
+            >>= fun state ->
+            debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+            ToLVM.resume toLVM_q
+            >>= fun () ->
+
+
+            Vg_IO.Volume.connect fromLVM_id
+            >>= function
+            | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
+            | `Ok disk ->
+            FromLVM.attach ~name ~disk ()
+            >>= fun (initial_state, fromLVM_q) ->
+            ( if initial_state = `Suspended then begin
+              Hashtbl.replace host_connections name Xenvm_interface.Resending_free_blocks;
+
+              debug "The FromLVM queue was already suspended: resending the free blocks";
+              let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of freeLVM_id) in
+              FromLVM.push fromLVM_q allocation
+              >>= fun pos ->
+              FromLVM.advance fromLVM_q pos
+              >>= fun () ->
+              debug "Free blocks pushed";
+              return ()
+            end else begin
+              debug "The FromLVM queue was running: no need to resend the free blocks";
+              return ()
+            end )
+            >>= fun () ->
+            debug "querying state";
+            FromLVM.state fromLVM_q
+            >>= fun state ->
+            debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+            return (toLVM_q, fromLVM_q, freeLVM_id) in
+
+          (* Run the blocking stuff in the background *)
+          Lwt.async
+            (fun () ->
+              Lwt.catch
+                (fun () ->
+                  background_t ()
+                  >>= fun (toLVM_q, fromLVM_q, freeLVM_id) ->
+                  Hashtbl.replace host_connections name Xenvm_interface.Connected;
+                  to_LVMs := (name, toLVM_q) :: !to_LVMs;
+                  from_LVMs := (name, fromLVM_q) :: !from_LVMs;
+                  let freeLVM_uuid = (Vg_IO.Volume.metadata_of freeLVM_id).Lvm.Lv.id in
+                  free_LVs := (name, (freeLVM,freeLVM_uuid)) :: !free_LVs;
+                  return ()
+                ) (fun e ->
+                  let msg = Printexc.to_string e in
+                  error "Connecting to %s failed with: %s" name msg;
+                  Hashtbl.replace host_connections name (Xenvm_interface.Failed msg);
+                  return ())
+            );
           return ()
-        end else begin
-          debug "The FromLVM queue was running: no need to resend the free blocks";
-          return ()
-        end )
-        >>= fun () ->
-        debug "querying state";
-        FromLVM.state from_LVM
-        >>= fun state ->
-        debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
-        to_LVMs := (name, to_LVM) :: !to_LVMs;
-        from_LVMs := (name, from_LVM) :: !from_LVMs;
-        free_LVs := (name, (freeLVM,freeLVMid)) :: !free_LVs;
-        return ()
+      | _, _, _ ->
+          info "At least one of host %s's volumes does not exist" name;
+          Hashtbl.remove host_connections name;
+          fail Xenvm_interface.HostNotCreated
       end
 
     (* Hold this mutex when actively flushing from the ToLVM queues *)
@@ -359,21 +391,25 @@ module VolumeManager = struct
       end
   
     let disconnect name =
-      if not(List.mem_assoc name !to_LVMs)
-      then return () (* already disconnected *)
-      else
-        let to_lvm = List.assoc name !to_LVMs in
-        debug "Suspending ToLVM queue for %s" name;
-        ToLVM.suspend to_lvm
-        >>= fun () ->
-        (* There may still be updates in the ToLVM queue *)
-        Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
-        >>= fun () ->
-        debug "ToLVM queue for %s has been suspended and flushed" name;
-        to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
-        from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
-        free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
-        return ()
+      if Hashtbl.mem host_connections name then begin
+        match Hashtbl.find host_connections name with
+        | Xenvm_interface.Connected ->
+          let to_lvm = List.assoc name !to_LVMs in
+          debug "Suspending ToLVM queue for %s" name;
+          ToLVM.suspend to_lvm
+          >>= fun () ->
+          (* There may still be updates in the ToLVM queue *)
+          Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
+          >>= fun () ->
+          debug "ToLVM queue for %s has been suspended and flushed" name;
+          to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
+          from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
+          free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
+          Hashtbl.remove host_connections name;
+          return ()
+        | x ->
+          fail (Xenvm_interface.(HostStillConnecting (Jsonrpc.to_string (rpc_of_connection_state x))))
+      end else return ()
 
     let destroy name =
       disconnect name
@@ -412,7 +448,11 @@ module VolumeManager = struct
               return (Lvm.Lv.size_in_extents lv)
             with Not_found -> return 0L
           ) >>= fun freeExtents ->
-          return { Xenvm_interface.name; fromLVM; toLVM; freeExtents }
+          let connection_state =
+            if Hashtbl.mem host_connections name
+            then Some (Hashtbl.find host_connections name)
+            else None in
+          return { Xenvm_interface.name; connection_state; fromLVM; toLVM; freeExtents }
         ) !to_LVMs
   end
 
