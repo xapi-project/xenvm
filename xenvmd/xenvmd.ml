@@ -302,7 +302,7 @@ module VolumeManager = struct
         match Vg_IO.find vg toLVM, Vg_IO.find vg fromLVM, Vg_IO.find vg freeLVM with
         | Some toLVM_id, Some fromLVM_id, Some freeLVM_id ->
           Hashtbl.replace host_connections name Resuming_to_LVM;
-          let background_t = 
+          let background_t () = 
             Vg_IO.Volume.connect toLVM_id
             >>= function
             | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
@@ -345,7 +345,7 @@ module VolumeManager = struct
             return (toLVM_q, fromLVM_q, freeLVM_id) in
           Lwt.catch
             (fun () ->
-              background_t
+              background_t ()
               >>= fun (toLVM_q, fromLVM_q, freeLVM_id) ->
               Hashtbl.replace host_connections name Connected;
               to_LVMs := (name, toLVM_q) :: !to_LVMs;
@@ -391,21 +391,25 @@ module VolumeManager = struct
       end
   
     let disconnect name =
-      if not(List.mem_assoc name !to_LVMs)
-      then return () (* already disconnected *)
-      else
-        let to_lvm = List.assoc name !to_LVMs in
-        debug "Suspending ToLVM queue for %s" name;
-        ToLVM.suspend to_lvm
-        >>= fun () ->
-        (* There may still be updates in the ToLVM queue *)
-        Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
-        >>= fun () ->
-        debug "ToLVM queue for %s has been suspended and flushed" name;
-        to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
-        from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
-        free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
-        return ()
+      if Hashtbl.mem host_connections name then begin
+        match Hashtbl.find host_connections name with
+        | Connected ->
+          let to_lvm = List.assoc name !to_LVMs in
+          debug "Suspending ToLVM queue for %s" name;
+          ToLVM.suspend to_lvm
+          >>= fun () ->
+          (* There may still be updates in the ToLVM queue *)
+          Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
+          >>= fun () ->
+          debug "ToLVM queue for %s has been suspended and flushed" name;
+          to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
+          from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
+          free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
+          Hashtbl.remove host_connections name;
+          return ()
+        | x ->
+          fail (Xenvm_interface.HostStillConnecting (Sexplib.Sexp.to_string (sexp_of_connection_state x)))
+      end else return ()
 
     let destroy name =
       disconnect name
