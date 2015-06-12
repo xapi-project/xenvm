@@ -343,20 +343,26 @@ module VolumeManager = struct
             >>= fun state ->
             debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
             return (toLVM_q, fromLVM_q, freeLVM_id) in
-          Lwt.catch
+
+          (* Run the blocking stuff in the background *)
+          Lwt.async
             (fun () ->
-              background_t ()
-              >>= fun (toLVM_q, fromLVM_q, freeLVM_id) ->
-              Hashtbl.replace host_connections name Connected;
-              to_LVMs := (name, toLVM_q) :: !to_LVMs;
-              from_LVMs := (name, fromLVM_q) :: !from_LVMs;
-              let freeLVM_uuid = (Vg_IO.Volume.metadata_of freeLVM_id).Lvm.Lv.id in
-              free_LVs := (name, (freeLVM,freeLVM_uuid)) :: !free_LVs;
-              return ()
-            ) (fun e ->
-              error "Connecting to %s failed with: %s" name (Printexc.to_string e);
-              Hashtbl.replace host_connections name (Failed e);
-              return ())
+              Lwt.catch
+                (fun () ->
+                  background_t ()
+                  >>= fun (toLVM_q, fromLVM_q, freeLVM_id) ->
+                  Hashtbl.replace host_connections name Connected;
+                  to_LVMs := (name, toLVM_q) :: !to_LVMs;
+                  from_LVMs := (name, fromLVM_q) :: !from_LVMs;
+                  let freeLVM_uuid = (Vg_IO.Volume.metadata_of freeLVM_id).Lvm.Lv.id in
+                  free_LVs := (name, (freeLVM,freeLVM_uuid)) :: !free_LVs;
+                  return ()
+                ) (fun e ->
+                  error "Connecting to %s failed with: %s" name (Printexc.to_string e);
+                  Hashtbl.replace host_connections name (Failed e);
+                  return ())
+            );
+          return ()
       | _, _, _ ->
           info "At least one of host %s's volumes does not exist" name;
           Hashtbl.remove host_connections name;
