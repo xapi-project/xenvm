@@ -47,6 +47,8 @@ module ToLVM = struct
     fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~queue:(name ^ " ToLVM Consumer") ~client:"xenvmd" ~disk ())
   let state t =
     fatal_error "querying ToLVM state" (R.Consumer.state t)
+  let debug_info t =
+    fatal_error "querying ToLVM debug_info" (R.Consumer.debug_info t)
   let rec suspend t =
     R.Consumer.suspend t
     >>= function
@@ -118,6 +120,8 @@ module FromLVM = struct
     >>= fun x ->
     return (!initial_state, x)
   let state t = fatal_error "FromLVM.state" (R.Producer.state t)
+  let debug_info t =
+    fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
   | `Error `Retry ->
@@ -435,13 +439,17 @@ module VolumeManager = struct
           ( ToLVM.state t >>= function
             | `Suspended -> return true
             | `Running -> return false ) >>= fun suspended ->
-          let toLVM = { Xenvm_interface.lv; suspended } in
+          ToLVM.debug_info t
+          >>= fun debug_info ->
+          let toLVM = { Xenvm_interface.lv; suspended; debug_info } in
           let lv = fromLVM name in
           let t = List.assoc name !from_LVMs in
           ( FromLVM.state t >>= function
             | `Suspended -> return true
             | `Running -> return false ) >>= fun suspended ->
-          let fromLVM = { Xenvm_interface.lv; suspended } in
+          FromLVM.debug_info t
+          >>= fun debug_info ->
+          let fromLVM = { Xenvm_interface.lv; suspended; debug_info } in
           read (fun vg ->
             try
               let lv = Lvm.Vg.LVs.find_by_name (freeLVM name) vg.Lvm.Vg.lvs in

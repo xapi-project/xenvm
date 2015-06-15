@@ -112,7 +112,7 @@ let host_list copts (vg_name,_) =
     let table_of_queue q = [
       [ "lv"; q.lv ];
       [ "suspended"; string_of_bool q.suspended ]
-    ] in
+    ] @ (List.map (fun (k, v) -> [ k; v ]) q.debug_info) in
     let table_of_host h =
       let connection_state = [ "state"; match h.connection_state with Some x -> Jsonrpc.to_string (rpc_of_connection_state x) | None -> "None" ] in
       let fromLVM = add_prefix "fromLVM" (table_of_queue h.fromLVM) in
