@@ -384,7 +384,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     ) >>= fun device ->
 
     (* We must replay the journal before resynchronising free blocks *)
-    J.start device perform
+    J.start ~client:"xenvm-local-allocator" ~name:"local allocator journal" device perform
     >>|= fun j ->
 
     FreePool.start config vg

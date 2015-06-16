@@ -538,7 +538,7 @@ module FreePool = struct
       | `Error _ -> fatal_error_t ("open " ^ name)
       | `Ok x -> return x )
     >>= fun device ->
-    J.start device perform
+    J.start ~client:"xenvmd" ~name:"allocation journal" device perform
     >>|= fun j' ->
     journal := Some j';
     return ()
