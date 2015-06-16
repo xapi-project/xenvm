@@ -55,7 +55,6 @@ module ToLVM = struct
     | `Error (`Msg msg) -> fatal_error_t msg
     | `Error `Suspended -> return ()
     | `Error `Retry ->
-      debug "ToLVM.suspend got `Retry; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       suspend t
@@ -65,7 +64,6 @@ module ToLVM = struct
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
         | `Ok `Running ->
-          debug "ToLVM.suspend got `Running; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -76,7 +74,6 @@ module ToLVM = struct
     >>= function
     | `Error (`Msg msg) -> fatal_error_t msg
     | `Error `Retry ->
-      debug "ToLVM.resume got `Retry; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       resume t
@@ -87,7 +84,6 @@ module ToLVM = struct
         >>= function
         | `Error _ -> fatal_error_t "reading state of ToLVM"
         | `Ok `Suspended ->
-          debug "ToLVM.resume got `Suspended; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -110,7 +106,6 @@ module FromLVM = struct
     let initial_state = ref `Running in
     let rec loop () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
       | `Error `Suspended ->
-        debug "FromLVM.attach got `Suspended; sleeping";
         Lwt_unix.sleep 5.
         >>= fun () ->
         initial_state := `Suspended;
@@ -125,12 +120,10 @@ module FromLVM = struct
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
   | `Error `Retry ->
-    debug "FromLVM.push got `Retry; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
   | `Error `Suspended ->
-    debug "FromLVM.push got `Suspended; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -578,7 +571,6 @@ module FreePool = struct
             FromLVM.state from_lvm
             >>= function
             | `Suspended ->
-              debug "FromLVM.state got `Suspended; sleeping";
               Lwt_unix.sleep 5.
               >>= fun () ->
               wait ()
@@ -761,7 +753,6 @@ let run port sock_path config =
       VolumeManager.flush_all ()
       >>= fun () ->
 
-      debug "sleeping for 5s";
       Lwt_unix.sleep 5.
       >>= fun () ->
       service_queues () in
