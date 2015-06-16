@@ -20,12 +20,6 @@ open Lwt
 (* Mock kernel devices so we can run as a regular user *)
 let use_mock = ref true
 
-module Log = struct
-  let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
-  let info  fmt = Printf.ksprintf (fun s -> print_endline s) fmt
-  let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
-end
-
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep

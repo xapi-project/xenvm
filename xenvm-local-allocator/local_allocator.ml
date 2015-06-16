@@ -28,7 +28,6 @@ let rec try_forever msg f =
   >>= function
   | `Ok x -> return (`Ok x)
   | `Error `Retry ->
-    debug "%s: retrying after 5s" msg;
     Lwt_unix.sleep 5.
     >>= fun () ->
     try_forever msg f
@@ -85,7 +84,6 @@ module FromLVM = struct
         >>= function
         | `Suspended -> return ()
         | `Running ->
-          debug "FromLVM.suspend got `Running; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait () in
@@ -99,7 +97,6 @@ module FromLVM = struct
         fatal_error "reading state of FromLVM" (R.Consumer.state t)
         >>= function
         | `Suspended ->
-          debug "FromLVM.resume got `Suspended; sleeping";
           Lwt_unix.sleep 5.
           >>= fun () ->
           wait ()
@@ -122,7 +119,6 @@ module ToLVM = struct
     >>= function
     | `Ok x -> return x
     | _ ->
-      debug "ToLVM.attach got `Error; sleeping";
       Lwt_unix.sleep 5.
       >>= fun () ->
       attach ~disk ()
@@ -130,7 +126,6 @@ module ToLVM = struct
     fatal_error "querying ToLVM state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Retry | `Suspended) ->
-    debug "ToLVM.push got `Error; sleeping";
     Lwt_unix.sleep 5.
     >>= fun () ->
     push t item
@@ -216,7 +211,6 @@ module FreePool = struct
         >>= fun (pos, ts) ->
         let open FreeAllocation in
         ( if ts = [] then begin
-            debug "No free blocks, sleeping for 5s";
             Lwt_unix.sleep 5.
           end else return ()
         ) >>= fun () ->
@@ -390,7 +384,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     ) >>= fun device ->
 
     (* We must replay the journal before resynchronising free blocks *)
-    J.start device perform
+    J.start ~client:"xenvm-local-allocator" ~name:"local allocator journal" device perform
     >>|= fun j ->
 
     FreePool.start config vg

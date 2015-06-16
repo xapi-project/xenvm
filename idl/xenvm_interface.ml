@@ -42,6 +42,7 @@ external shutdown : unit -> int = ""
 type queue = {
   lv: string;
   suspended: bool;
+  debug_info: (string * string) list;
 }
 
 type connection_state =
