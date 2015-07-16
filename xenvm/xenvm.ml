@@ -79,6 +79,30 @@ let format config name filenames =
       return () in
   Lwt_main.run t
 
+let dump config filenames =
+    let t =
+      let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
+      let open Xenvm_interface in
+      Lwt_list.map_s
+        (fun filename ->
+          Block.connect filename
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
+          | `Ok x -> return x
+        ) filenames
+      >>= fun blocks ->
+      Vg_IO.connect blocks `RO
+      >>|= fun vg ->
+      let md = Vg_IO.metadata_of vg in
+      let buf = Cstruct.create (64 * 1024 * 1024) in
+      let next = Vg.marshal md buf in
+      let buf = Cstruct.(sub buf 0 ((len buf) - (len next))) in
+      let txt = Cstruct.to_string buf in
+      output_string Pervasives.stdout txt;
+      output_string Pervasives.stdout "\n";
+      return () in
+  Lwt_main.run t
+
 let host_create copts (vg_name,_) host =
   let t =
     get_vg_info_t copts vg_name >>= fun info ->
@@ -213,6 +237,15 @@ let size =
   let doc = "Size of the LV in megs" in
   Arg.(value & opt int64 4L & info ["size"] ~docv:"SIZE" ~doc)
 
+let dump_cmd =
+  let doc = "Dump the metadata in LVM format to stdout" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Prints the volume group metadata to stdout in LVM format. Note this will not include any updates which are still pending in the redo-log."
+  ] in
+  Term.(pure dump $ copts_t $ filenames),
+  Term.info "dump" ~sdocs:copts_sect ~doc ~man
+
 let format_cmd =
   let doc = "Format the specified file as a VG" in
   let man = [
@@ -292,6 +325,7 @@ let cmds = [
   Lvresize.lvresize_cmd;
   Lvresize.lvextend_cmd;
   format_cmd;
+  dump_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
