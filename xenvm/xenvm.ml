@@ -234,7 +234,7 @@ let benchmark copts (vg_name,_) volumes threads =
     let oc = open_out "benchmark.gp" in
     Printf.fprintf oc "set xlabel \"LV number\"\n";
     Printf.fprintf oc "set ylabel \"Time/seconds\"\n";
-    Printf.fprintf oc "set title \"Creating and then destroying 1000 LVs\"\n";
+    Printf.fprintf oc "set title \"Creating and then destroying %d LVs\"\n" volumes;
     Printf.fprintf oc "plot \"benchmark.dat\" with points\n";
     close_out oc;
     return () in
