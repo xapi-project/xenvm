@@ -230,6 +230,13 @@ let benchmark copts (vg_name,_) volumes threads =
     List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" (volumes + n) t) (List.rev !times);
     Printf.fprintf oc "# %d destroys in %.1f s\n" volumes time;
     Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int volumes /. time);
+    close_out oc;
+    let oc = open_out "benchmark.gp" in
+    Printf.fprintf oc "set xlabel \"LV number\"\n";
+    Printf.fprintf oc "set ylabel \"Time/seconds\"\n";
+    Printf.fprintf oc "set title \"Creating and then destroying 1000 LVs\"\n";
+    Printf.fprintf oc "plot \"benchmark.dat\" with points\n";
+    close_out oc;
     return () in
   Lwt_main.run t
 
