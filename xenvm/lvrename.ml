@@ -3,6 +3,21 @@
 open Cmdliner
 open Lwt
 
+let retry fn =
+  let rec inner n =
+    match n with
+    | 0 -> return (fn ())
+    | n ->
+      try
+        return (fn ())
+      with e ->
+        Printf.fprintf stderr "Caught exception: %s. Retrying.\n%!" (Printexc.to_string e);
+        Lwt_unix.sleep 1.0 >>=
+        fun () ->
+        inner (n-1)
+  in
+  inner 5
+
 let lvrename copts (vg_name,lv_opt) newname physical_device =
   let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
@@ -28,7 +43,8 @@ let lvrename copts (vg_name,lv_opt) newname physical_device =
     let all = Devmapper.ls () in
     let old_name = Mapper.name_of vg lv in
     if List.mem old_name all then begin
-      Devmapper.remove old_name;
+      retry (fun () -> Devmapper.remove old_name)
+      >>= fun () ->
       Mapper.read [ local_device ]
       >>= fun devices ->
       let targets = Mapper.to_targets devices vg lv in
