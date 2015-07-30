@@ -291,6 +291,11 @@ module VolumeManager = struct
       end else begin
         match Vg_IO.find vg toLVM, Vg_IO.find vg fromLVM, Vg_IO.find vg freeLVM with
         | Some toLVM_id, Some fromLVM_id, Some freeLVM_id ->
+          (* Persist at this point that we're going to connect this host *)
+          (* All of the following logic is idempotent *)
+          write (fun vg ->
+              Lvm.Vg.add_tag vg toLVM "xenvm_connected"
+            ) >>= fun () -> 
           Hashtbl.replace host_connections name Xenvm_interface.Resuming_to_LVM;
           let background_t () = 
             Vg_IO.Volume.connect toLVM_id
@@ -304,7 +309,6 @@ module VolumeManager = struct
             debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
             ToLVM.resume toLVM_q
             >>= fun () ->
-
 
             Vg_IO.Volume.connect fromLVM_id
             >>= function
@@ -394,7 +398,7 @@ module VolumeManager = struct
           let to_lvm = List.assoc name !to_LVMs in
           debug "Suspending ToLVM queue for %s" name;
           ToLVM.suspend to_lvm
-          >>= fun () ->
+          >>= fun () -> 
           (* There may still be updates in the ToLVM queue *)
           Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
           >>= fun () ->
@@ -402,6 +406,10 @@ module VolumeManager = struct
           to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
           from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
           free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
+          let toLVM = toLVM name in
+          write (fun vg ->
+              Lvm.Vg.remove_tag vg toLVM "xenvm_connected"
+            ) >>= fun () ->
           Hashtbl.remove host_connections name;
           return ()
         | x ->
