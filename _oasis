@@ -30,7 +30,7 @@ Executable "xenvmd"
   MainIs:             xenvmd.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring
+  BuildDepends:       lwt, lwt.unix, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, cstruct, oUnit, io-page, io-page.unix, stringext, cmdliner, sexplib.syntax, xenvmidl, lvm, lvm.mapper, shared-block-ring
 
 Executable "xenvm"
   ByteOpt:            -warn-error +a
