@@ -31,6 +31,8 @@ let fatal_error_t msg =
   error "%s" msg;
   fail (Failure msg)
 
+let connected_tag = "xenvm_connected"
+
 let fatal_error msg m = m >>= function
   | `Error (`Msg x) -> fatal_error_t (msg ^ ": " ^ x)
   | `Error `Suspended -> fatal_error_t (msg ^ ": queue is suspended")
@@ -294,7 +296,7 @@ module VolumeManager = struct
           (* Persist at this point that we're going to connect this host *)
           (* All of the following logic is idempotent *)
           write (fun vg ->
-              Lvm.Vg.add_tag vg toLVM "xenvm_connected"
+              Lvm.Vg.add_tag vg toLVM connected_tag
             ) >>= fun () -> 
           Hashtbl.replace host_connections name Xenvm_interface.Resuming_to_LVM;
           let background_t () = 
@@ -408,7 +410,7 @@ module VolumeManager = struct
           free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
           let toLVM = toLVM name in
           write (fun vg ->
-              Lvm.Vg.remove_tag vg toLVM "xenvm_connected"
+              Lvm.Vg.remove_tag vg toLVM connected_tag
             ) >>= fun () ->
           Hashtbl.remove host_connections name;
           return ()
@@ -463,6 +465,30 @@ module VolumeManager = struct
             else None in
           return { Xenvm_interface.name; connection_state; fromLVM; toLVM; freeExtents }
         ) !to_LVMs
+
+    let reconnect_all () =
+      read (fun vg ->
+          debug "Reconnecting";
+          Lvm.Vg.LVs.fold (fun key v acc ->
+              debug "Checking LV: %s" v.Lvm.Lv.name;
+              let name = v.Lvm.Lv.name in
+              match Stringext.split name ~on:'-' |> List.rev with
+              | "toLVM" :: host_bits ->
+                let host = String.concat "-" (List.rev host_bits) in
+                debug "This is a 'toLVM' LV";
+                (* It's a toLVM - check to see whether it has the 'connected' flag *)
+                let tags = List.map Lvm.Name.Tag.to_string v.Lvm.Lv.tags in
+                let connected = List.mem connected_tag tags in
+                debug "host=%s connected=%b" host connected;
+                (host,connected)::acc
+              | e ->
+                debug "got list: %s" (String.concat "," e);
+                acc)
+            vg.Lvm.Vg.lvs [] |> Lwt.return
+        ) >>= fun host_states ->
+      Lwt_list.iter_s (fun (host, connected) ->
+          if connected then connect host else disconnect host) host_states
+        
   end
 
   let flush_all () =
@@ -748,7 +774,9 @@ let run port sock_path config =
     >>= fun () ->
     FreePool.start Xenvm_interface._journal_name
     >>= fun () ->
-
+    VolumeManager.Host.reconnect_all ()
+    >>= fun () -> 
+    
     let rec service_queues () =
       (* 0. Have any local allocators restarted? *)
       FreePool.resend_free_volumes config
