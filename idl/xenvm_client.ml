@@ -41,8 +41,11 @@ module Rpc = struct
            return (`Error e))
         >>= function
         | `Ok (resp, body) ->
-          Cohttp_lwt_body.to_string body >>= fun body ->
-          return (Jsonrpc.response_of_string body)
+          if Cohttp.(Code.is_success (Code.code_of_status resp.Response.status)) then
+            Cohttp_lwt_body.to_string body >>= fun body ->
+            return (Jsonrpc.response_of_string body)
+          else
+            fail (Failure "Error talking to xenvmd")
         | `Retry e ->
           let attempts_remaining = max 0 (attempts_remaining - 1) in
           (if attempts_remaining > 0 then Lwt_unix.sleep 1. else return ())
