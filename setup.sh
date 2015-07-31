@@ -76,9 +76,21 @@ kill `cat /tmp/xenvmd.lock`
 sleep 10
 ./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out2
 diff -u host-list.out host-list.out2 
-  
+
+# simulate a host failure and uncooperative disconnect
+kill `cat /tmp/host2-socket.lock`
+./xenvm.native host-disconnect --uncooperative /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
+# check we've lost a host in the host-list
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out3
+grep -v host2 host-list.out2 | diff -u - host-list.out3
+# check it doesn't reconnect after a restart
+kill `cat /tmp/xenvmd.lock`
+./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log.3 &
+sleep 10
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out4
+diff -u host-list.out3 host-list.out4
+
 # destroy hosts
-./xenvm.native host-disconnect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-destroy /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-destroy /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
