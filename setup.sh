@@ -69,13 +69,19 @@ cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HO
 sleep 30
 ./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
+# Let's check that xenvmd retains its list of connected hosts over a restart
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG > host-list.out
+kill `cat /tmp/xenvmd.lock`
+./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log.2 &
+sleep 10
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG > host-list.out2
+diff host-list.out host-list.out2 
+  
 # destroy hosts
 ./xenvm.native host-disconnect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-destroy /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
 ./xenvm.native host-destroy /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 #shutdown
 ./xenvm.native lvchange -an /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG || true
