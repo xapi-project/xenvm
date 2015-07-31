@@ -478,16 +478,16 @@ module VolumeManager = struct
                 debug "This is a 'toLVM' LV";
                 (* It's a toLVM - check to see whether it has the 'connected' flag *)
                 let tags = List.map Lvm.Name.Tag.to_string v.Lvm.Lv.tags in
-                let connected = List.mem connected_tag tags in
-                debug "host=%s connected=%b" host connected;
-                (host,connected)::acc
+                let was_connected = List.mem connected_tag tags in
+                debug "host=%s was_connected=%b" host was_connected;
+                (host,was_connected)::acc
               | e ->
                 debug "got list: %s" (String.concat "," e);
                 acc)
             vg.Lvm.Vg.lvs [] |> Lwt.return
         ) >>= fun host_states ->
-      Lwt_list.iter_s (fun (host, connected) ->
-          if connected then connect host else disconnect host) host_states
+      Lwt_list.iter_s (fun (host, was_connected) ->
+          if was_connected then connect host else disconnect host) host_states
         
   end
 
