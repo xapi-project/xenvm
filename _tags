@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: ff372a3fb61a268f33926cbcbfd6c5ab)
+# DO NOT EDIT (digest: 2190fe0a8a00a6b8cc32c1b1dff4f3d1)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -52,6 +52,7 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: pkg_sexplib
 <xenvmd/xenvmd.{native,byte}>: pkg_sexplib.syntax
 <xenvmd/xenvmd.{native,byte}>: pkg_shared-block-ring
+<xenvmd/xenvmd.{native,byte}>: pkg_stringext
 <xenvmd/xenvmd.{native,byte}>: pkg_threads
 <xenvmd/xenvmd.{native,byte}>: use_xenvmidl
 <xenvmd/*.ml{,i,y}>: pkg_cmdliner
@@ -72,6 +73,7 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: pkg_sexplib
 <xenvmd/*.ml{,i,y}>: pkg_sexplib.syntax
 <xenvmd/*.ml{,i,y}>: pkg_shared-block-ring
+<xenvmd/*.ml{,i,y}>: pkg_stringext
 <xenvmd/*.ml{,i,y}>: pkg_threads
 <xenvmd/*.ml{,i,y}>: use_xenvmidl
 <xenvmd/xenvmd.{native,byte}>: custom
