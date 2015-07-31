@@ -69,7 +69,7 @@ module Host = struct
   (** [connect host] connects to existing metadata volumes and
       process them. *)
 
-  external disconnect: name:string -> unit = ""
+  external disconnect: cooperative:bool -> name:string -> unit = ""
   (** [disconnect host] disconnects from metadata volumes and
       stops processing them. *)
 

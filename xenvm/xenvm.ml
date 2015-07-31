@@ -91,11 +91,11 @@ let host_connect copts (vg_name,_) host =
     set_uri copts info;
     Client.Host.connect host in
   Lwt_main.run t
-let host_disconnect copts (vg_name,_) host =
+let host_disconnect copts (vg_name,_) uncooperative host =
   let t =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    Client.Host.disconnect host in
+    Client.Host.disconnect ~cooperative:(not uncooperative) ~name:host in
   Lwt_main.run t 
 let host_destroy copts (vg_name,_) host =
   let t =
@@ -232,12 +232,15 @@ let host_connect_cmd =
   Term.info "host-connect" ~sdocs:copts_sect ~doc ~man
 
 let host_disconnect_cmd =
-  let doc = "Disconnect to a host" in
+  let uncooperative_flag =
+    let doc = "Perform an uncooperative disconnect (if the host is dead)" in
+    Arg.(value & flag & info ["uncooperative"] ~doc) in
+  let doc = "Disconnect from a host" in
   let man = [
     `S "DESCRIPTION";
-    `P "Dergister a host with the daemon. The daemon will suspend the block queues and stop listening to requests.";
+    `P "Dergister a host with the daemon. The daemon will suspend the block queues (unless the --uncooperative flag is used) and stop listening to requests.";
   ] in
-  Term.(pure host_disconnect $ copts_t $ name_arg $ hostname),
+  Term.(pure host_disconnect $ copts_t $ name_arg $ uncooperative_flag $ hostname),
   Term.info "host-disconnect" ~sdocs:copts_sect ~doc ~man
 
 let host_create_cmd =

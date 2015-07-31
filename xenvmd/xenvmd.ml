@@ -393,18 +393,20 @@ module VolumeManager = struct
         ToLVM.advance to_lvm pos
       end
   
-    let disconnect name =
+    let disconnect ~cooperative name =
       if Hashtbl.mem host_connections name then begin
         match Hashtbl.find host_connections name with
         | Xenvm_interface.Connected ->
           let to_lvm = List.assoc name !to_LVMs in
-          debug "Suspending ToLVM queue for %s" name;
-          ToLVM.suspend to_lvm
-          >>= fun () -> 
+          ( if cooperative then begin
+              debug "Cooperative disconnect: suspending ToLVM queue for %s" name;
+              ToLVM.suspend to_lvm
+            end else return ()
+          ) >>= fun () ->
           (* There may still be updates in the ToLVM queue *)
+          debug "Flushing ToLVM queue for %s" name;
           Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
           >>= fun () ->
-          debug "ToLVM queue for %s has been suspended and flushed" name;
           to_LVMs := List.filter (fun (n, _) -> n <> name) !to_LVMs;
           from_LVMs := List.filter (fun (n, _) -> n <> name) !from_LVMs;
           free_LVs := List.filter (fun (n, _) -> n <> name) !free_LVs;
@@ -419,7 +421,7 @@ module VolumeManager = struct
       end else return ()
 
     let destroy name =
-      disconnect name
+      disconnect ~cooperative:false name
       >>= fun () ->
       let toLVM = toLVM name in
       let fromLVM = fromLVM name in
@@ -487,7 +489,7 @@ module VolumeManager = struct
             vg.Lvm.Vg.lvs [] |> Lwt.return
         ) >>= fun host_states ->
       Lwt_list.iter_s (fun (host, was_connected) ->
-          if was_connected then connect host else disconnect host) host_states
+          if was_connected then connect host else disconnect ~cooperative:false host) host_states
         
   end
 
@@ -503,7 +505,7 @@ module VolumeManager = struct
   let shutdown () =
     Lwt_list.iter_s
       (fun (host, _) ->
-        Host.disconnect host
+        Host.disconnect ~cooperative:true host
       ) !from_LVMs
     >>= fun () ->
     sync ()
@@ -740,7 +742,7 @@ module Impl = struct
   module Host = struct
     let create context ~name = VolumeManager.Host.create name
     let connect context ~name = VolumeManager.Host.connect name
-    let disconnect context ~name = VolumeManager.Host.disconnect name
+    let disconnect context ~cooperative ~name = VolumeManager.Host.disconnect ~cooperative name
     let destroy context ~name = VolumeManager.Host.destroy name
     let all context () = VolumeManager.Host.all ()
   end
