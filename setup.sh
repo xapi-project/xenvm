@@ -70,12 +70,12 @@ sleep 30
 ./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
 
 # Let's check that xenvmd retains its list of connected hosts over a restart
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG > host-list.out
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out
 kill `cat /tmp/xenvmd.lock`
 ./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log.2 &
 sleep 10
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG > host-list.out2
-diff host-list.out host-list.out2 
+./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out2
+diff -u host-list.out host-list.out2 
   
 # destroy hosts
 ./xenvm.native host-disconnect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
