@@ -22,4 +22,4 @@ if [ "$USE_MOCK" -eq "0" ]; then
   losetup -d $LOOP
 fi
 
-rm -f localJournal bigdisk *.out*  djstest-* dm-mock
+rm -f localJournal bigdisk *.out*  djstest-* dm-mock xenvmd.log*

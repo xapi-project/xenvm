@@ -249,8 +249,9 @@ let physical_device_arg_required =
 let parse_name name_arg =
   let comps = Stringext.split name_arg '/' in
   match comps with
-  | ["";"dev";vg;lv] -> (vg,Some lv)
+  | ["";"dev";vg;""]
   | ["";"dev";vg] -> (vg,None)
+  | ["";"dev";vg;lv] -> (vg,Some lv)
   | [vg;lv] -> (vg,Some lv)
   | [vg] -> (vg,None)
   | _ -> failwith "failed to parse vg name"
