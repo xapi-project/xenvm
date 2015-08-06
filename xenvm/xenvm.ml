@@ -79,6 +79,30 @@ let format config name filenames =
       return () in
   Lwt_main.run t
 
+let dump config filenames =
+    let t =
+      let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
+      let open Xenvm_interface in
+      Lwt_list.map_s
+        (fun filename ->
+          Block.connect filename
+          >>= function
+          | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" filename))
+          | `Ok x -> return x
+        ) filenames
+      >>= fun blocks ->
+      Vg_IO.connect blocks `RO
+      >>|= fun vg ->
+      let md = Vg_IO.metadata_of vg in
+      let buf = Cstruct.create (64 * 1024 * 1024) in
+      let next = Vg.marshal md buf in
+      let buf = Cstruct.(sub buf 0 ((len buf) - (len next))) in
+      let txt = Cstruct.to_string buf in
+      output_string Pervasives.stdout txt;
+      output_string Pervasives.stdout "\n";
+      return () in
+  Lwt_main.run t
+
 let host_create copts (vg_name,_) host =
   let t =
     get_vg_info_t copts vg_name >>= fun info ->
@@ -140,37 +164,79 @@ let shutdown copts (vg_name,_) =
     lwt_while (fun () -> is_alive pid) (fun () -> Lwt_unix.sleep 1.0)
   in Lwt_main.run t
 
-let benchmark copts (vg_name,_) =
+let benchmark copts (vg_name,_) volumes threads =
   let t =
     let creation_host = Unix.gethostname () in
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
     let mib = Int64.mul 1048576L 4L in
-    let number = 1000 in
-    let start = Unix.gettimeofday () in
-    let rec fori test_name acc f = function
-    | 0 -> return acc
-    | n ->
-      f n
-      >>= fun () ->
-      ( if ((n * 100) / number) <> (((n + 1) * 100) / number)
-        then stderr "%s %d %% complete\n%!" test_name (100 - (n * 100) / number)
-        else return () ) >>= fun () ->
-      fori test_name ((number - n, Unix.gettimeofday () -. start) :: acc) f (n - 1) in
-    fori "Creating volumes" [] (fun i -> Client.create ~name:(Printf.sprintf "test-lv-%d" i) ~size:mib ~creation_host ~creation_time:(Unix.gettimeofday () |> Int64.of_float) ~tags:[]) number
-    >>= fun creates ->
-    let time = Unix.gettimeofday () -. start in
+
+    let start = ref (Unix.gettimeofday ()) in
+    let n_pending = ref volumes in
+    let m = Lwt_mutex.create () in
+    let n_complete = ref 0 in
+    let times = ref [] in
+    let on_complete () =
+      incr n_complete;
+      let n = !n_complete in
+      times := (n, Unix.gettimeofday () -. !start) :: !times;
+      if ((n * 100) / volumes) <> (((n + 1) * 100) / volumes)
+      then stderr "%d %% complete" ((n * 100) / volumes)
+      else return () in
+    let rec worker f =
+      Lwt_mutex.with_lock m
+        (fun () ->
+          if !n_pending > 0 then begin
+            decr n_pending;
+            return (Some (volumes - !n_pending))
+          end else return None)
+      >>= function
+      | Some n ->
+        f n
+        >>= fun () ->
+        on_complete ()
+        >>= fun () ->
+        worker f
+      | None ->
+        return () in
+
+    let create n =
+      Client.create ~name:(Printf.sprintf "test-lv-%d" n) ~size:mib ~creation_host ~creation_time:(Unix.gettimeofday () |> Int64.of_float) ~tags:[] in
+    let destroy n =
+      Client.remove ~name:(Printf.sprintf "test-lv-%d" n) in
+
+    let rec mkints = function
+      | 0 -> []
+      | n -> n :: (mkints (n - 1)) in
+    let creators = List.map (fun _ -> worker create) (mkints threads) in
+    Lwt.join creators
+    >>= fun () ->
+
     let oc = open_out "benchmark.dat" in
-    List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" n t) (List.rev creates);
-    Printf.fprintf oc "# %d creates in %.1f s\n" number time;
-    Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int number /. time);
-    let start = Unix.gettimeofday () in
-    fori "Removing volumes" [] (fun i -> Client.remove ~name:(Printf.sprintf "test-lv-%d" i)) number
-    >>= fun destroys ->
-    let time = Unix.gettimeofday () -. start in
-    List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" (number + n) t) (List.rev destroys);
-    Printf.fprintf oc "# %d destroys in %.1f s\n" number time;
-    Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int number /. time);
+    let time = Unix.gettimeofday () -. !start in
+    List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" n t) (List.rev !times);
+    Printf.fprintf oc "# %d creates in %.1f s\n" volumes time;
+    Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int volumes /. time);
+
+    start := Unix.gettimeofday ();
+    n_pending := volumes;
+    n_complete := 0;
+    times := [];
+
+    let destroyers = List.map (fun _ -> worker destroy) (mkints threads) in
+    Lwt.join destroyers
+    >>= fun () ->
+    let time = Unix.gettimeofday () -. !start in
+    List.iter (fun (n, t) -> Printf.fprintf oc "%d %f\n" (volumes + n) t) (List.rev !times);
+    Printf.fprintf oc "# %d destroys in %.1f s\n" volumes time;
+    Printf.fprintf oc "# Average %.1f /sec\n" (float_of_int volumes /. time);
+    close_out oc;
+    let oc = open_out "benchmark.gp" in
+    Printf.fprintf oc "set xlabel \"LV number\"\n";
+    Printf.fprintf oc "set ylabel \"Time/seconds\"\n";
+    Printf.fprintf oc "set title \"Creating and then destroying %d LVs\"\n" volumes;
+    Printf.fprintf oc "plot \"benchmark.dat\" with points\n";
+    close_out oc;
     return () in
   Lwt_main.run t
 
@@ -212,6 +278,15 @@ let lvname =
 let size =
   let doc = "Size of the LV in megs" in
   Arg.(value & opt int64 4L & info ["size"] ~docv:"SIZE" ~doc)
+
+let dump_cmd =
+  let doc = "Dump the metadata in LVM format to stdout" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Prints the volume group metadata to stdout in LVM format. Note this will not include any updates which are still pending in the redo-log."
+  ] in
+  Term.(pure dump $ copts_t $ filenames),
+  Term.info "dump" ~sdocs:copts_sect ~doc ~man
 
 let format_cmd =
   let doc = "Format the specified file as a VG" in
@@ -285,7 +360,13 @@ let benchmark_cmd =
     `S "DESCRIPTION";
     `P "Perform some microbenchmarks and print the results.";
   ] in
-  Term.(pure benchmark $ copts_t $ name_arg),
+  let volumes_arg =
+    let doc = "The number of logical volumes which should be created then destroyed." in
+    Arg.(value & opt int 10000 & info [ "volumes"; "v" ] ~docv:"VOLUMES" ~doc) in
+  let threads_arg =
+    let doc = "The number of concurrent worker threads which should create then destroy the volumes." in
+    Arg.(value & opt int 1 & info [ "threads"; "t" ] ~docv:"THREADS" ~doc) in
+  Term.(pure benchmark $ copts_t $ name_arg $ volumes_arg $ threads_arg),
   Term.info "benchmark" ~sdocs:copts_sect ~doc ~man
 
 let default_cmd =
@@ -295,6 +376,7 @@ let cmds = [
   Lvresize.lvresize_cmd;
   Lvresize.lvextend_cmd;
   format_cmd;
+  dump_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
   host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
