@@ -379,14 +379,10 @@ module VolumeManager = struct
         debug "FromLVM queue %s has %d items" name (List.length items);
         Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
           write (fun vg ->
-              debug "Expanding volume %s" volume;
-	      let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(id, { lvex_segments = segments })))
-          ) >>= fun () ->
-          write (fun vg ->
-            debug "Removing free blocks from %s free LV" name;
-            let (_,freeid) = (List.assoc name !free_LVs) in
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvCrop(freeid, { lvc_segments = segments })))
+            debug "Expanding volume %s" volume;
+            let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
+            let (_, free_id) = (List.assoc name !free_LVs) in
+            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvTransfer(free_id, id, segments)))
           )
         ) items
         >>= fun () ->
