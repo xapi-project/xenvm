@@ -35,10 +35,11 @@ let lvcreate copts lv_name real_size percent_size tags vg_name action =
         | e -> fail e
     ) >>= fun () ->
     return info) in
+  (* Activate the volume by default unless requested otherwise *)
   match action with
-  | Some Xenvm_common.Activate ->
-    (match info with | Some i -> Lvchange.lvchange_activate copts vg_name lv_name (Some i.local_device) false | None -> ())
-  | _ -> ()
+  | Some Xenvm_common.Deactivate -> ()
+  | _ ->
+    (match info with Some i -> Lvchange.lvchange_activate copts vg_name lv_name (Some i.local_device) false | None -> ())
 
 let lv_name_arg =
   let doc = "Gives the name of the LV to be created. This must be unique within the volume group. " in
