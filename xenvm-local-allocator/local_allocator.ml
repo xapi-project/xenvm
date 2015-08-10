@@ -23,6 +23,20 @@ let dm = ref (module Devmapper.Linux : Devmapper.S.DEVMAPPER)
 
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
 
+let retry ~dbg ~retries ~interval f =
+  debug "Attempting to '%s': will try at most %d times with a %ds interval."
+    dbg retries interval;
+  let rec aux n =
+    if n <= 0 then f ()
+    else
+      try f ()
+      with exn ->
+        warn "warning: '%s' failed with '%s'; will retry %d more time%s..."
+          dbg (Printexc.to_string exn) retries (if retries = 1 then "" else "s");
+        Unix.sleep interval;
+        aux (retries - 1) in
+  aux retries
+
 let rec try_forever msg f =
   f ()
   >>= function
@@ -357,13 +371,14 @@ let main use_mock config daemon socket journal fromLVM toLVM =
         >>= fun to_device_targets ->
         (* Append the physical blocks to toLV *)
         let to_targets = to_device_targets @ t.device.ExpandDevice.targets in
-        D.suspend t.device.ExpandDevice.device;
-        print_endline "Suspend local dm device";
-        D.reload t.device.ExpandDevice.device to_targets;
+        retry ~dbg:"Suspend local dm device" ~retries:3 ~interval:1 (fun () ->
+          D.suspend t.device.ExpandDevice.device);
+        retry ~dbg:"Reload local dm device" ~retries:3 ~interval:1 (fun () ->
+          D.reload t.device.ExpandDevice.device to_targets);
         ToLVM.advance tolvm position
         >>= fun () ->
-        D.resume t.device.ExpandDevice.device;
-        print_endline "Resume local dm device";
+        retry ~dbg:"Resume local dm device" ~retries:3 ~interval:1 (fun () ->
+          D.resume t.device.ExpandDevice.device);
         return ()
       ) ops
       >>= fun () ->
