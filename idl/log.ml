@@ -8,6 +8,7 @@ type traced_operation_list = traced_operation list with sexp
 
 let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 let info  fmt = Printf.ksprintf (fun s -> print_endline s) fmt
+let warn fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
 
 let trace ts =
