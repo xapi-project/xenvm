@@ -47,10 +47,8 @@ let vgs_offline =
     )
   )
 
-let lvchange_offline =
-  "lvchange vg/lv --offline: check that we can activate volumes offline" >::
-  fun () ->
-  with_temp_file (fun filename' ->
+let with_xenvmd ?(cleanup_vg=true) (f : string -> 'a) =
+  with_temp_file ~delete:cleanup_vg (fun filename' ->
     with_loop_device filename' (fun loop ->
       xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
@@ -58,16 +56,19 @@ let lvchange_offline =
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
-      let name = Uuid.(to_string (create ())) in
       finally
-        (fun () ->
-          xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
-        ) (fun () ->
-          xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string
-        );
-      xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string;
+        (fun () -> f vg)
+        (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string)
     )
   )
+
+let lvchange_offline =
+  "lvchange vg/lv --offline: check that we can activate volumes offline" >::
+  fun () ->
+  let name = Uuid.(to_string (create ())) in
+  with_xenvmd ~cleanup_vg:false (fun vg ->
+    xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string);
+  xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string
 
 let pvremove =
   "pvremove <device>: check that we can make a PV unrecognisable" >::
@@ -299,19 +300,4 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
 let _ =
   mkdir_rec "/tmp/xenvm.d" 0o0755;
   run_test_tt_main no_xenvmd_suite |> ignore;
-  with_temp_file (fun filename' ->
-    with_loop_device filename' (fun loop ->
-      xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
-      xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
-      file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
-      xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
-      Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
-      Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
-      finally
-        (fun () ->
-          run_test_tt_main xenvmd_suite |> ignore;
-        ) (fun () ->
-          xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string
-        )
-    )
-  )
+  with_xenvmd (fun vg -> run_test_tt_main xenvmd_suite |> ignore);

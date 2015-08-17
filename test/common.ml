@@ -211,7 +211,7 @@ let tib = Int64.(gib * kib)
 
 module Client = Xenvm_client.Client
 
-let with_temp_file fn =
+let with_temp_file ?(delete=true) fn =
   let filename = Filename.concat (Unix.getcwd ()) "vg" in
   let f = Unix.openfile filename [Unix.O_CREAT; Unix.O_RDWR; Unix.O_TRUNC] 0o644 in
   (* approximately 10000 4MiB extents for volumes, 100MiB for metadata and
@@ -220,7 +220,7 @@ let with_temp_file fn =
   ignore(Unix.write f "\000" 0 1);
   Unix.close f;
   let result = fn filename in
-  Unix.unlink filename;
+  if delete then Unix.unlink filename;
   result
   (* NB we leak the file on error, but this is quite useful *)
 
