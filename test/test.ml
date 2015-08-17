@@ -75,17 +75,12 @@ let pvremove =
   (fun () ->
     with_temp_file (fun filename ->
       xenvm [ "vgcreate"; vg; filename ] |> ignore_string;
-      mkdir_rec "/tmp/xenvm.d" 0o0755;
-      xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       xenvm [ "vgs"; vg ] |> ignore_string;
       xenvm [ "pvremove"; filename ] |> ignore_string;
-      begin
-        try
-          xenvm [ "vgs"; vg ] |> ignore_string;
-          failwith "pvremove failed to hide a VG from vgs"
-        with Bad_exit(1, _, _, _, _) ->
-          ()
-      end
+      try
+        xenvm [ "vgs"; vg ] |> ignore_string;
+        failwith "pvremove failed to hide a VG from vgs"
+      with Bad_exit(1, _, _, _, _) -> ()
     )
   )
 
