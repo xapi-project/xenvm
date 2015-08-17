@@ -58,13 +58,14 @@ let lvchange_offline =
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
+      let name = Uuid.(to_string (create ())) in
       finally
         (fun () ->
-          xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
+          xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
         ) (fun () ->
           xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string
         );
-      xenvm [ "lvchange"; "-ay"; vg ^ "/test"; "--offline" ] |> ignore_string;
+      xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string;
     )
   )
 
@@ -98,7 +99,7 @@ let assert_lv_exists ?expected_size_in_extents name =
   let t =
     Lwt.catch
       (fun () ->
-        Client.get_lv "test"
+        Client.get_lv name
         >>= fun (_, lv) ->
         match expected_size_in_extents with
         | None -> return ()
@@ -119,24 +120,27 @@ let free_extents () =
 let lvcreate_L =
   "lvcreate -n <name> -L <mib> <vg>: check that we can create an LV with a size in MiB" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "16"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:4L "test";
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-L"; "16"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:4L name;
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let lvcreate_l =
   "lvcreate -n <name> -l <extents> <vg>: check that we can create an LV with a size in extents" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "2"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:2L "test";
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-l"; "2"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:2L name;
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let lvcreate_percent =
   "lvcreate -n <name> -l 100%F <vg>: check that we can fill all free space in the VG" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "100%F"; vg ] |> ignore_string;
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-l"; "100%F"; vg ] |> ignore_string;
   let free = free_extents () in
   assert_equal ~printer:Int64.to_string 0L free;
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let kib = 1024L
 let mib = Int64.mul kib 1024L
@@ -161,7 +165,8 @@ let lvcreate_toobig =
        | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
   );
   try
-    xenvm [ "lvcreate"; "-n"; "test"; "-l"; Int64.to_string xib; vg ] |> ignore_string;
+    let name = Uuid.(to_string (create ())) in
+    xenvm [ "lvcreate"; "-n"; name; "-l"; Int64.to_string xib; vg ] |> ignore_string;
     failwith "Did not get Insufficient_free_space"
   with
     | Bad_exit(5, _, _, stdout, stderr) ->
@@ -174,16 +179,17 @@ let lvcreate_toobig =
 let lvextend_toobig =
   "lvextend packer-virtualbox-iso-vg/swap_1 -L 1T: check that the failure is nice" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-l"; "100%F"; vg ] |> ignore_string;
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-l"; "100%F"; vg ] |> ignore_string;
   begin
     Lwt_main.run (
       Lwt.catch
-        (fun () -> Client.resize "test" xib)
+        (fun () -> Client.resize name xib)
         (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
          | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
     );
     try
-      xenvm [ "lvextend"; vg ^ "/test"; "-L"; Int64.to_string xib ] |> ignore_string;
+      xenvm [ "lvextend"; vg ^ "/" ^ name; "-L"; Int64.to_string xib ] |> ignore_string;
       failwith "Did not get Insufficient_free_space"
     with
       | Bad_exit(5, _, _, stdout, stderr) ->
@@ -193,7 +199,7 @@ let lvextend_toobig =
       | e ->
         failwith (Printf.sprintf "Expected exit code 5: %s" (Printexc.to_string e))
   end;
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let file_exists filename =
   try
@@ -211,48 +217,52 @@ let mapper_path_of name = "/dev/mapper/" ^ vg ^ "-" ^ name
 let lvchange_addtag =
   "lvchange vg/lv [--addtag|--removetag]: check that we can add tags" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:1L "test";
-  xenvm [ "lvchange"; vg ^ "/test"; "--addtag"; "hidden" ] |> ignore_string;
-  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv "test") in
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L name;
+  xenvm [ "lvchange"; vg ^ "/" ^ name; "--addtag"; "hidden" ] |> ignore_string;
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
   let tags = List.map Lvm.Name.Tag.to_string lv_metadata.Lvm.Lv.tags in
   if not(List.mem "hidden" tags)
   then failwith "Failed to add 'hidden' tag";
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let lvchange_deltag =
   "lvchange vg/lv [--addtag|--deltag]: check that we can add and remove tags" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:1L "test";
-  xenvm [ "lvchange"; vg ^ "/test"; "--addtag"; "hidden" ] |> ignore_string;
-  xenvm [ "lvchange"; vg ^ "/test"; "--deltag"; "hidden" ] |> ignore_string;
-  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv "test") in
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L name;
+  xenvm [ "lvchange"; vg ^ "/" ^ name; "--addtag"; "hidden" ] |> ignore_string;
+  xenvm [ "lvchange"; vg ^ "/" ^ name; "--deltag"; "hidden" ] |> ignore_string;
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
   let tags = List.map Lvm.Name.Tag.to_string lv_metadata.Lvm.Lv.tags in
   if List.mem "hidden" tags
   then failwith "Failed to remove 'hidden' tag";
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let lvchange_n =
   "lvchange -an <device>: check that we can deactivate a volume" >::
   fun () ->
-  xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
-  assert_lv_exists ~expected_size_in_extents:1L "test";
-  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv "test") in
-  let name = Mapper.name_of vg_metadata lv_metadata in
-  xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/test" ] |> ignore_string;
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L name;
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
+  let map_name = Mapper.name_of vg_metadata lv_metadata in
+  xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
   if not !Common.use_mock then begin (* FIXME: #99 *)
-  assert_equal ~printer:string_of_bool true (file_exists (dev_path_of "test"));
-  assert_equal ~printer:string_of_bool true (file_exists (mapper_path_of "test"));
-  assert_equal ~printer:string_of_bool true (dm_exists name);
+  assert_equal ~printer:string_of_bool true (file_exists (dev_path_of name));
+  assert_equal ~printer:string_of_bool true (file_exists (mapper_path_of name));
+  assert_equal ~printer:string_of_bool true (dm_exists map_name);
   end;
-  xenvm [ "lvchange"; "-an"; "/dev/" ^ vg ^ "/test" ] |> ignore_string;
+  xenvm [ "lvchange"; "-an"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
   if not !Common.use_mock then begin (* FIXME: #99 *)
-  assert_equal ~printer:string_of_bool false (file_exists (dev_path_of"test"));
-  assert_equal ~printer:string_of_bool false (file_exists (mapper_path_of"test"));
-  assert_equal ~printer:string_of_bool false (dm_exists name);
+  assert_equal ~printer:string_of_bool false (file_exists (dev_path_of name));
+  assert_equal ~printer:string_of_bool false (file_exists (mapper_path_of name));
+  assert_equal ~printer:string_of_bool false (dm_exists map_name);
+  
   end;
-  xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
 let parse_int x =
   int_of_string (String.trim x)
@@ -265,12 +275,13 @@ let vgs_online =
     let expected = Lvm.Vg.LVs.cardinal metadata.Lvm.Vg.lvs in
     assert_equal ~printer:string_of_int expected count;
     (* The new LV will be cached: *)
-    xenvm [ "lvcreate"; "-n"; "test"; "-L"; "3"; vg ] |> ignore_string;
+    let name = Uuid.(to_string (create ())) in
+    xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
     (* This should use the network, not the on-disk metadata: *)
     let count = xenvm [ "vgs"; "/dev/" ^ vg; "--noheadings"; "-o"; "lv_count" ] |> parse_int in
     (* Did we see the new volume? *)
     assert_equal ~printer:string_of_int (expected+1) count;
-    xenvm [ "lvremove"; vg ^ "/test" ] |> ignore_string
+    xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
   )
 
 let xenvmd_suite = "Commands which require xenvmd" >::: [
