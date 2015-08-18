@@ -299,5 +299,8 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
 
 let _ =
   mkdir_rec "/tmp/xenvm.d" 0o0755;
-  run_test_tt_main no_xenvmd_suite |> ignore;
-  with_xenvmd (fun vg -> run_test_tt_main xenvmd_suite |> ignore);
+  let check_results_with_exit_code results =
+    if List.exists (function RFailure _ | RError _ -> true | _ -> false) results
+    then exit 1 in
+  run_test_tt_main no_xenvmd_suite |> check_results_with_exit_code;
+  with_xenvmd (fun _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
