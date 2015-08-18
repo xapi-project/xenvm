@@ -141,8 +141,8 @@ let lvcreate_percent =
 let kib = 1024L
 let mib = Int64.mul kib 1024L
 let gib = Int64.mul mib 1024L
-let tib = Int64.mul mib 1024L
-let xib = Int64.mul tib 1024L
+let tib = Int64.mul gib 1024L
+let pib = Int64.mul tib 1024L
 
 let contains s1 s2 =
     let re = Str.regexp_string s2 in
@@ -156,21 +156,21 @@ let lvcreate_toobig =
   fun () ->
   Lwt_main.run (
     Lwt.catch
-      (fun () -> Client.create "toobig" xib "unknown" 0L [])
+      (fun () -> Client.create "toobig" tib "unknown" 0L [])
       (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
        | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
   );
   try
     let name = Uuid.(to_string (create ())) in
-    xenvm [ "lvcreate"; "-n"; name; "-l"; Int64.to_string xib; vg ] |> ignore_string;
+    xenvm [ "lvcreate"; "-n"; name; "-l"; Int64.to_string tib; vg ] |> ignore_string;
     failwith "Did not get Insufficient_free_space"
   with
     | Bad_exit(5, _, _, stdout, stderr) ->
       let expected = "insufficient free space" in
       if not (contains stderr expected)
       then failwith (Printf.sprintf "stderr [%s] did not have expected string [%s]" stderr expected)
-    | _ ->
-      failwith "Expected exit code 5"
+    | e ->
+      failwith (Printf.sprintf "Expected exit code 5; got exception: %s" (Printexc.to_string e))
 
 let lvextend_toobig =
   "lvextend packer-virtualbox-iso-vg/swap_1 -L 1T: check that the failure is nice" >::
@@ -180,12 +180,12 @@ let lvextend_toobig =
   begin
     Lwt_main.run (
       Lwt.catch
-        (fun () -> Client.resize name xib)
+        (fun () -> Client.resize name tib)
         (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
          | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
     );
     try
-      xenvm [ "lvextend"; vg ^ "/" ^ name; "-L"; Int64.to_string xib ] |> ignore_string;
+      xenvm [ "lvextend"; vg ^ "/" ^ name; "-L"; Int64.to_string tib ] |> ignore_string;
       failwith "Did not get Insufficient_free_space"
     with
       | Bad_exit(5, _, _, stdout, stderr) ->
