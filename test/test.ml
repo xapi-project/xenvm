@@ -293,6 +293,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
 ]
 
 let _ =
+  Random.self_init ();
   mkdir_rec "/tmp/xenvm.d" 0o0755;
   let check_results_with_exit_code results =
     if List.exists (function RFailure _ | RError _ -> true | _ -> false) results
