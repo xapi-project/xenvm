@@ -47,10 +47,8 @@ let vgs_offline =
     )
   )
 
-let with_xenvmd ?(cleanup_vg=true) (f : string -> 'a) =
-  with_temp_file ~delete:cleanup_vg (fun filename' ->
-    with_loop_device filename' (fun loop ->
-      xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
+let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
+  let with_xenvmd_running loop =
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
@@ -58,9 +56,16 @@ let with_xenvmd ?(cleanup_vg=true) (f : string -> 'a) =
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
       finally
         (fun () -> f vg)
-        (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string)
+        (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string) in
+  match existing_vg with
+  | Some path -> with_xenvmd_running path
+  | None ->
+    with_temp_file ~delete:cleanup_vg (fun filename ->
+      with_loop_device filename (fun loop ->
+        xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
+        with_xenvmd_running loop
+      )
     )
-  )
 
 let lvchange_offline =
   "lvchange vg/lv --offline: check that we can activate volumes offline" >::
@@ -84,11 +89,78 @@ let pvremove =
     )
   )
 
+let upgrade =
+  "Check that we can upgrade an LVM volume to XenVM" >:: fun () ->
+  with_temp_file (fun filename ->
+    let t =
+      with_block filename (fun block ->
+        Result.get_ok (Pv.Name.of_string "pv0") |> fun pv ->
+        Vg_IO.format ~magic:`Lvm "vg" [ pv, block ] >>|= fun () ->
+        Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+        (* there should be no LVs on this (not even a redo log) *)
+        assert_equal ~msg:"Formated volume (LVM magic) has non-zero LV count"
+          ~printer:string_of_int 0 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+        (* create a couple of LVs *)
+        let lv0 = (Uuid.(to_string (create ())), Int64.(10L * mib)) in
+        let lv1 = (Uuid.(to_string (create ())), Int64.(20L * mib)) in
+        Lwt_list.iter_p (fun (name, size) ->
+          Vg.create (Vg_IO.metadata_of vg) name size >>*= fun (_, op) ->
+          Vg_IO.update vg [ op ] >>|= fun () ->
+          Vg_IO.sync vg >>|= fun () ->
+          return ()
+        ) [ lv0; lv1 ] >>= fun () ->
+        (* check that these LVs are there *)
+        assert_equal ~msg:"Unexpected number of LVs on LVM volume"
+          ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+
+        (* Upgrade the volume to journalled *)
+        (* TODO: Take the LVM lock *)
+        (* Change the label magic to be Journalled to hide from LVM *)
+        let module Label_IO = Label.Make(Block) in
+        let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
+        Label_IO.read block >>:= fun label ->
+        let new_label_header = Label.Label_header.create `Journalled in
+        let new_label = {label with Label.label_header = new_label_header } in
+        Label_IO.write block new_label >>:= fun () ->
+        (* Create the redo log, first reconnect to pick up the label changes *)
+        Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+        let creation_host = Unix.gethostname () in
+        let creation_time = Unix.gettimeofday () |> Int64.of_float in
+        let size = Int64.(4L * mib) in
+        Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name size
+          ~creation_host ~creation_time >>*= fun (_, op) ->
+        Vg_IO.update vg [ op ] >>|= fun () ->
+        Vg_IO.sync vg >>|= fun () ->
+        (* TODO: release the LVM lock *)
+
+        (* check the changing of the magic persisted *)
+        Label_IO.read block >>:= fun label ->
+        assert_equal ~msg:"PV label was not as expected"
+          ~printer:(function None -> "" | Some m -> Sexplib.Sexp.to_string_hum (Magic.sexp_of_t m))
+          (Some `Journalled) Label.(Label_header.magic_of label.label_header);
+        (* Check we now have 1 more volume than before (the redo log) *)
+        assert_equal ~msg:"Unexpected number of LVs on LVM after upgrade"
+          ~printer:string_of_int 3 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+        (* Check xenvmd is happy to connect *)
+        with_xenvmd ~existing_vg:filename (fun vg ->
+          let lv_count =
+            xenvm [ "vgs"; "/dev/" ^ vg; "--noheadings"; "-o"; "lv_count" ]
+            |> String.trim |> int_of_string in
+          assert_equal ~msg:"Xenvmd reported wrong number of LVs"
+            ~printer:string_of_int 3 lv_count;
+          xenvm [ "lvs"; "/dev/" ^ vg ] |> ignore_string;
+        );
+        return ()
+      ) in
+    Lwt_main.run t
+  )
+
 let no_xenvmd_suite = "Commands which should work without xenvmd" >::: [
   vgcreate;
   vgs_offline;
   lvchange_offline;
   pvremove;
+  upgrade;
 ]
 
 let assert_lv_exists ?expected_size_in_extents name =
