@@ -122,7 +122,7 @@ let upgrade =
         let module Label_IO = Label.Make(Block) in
         let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
         Label_IO.read block >>:= fun label ->
-        assert_equal ~msg:"PV label was not as expected"
+        assert_equal ~msg:"PV label was not as expected after upgrade"
           ~printer:(function None -> "" | Some m -> Sexplib.Sexp.to_string_hum (Magic.sexp_of_t m))
           (Some `Journalled) Label.(Label_header.magic_of label.label_header);
         (* Check we now have 1 more volume than before (the redo log) *)
@@ -138,6 +138,19 @@ let upgrade =
             ~printer:string_of_int 3 lv_count;
           xenvm [ "lvs"; "/dev/" ^ vg ] |> ignore_string;
         );
+
+        (* Downgrade the volume to lvm2 *)
+        xenvm [ "downgrade"; "vg" ] |> ignore_string;
+
+        (* check the changing of the magic persisted *)
+        Label_IO.read block >>:= fun label ->
+        assert_equal ~msg:"PV label was not as expected after downgrade"
+          ~printer:(function None -> "" | Some m -> Sexplib.Sexp.to_string_hum (Magic.sexp_of_t m))
+          (Some `Lvm) Label.(Label_header.magic_of label.label_header);
+        (* Check we now have 1 more volume than before (the redo log) *)
+        Vg_IO.connect ~flush_interval:0. [ block ] `RO >>|= fun vg ->
+        assert_equal ~msg:"Unexpected number of LVs on LVM after downgrade"
+          ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
         return ()
       ) in
     Lwt_main.run t
