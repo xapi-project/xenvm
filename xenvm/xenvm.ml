@@ -110,9 +110,13 @@ let upgrade config filename =
           let creation_host = Unix.gethostname () in
           let creation_time = Unix.gettimeofday () |> Int64.of_float in
           let size = Int64.mul 4L mib in
-          Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name size
-            ~creation_host ~creation_time >>*= fun (_, op) ->
-          Vg_IO.update vg [ op ] >>|= fun () ->
+          begin match Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name
+            size ~creation_host ~creation_time with
+          | `Ok (_, op) -> `Ok [ op ]
+          | `Error (`DuplicateLV _) -> `Ok []
+          | `Error e -> `Error e
+          end >>*= fun ops ->
+          Vg_IO.update vg ops >>|= fun () ->
           return ()
         ) (fun exn -> Label_IO.write block orig_label >>:= return)
       )

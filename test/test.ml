@@ -115,6 +115,8 @@ let upgrade =
 
         (* Upgrade the volume to journalled *)
         xenvm [ "upgrade"; "vg" ] |> ignore_string;
+        (* Check it's idempotent *)
+        xenvm [ "upgrade"; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         let module Label_IO = Label.Make(Block) in
