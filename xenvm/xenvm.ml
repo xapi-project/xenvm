@@ -139,8 +139,12 @@ let downgrade config filename =
         with_label_change block `Lvm (fun () ->
           (* Destroy the redo log, first reconnect to pick up the label changes *)
           Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
-          Vg.remove (Vg_IO.metadata_of vg) Xenvm_interface._journal_name >>*= fun (_, op) ->
-          Vg_IO.update vg [ op ] >>|= fun () ->
+          begin match Vg.remove (Vg_IO.metadata_of vg) Xenvm_interface._journal_name with
+          | `Ok (_, op) -> `Ok [ op ]
+          | `Error (`UnknownLV _) -> `Ok []
+          | `Error e -> `Error e
+          end >>*= fun ops ->
+          Vg_IO.update vg ops >>|= fun () ->
           return ()
         )
       )

@@ -141,6 +141,8 @@ let upgrade =
 
         (* Downgrade the volume to lvm2 *)
         xenvm [ "downgrade"; "vg" ] |> ignore_string;
+        (* Check it's idempotent *)
+        xenvm [ "downgrade"; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         Label_IO.read block >>:= fun label ->
