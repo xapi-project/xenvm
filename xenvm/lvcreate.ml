@@ -14,6 +14,7 @@ let lvcreate copts lv_name real_size percent_size tags vg_name action =
 
     let extent_size_bytes = Int64.(mul 512L vg.Lvm.Vg.extent_size) in
 
+    (* XXX: Need to guard against integer overflow here *)
     let size = match parse_size real_size percent_size with
     | `Absolute size -> size
     | `Extents extents -> Int64.mul extent_size_bytes extents

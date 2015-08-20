@@ -16,6 +16,16 @@ let stderr fmt = Printf.ksprintf (fun s ->
   Lwt_log.log ~logger:syslog ~level:Lwt_log.Notice ("stderr:" ^ s)
 ) fmt
 
+let mkdir_rec dir perm =
+  let mkdir_safe dir perm =
+    try Unix.mkdir dir perm with Unix.Unix_error (Unix.EEXIST, _, _) -> () in
+  let rec p_mkdir dir =
+    let p_name = Filename.dirname dir in
+    if p_name <> "/" && p_name <> "."
+    then p_mkdir p_name;
+    mkdir_safe dir perm in
+  p_mkdir dir
+
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
@@ -459,15 +469,6 @@ let print_table noheadings header rows =
   if noheadings
   then List.map print_row rows
   else print_row header :: (List.map print_row rows)
-
-let (>>*=) m f = match m with
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Error (`DuplicateLV x) -> fail (Failure (Printf.sprintf "%s is a duplicate LV name" x))
-  | `Error (`OnlyThisMuchFree (needed, available)) -> fail (Xenvm_interface.Insufficient_free_space(needed, available))
-  | `Error (`UnknownLV x) -> fail (Failure (Printf.sprintf "I couldn't find an LV named %s" x))
-  | `Ok x -> f x
-
-let (>>|=) m f = m >>= fun x -> x >>*= f
 
 let with_block filename f =
   let open Lwt in

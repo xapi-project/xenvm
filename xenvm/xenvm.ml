@@ -79,6 +79,78 @@ let format config name filenames =
       return () in
   Lwt_main.run t
 
+(* LVM locking code can be seen here:
+ * https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/misc/lvm-flock.c#n141 *)
+let with_lvm_lock vg_name f =
+  let lock_dir = "/run/lock/lvm" in
+  let lock_path = Filename.concat lock_dir ("V_" ^ vg_name ^ ":aux") in
+  Lwt.catch (fun () ->
+    mkdir_rec lock_dir 0o0700;
+    Lwt_unix.(openfile lock_path [O_CREAT; O_TRUNC; O_RDWR] 0o644)
+    >>= fun fd ->
+    Lwt_unix.(lockf fd F_LOCK) 0;
+  ) (function _ -> fail (Failure "Could_not_obtain_lvm_lock")) >>= fun () ->
+  Lwt.finalize f (fun () -> Lwt_unix.unlink lock_path)
+
+(* Change the label on the PV and revert it if the function [f] fails *)
+let with_label_change block magic f =
+  let module Label_IO = Label.Make(Block) in
+  let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
+  Label_IO.read block >>:= fun orig_label ->
+  let label_header = Label.Label_header.create magic in
+  let new_label = { orig_label with Label.label_header } in
+  Label_IO.write block new_label >>:= fun () ->
+  Lwt.catch f (fun exn -> Label_IO.write block orig_label >>:= fun () -> fail exn)
+
+
+let upgrade config filename =
+  let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
+  let t =
+    let (vg_name, _) = parse_name filename in
+    with_lvm_lock vg_name (fun () ->
+      with_block filename (fun block ->
+        (* Change the label magic to be Journalled to hide from LVM *)
+        with_label_change block `Journalled (fun () ->
+          (* Create the redo log, first reconnect to pick up the label changes *)
+          Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+          let creation_host = Unix.gethostname () in
+          let creation_time = Unix.gettimeofday () |> Int64.of_float in
+          let size = Int64.mul 4L mib in
+          begin match Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name
+            size ~creation_host ~creation_time with
+          | `Ok (_, op) -> `Ok [ op ]
+          | `Error (`DuplicateLV _) -> `Ok []
+          | `Error e -> `Error e
+          end >>*= fun ops ->
+          Vg_IO.update vg ops >>|= fun () ->
+          return ()
+        )
+      )
+    ) in
+  Lwt_main.run t
+
+let downgrade config filename =
+  let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
+  let t =
+    let (vg_name, _) = parse_name filename in
+    with_lvm_lock vg_name (fun () ->
+      with_block filename (fun block ->
+        (* Change the label magic to be LVM to hide from XenVM *)
+        with_label_change block `Lvm (fun () ->
+          (* Destroy the redo log, first reconnect to pick up the label changes *)
+          Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+          begin match Vg.remove (Vg_IO.metadata_of vg) Xenvm_interface._journal_name with
+          | `Ok (_, op) -> `Ok [ op ]
+          | `Error (`UnknownLV _) -> `Ok []
+          | `Error e -> `Error e
+          end >>*= fun ops ->
+          Vg_IO.update vg ops >>|= fun () ->
+          return ()
+        )
+      )
+    ) in
+  Lwt_main.run t
+
 let dump config filenames =
     let t =
       let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
@@ -297,6 +369,24 @@ let format_cmd =
   Term.(pure format $ copts_t $ vgname $ filenames),
   Term.info "format" ~sdocs:copts_sect ~doc ~man
 
+let upgrade_cmd =
+  let doc = "Upgrade the specified VG from LVM2 to XenVM" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Upgrades the volume group metadata so that it will be usable by xenvmd and hidden from lvm."
+  ] in
+  Term.(pure upgrade $ copts_t $ filename),
+  Term.info "upgrade" ~sdocs:copts_sect ~doc ~man
+
+let downgrade_cmd =
+  let doc = "Downgrade the specified VG from XenVM to LVM2" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Downgrades the volume group metadata so that it will be usable by lvm and hidden from xenvm."
+  ] in
+  Term.(pure downgrade $ copts_t $ filename),
+  Term.info "downgrade" ~sdocs:copts_sect ~doc ~man
+
 let host_connect_cmd =
   let doc = "Connect to a host" in
   let man = [
@@ -376,6 +466,8 @@ let cmds = [
   Lvresize.lvresize_cmd;
   Lvresize.lvextend_cmd;
   format_cmd;
+  upgrade_cmd;
+  downgrade_cmd;
   dump_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;

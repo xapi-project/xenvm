@@ -47,45 +47,115 @@ let vgs_offline =
     )
   )
 
-let lvchange_offline =
-  "lvchange vg/lv --offline: check that we can activate volumes offline" >::
-  fun () ->
-  with_temp_file (fun filename' ->
-    with_loop_device filename' (fun loop ->
-      xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
+let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
+  let with_xenvmd_running loop =
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
-      let name = Uuid.(to_string (create ())) in
       finally
-        (fun () ->
-          xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
-        ) (fun () ->
-          xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string
-        );
-      xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string;
+        (fun () -> f vg)
+        (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string) in
+  match existing_vg with
+  | Some path -> with_xenvmd_running path
+  | None ->
+    with_temp_file ~delete:cleanup_vg (fun filename ->
+      with_loop_device filename (fun loop ->
+        xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
+        with_xenvmd_running loop
+      )
     )
-  )
+
+let lvchange_offline =
+  "lvchange vg/lv --offline: check that we can activate volumes offline" >::
+  fun () ->
+  let name = Uuid.(to_string (create ())) in
+  with_xenvmd ~cleanup_vg:false (fun vg ->
+    xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string);
+  xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string
 
 let pvremove =
   "pvremove <device>: check that we can make a PV unrecognisable" >::
   (fun () ->
     with_temp_file (fun filename ->
       xenvm [ "vgcreate"; vg; filename ] |> ignore_string;
-      mkdir_rec "/tmp/xenvm.d" 0o0755;
-      xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       xenvm [ "vgs"; vg ] |> ignore_string;
       xenvm [ "pvremove"; filename ] |> ignore_string;
-      begin
-        try
-          xenvm [ "vgs"; vg ] |> ignore_string;
-          failwith "pvremove failed to hide a VG from vgs"
-        with Bad_exit(1, _, _, _, _) ->
-          ()
-      end
+      try
+        xenvm [ "vgs"; vg ] |> ignore_string;
+        failwith "pvremove failed to hide a VG from vgs"
+      with Bad_exit(1, _, _, _, _) -> ()
     )
+  )
+
+let upgrade =
+  "Check that we can upgrade an LVM volume to XenVM" >:: fun () ->
+  with_temp_file (fun filename ->
+    let t =
+      with_block filename (fun block ->
+        Result.get_ok (Pv.Name.of_string "pv0") |> fun pv ->
+        Vg_IO.format ~magic:`Lvm "vg" [ pv, block ] >>|= fun () ->
+        Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+        (* there should be no LVs on this (not even a redo log) *)
+        assert_equal ~msg:"Formated volume (LVM magic) has non-zero LV count"
+          ~printer:string_of_int 0 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+        (* create a couple of LVs *)
+        let lv0 = (Uuid.(to_string (create ())), Int64.(10L * mib)) in
+        let lv1 = (Uuid.(to_string (create ())), Int64.(20L * mib)) in
+        Lwt_list.iter_p (fun (name, size) ->
+          Vg.create (Vg_IO.metadata_of vg) name size >>*= fun (_, op) ->
+          Vg_IO.update vg [ op ] >>|= fun () ->
+          Vg_IO.sync vg >>|= fun () ->
+          return ()
+        ) [ lv0; lv1 ] >>= fun () ->
+        (* check that these LVs are there *)
+        assert_equal ~msg:"Unexpected number of LVs on LVM volume"
+          ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+
+        (* Upgrade the volume to journalled *)
+        xenvm [ "upgrade"; "vg" ] |> ignore_string;
+        (* Check it's idempotent *)
+        xenvm [ "upgrade"; "vg" ] |> ignore_string;
+
+        (* check the changing of the magic persisted *)
+        let module Label_IO = Label.Make(Block) in
+        let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
+        Label_IO.read block >>:= fun label ->
+        assert_equal ~msg:"PV label was not as expected after upgrade"
+          ~printer:(function None -> "" | Some m -> Sexplib.Sexp.to_string_hum (Magic.sexp_of_t m))
+          (Some `Journalled) Label.(Label_header.magic_of label.label_header);
+        (* Check we now have 1 more volume than before (the redo log) *)
+        Vg_IO.connect ~flush_interval:0. [ block ] `RO >>|= fun vg ->
+        assert_equal ~msg:"Unexpected number of LVs on LVM after upgrade"
+          ~printer:string_of_int 3 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+        (* Check xenvmd is happy to connect *)
+        with_xenvmd ~existing_vg:filename (fun vg ->
+          let lv_count =
+            xenvm [ "vgs"; "/dev/" ^ vg; "--noheadings"; "-o"; "lv_count" ]
+            |> String.trim |> int_of_string in
+          assert_equal ~msg:"Xenvmd reported wrong number of LVs"
+            ~printer:string_of_int 3 lv_count;
+          xenvm [ "lvs"; "/dev/" ^ vg ] |> ignore_string;
+        );
+
+        (* Downgrade the volume to lvm2 *)
+        xenvm [ "downgrade"; "vg" ] |> ignore_string;
+        (* Check it's idempotent *)
+        xenvm [ "downgrade"; "vg" ] |> ignore_string;
+
+        (* check the changing of the magic persisted *)
+        Label_IO.read block >>:= fun label ->
+        assert_equal ~msg:"PV label was not as expected after downgrade"
+          ~printer:(function None -> "" | Some m -> Sexplib.Sexp.to_string_hum (Magic.sexp_of_t m))
+          (Some `Lvm) Label.(Label_header.magic_of label.label_header);
+        (* Check we now have 1 more volume than before (the redo log) *)
+        Vg_IO.connect ~flush_interval:0. [ block ] `RO >>|= fun vg ->
+        assert_equal ~msg:"Unexpected number of LVs on LVM after downgrade"
+          ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
+        return ()
+      ) in
+    Lwt_main.run t
   )
 
 let no_xenvmd_suite = "Commands which should work without xenvmd" >::: [
@@ -93,6 +163,7 @@ let no_xenvmd_suite = "Commands which should work without xenvmd" >::: [
   vgs_offline;
   lvchange_offline;
   pvremove;
+  upgrade;
 ]
 
 let assert_lv_exists ?expected_size_in_extents name =
@@ -145,8 +216,8 @@ let lvcreate_percent =
 let kib = 1024L
 let mib = Int64.mul kib 1024L
 let gib = Int64.mul mib 1024L
-let tib = Int64.mul mib 1024L
-let xib = Int64.mul tib 1024L
+let tib = Int64.mul gib 1024L
+let pib = Int64.mul tib 1024L
 
 let contains s1 s2 =
     let re = Str.regexp_string s2 in
@@ -160,21 +231,21 @@ let lvcreate_toobig =
   fun () ->
   Lwt_main.run (
     Lwt.catch
-      (fun () -> Client.create "toobig" xib "unknown" 0L [])
+      (fun () -> Client.create "toobig" tib "unknown" 0L [])
       (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
        | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
   );
   try
     let name = Uuid.(to_string (create ())) in
-    xenvm [ "lvcreate"; "-n"; name; "-l"; Int64.to_string xib; vg ] |> ignore_string;
+    xenvm [ "lvcreate"; "-n"; name; "-l"; Int64.to_string tib; vg ] |> ignore_string;
     failwith "Did not get Insufficient_free_space"
   with
     | Bad_exit(5, _, _, stdout, stderr) ->
       let expected = "insufficient free space" in
       if not (contains stderr expected)
       then failwith (Printf.sprintf "stderr [%s] did not have expected string [%s]" stderr expected)
-    | _ ->
-      failwith "Expected exit code 5"
+    | e ->
+      failwith (Printf.sprintf "Expected exit code 5; got exception: %s" (Printexc.to_string e))
 
 let lvextend_toobig =
   "lvextend packer-virtualbox-iso-vg/swap_1 -L 1T: check that the failure is nice" >::
@@ -184,12 +255,12 @@ let lvextend_toobig =
   begin
     Lwt_main.run (
       Lwt.catch
-        (fun () -> Client.resize name xib)
+        (fun () -> Client.resize name tib)
         (function Xenvm_interface.Insufficient_free_space(needed, available) -> return ()
          | e -> failwith (Printf.sprintf "Did not get Insufficient_free_space: %s" (Printexc.to_string e)))
     );
     try
-      xenvm [ "lvextend"; vg ^ "/" ^ name; "-L"; Int64.to_string xib ] |> ignore_string;
+      xenvm [ "lvextend"; vg ^ "/" ^ name; "-L"; Int64.to_string tib ] |> ignore_string;
       failwith "Did not get Insufficient_free_space"
     with
       | Bad_exit(5, _, _, stdout, stderr) ->
@@ -297,21 +368,10 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
 ]
 
 let _ =
+  Random.self_init ();
   mkdir_rec "/tmp/xenvm.d" 0o0755;
-  run_test_tt_main no_xenvmd_suite |> ignore;
-  with_temp_file (fun filename' ->
-    with_loop_device filename' (fun loop ->
-      xenvm [ "vgcreate"; vg; loop ] |> ignore_string;
-      xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
-      file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
-      xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
-      Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
-      Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
-      finally
-        (fun () ->
-          run_test_tt_main xenvmd_suite |> ignore;
-        ) (fun () ->
-          xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string
-        )
-    )
-  )
+  let check_results_with_exit_code results =
+    if List.exists (function RFailure _ | RError _ -> true | _ -> false) results
+    then exit 1 in
+  run_test_tt_main no_xenvmd_suite |> check_results_with_exit_code;
+  with_xenvmd (fun _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
