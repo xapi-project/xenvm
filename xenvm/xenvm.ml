@@ -92,21 +92,26 @@ let with_lvm_lock vg_name f =
   ) (function _ -> fail (Failure "Could_not_obtain_lvm_lock")) >>= fun () ->
   Lwt.finalize f (fun () -> Lwt_unix.unlink lock_path)
 
-let upgrade config filename =
-  let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
+(* Change the label on the PV and revert it if the function [f] fails *)
+let with_label_change block magic f =
   let module Label_IO = Label.Make(Block) in
   let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
+  Label_IO.read block >>:= fun orig_label ->
+  let label_header = Label.Label_header.create magic in
+  let new_label = { orig_label with Label.label_header } in
+  Label_IO.write block new_label >>:= fun () ->
+  Lwt.catch f (fun exn -> Label_IO.write block orig_label >>:= fun () -> fail exn)
+
+
+let upgrade config filename =
+  let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
   let t =
     let (vg_name, _) = parse_name filename in
     with_lvm_lock vg_name (fun () ->
-      (* Change the label magic to be Journalled to hide from LVM *)
       with_block filename (fun block ->
-        Label_IO.read block >>:= fun orig_label ->
-        let label_header = Label.Label_header.create `Journalled in
-        let new_label = { orig_label with Label.label_header } in
-        Label_IO.write block new_label >>:= fun () ->
-        (* Create the redo log, first reconnect to pick up the label changes *)
-        Lwt.catch (fun () ->
+        (* Change the label magic to be Journalled to hide from LVM *)
+        with_label_change block `Journalled (fun () ->
+          (* Create the redo log, first reconnect to pick up the label changes *)
           Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
           let creation_host = Unix.gethostname () in
           let creation_time = Unix.gettimeofday () |> Int64.of_float in
@@ -119,31 +124,25 @@ let upgrade config filename =
           end >>*= fun ops ->
           Vg_IO.update vg ops >>|= fun () ->
           return ()
-        ) (fun exn -> Label_IO.write block orig_label >>:= return)
+        )
       )
     ) in
   Lwt_main.run t
 
 let downgrade config filename =
   let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
-  let module Label_IO = Label.Make(Block) in
-  let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
   let t =
     let (vg_name, _) = parse_name filename in
     with_lvm_lock vg_name (fun () ->
-      (* Change the label magic to be LVM to hide from XenVM *)
       with_block filename (fun block ->
-        Label_IO.read block >>:= fun orig_label ->
-        let label_header = Label.Label_header.create `Lvm in
-        let new_label = { orig_label with Label.label_header } in
-        Label_IO.write block new_label >>:= fun () ->
-        (* Destroy the redo log, first reconnect to pick up the label changes *)
-        Lwt.catch (fun () ->
+        (* Change the label magic to be LVM to hide from XenVM *)
+        with_label_change block `Lvm (fun () ->
+          (* Destroy the redo log, first reconnect to pick up the label changes *)
           Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
           Vg.remove (Vg_IO.metadata_of vg) Xenvm_interface._journal_name >>*= fun (_, op) ->
           Vg_IO.update vg [ op ] >>|= fun () ->
           return ()
-        ) (fun exn -> Label_IO.write block orig_label >>:= return)
+        )
       )
     ) in
   Lwt_main.run t
