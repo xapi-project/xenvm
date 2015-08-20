@@ -470,15 +470,6 @@ let print_table noheadings header rows =
   then List.map print_row rows
   else print_row header :: (List.map print_row rows)
 
-let (>>*=) m f = match m with
-  | `Error (`Msg e) -> fail (Failure e)
-  | `Error (`DuplicateLV x) -> fail (Failure (Printf.sprintf "%s is a duplicate LV name" x))
-  | `Error (`OnlyThisMuchFree (needed, available)) -> fail (Xenvm_interface.Insufficient_free_space(needed, available))
-  | `Error (`UnknownLV x) -> fail (Failure (Printf.sprintf "I couldn't find an LV named %s" x))
-  | `Ok x -> f x
-
-let (>>|=) m f = m >>= fun x -> x >>*= f
-
 let with_block filename f =
   let open Lwt in
   Block.connect filename

@@ -3,6 +3,7 @@
 open Cmdliner
 open Xenvm_common
 open Lwt
+open Errors
 
 let default_fields = [
  "pv_name";

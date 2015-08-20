@@ -3,6 +3,7 @@
 open Cmdliner
 open Lwt
 open Xenvm_common
+open Errors
 open Lvm
 module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock)
   
