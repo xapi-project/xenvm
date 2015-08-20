@@ -89,7 +89,6 @@ let pvremove =
     )
   )
 
-exception Could_not_obtain_lvm_lock
 let upgrade =
   "Check that we can upgrade an LVM volume to XenVM" >:: fun () ->
   with_temp_file (fun filename ->
@@ -115,36 +114,7 @@ let upgrade =
           ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
 
         (* Upgrade the volume to journalled *)
-        (* LVM locking code can be seen here:
-         * https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/misc/lvm-flock.c#n141 *)
-        let with_lvm_lock vg_name f =
-          let lock_dir = "/run/lock/lvm" in
-          let lock_path = Filename.concat lock_dir ("V_" ^ vg_name ^ ":aux") in
-          Lwt.catch (fun () ->
-            mkdir_rec lock_dir 0o0700;
-            Lwt_unix.(openfile lock_path [O_CREAT; O_TRUNC; O_RDWR] 0o644)
-            >>= fun fd ->
-            Lwt_unix.(lockf fd F_LOCK) 0;
-          ) (function _ -> fail Could_not_obtain_lvm_lock) >>= fun () ->
-          Lwt.finalize f (fun () -> Lwt_unix.unlink lock_path) in
-        with_lvm_lock "vg" (fun () ->
-          (* Change the label magic to be Journalled to hide from LVM *)
-          let module Label_IO = Label.Make(Block) in
-          let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
-          Label_IO.read block >>:= fun label ->
-          let new_label_header = Label.Label_header.create `Journalled in
-          let new_label = {label with Label.label_header = new_label_header } in
-          Label_IO.write block new_label >>:= fun () ->
-          (* Create the redo log, first reconnect to pick up the label changes *)
-          Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
-          let creation_host = Unix.gethostname () in
-          let creation_time = Unix.gettimeofday () |> Int64.of_float in
-          let size = Int64.(4L * mib) in
-          Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name size
-            ~creation_host ~creation_time >>*= fun (_, op) ->
-          Vg_IO.update vg [ op ] >>|= fun () ->
-          Vg_IO.sync vg
-        ) >>|= fun () ->
+        xenvm [ "upgrade"; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         let module Label_IO = Label.Make(Block) in
