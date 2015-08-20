@@ -79,19 +79,20 @@ let format config name filenames =
       return () in
   Lwt_main.run t
 
+(* LVM locking code can be seen here:
+ * https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/misc/lvm-flock.c#n141 *)
+let with_lvm_lock vg_name f =
+  let lock_dir = "/run/lock/lvm" in
+  let lock_path = Filename.concat lock_dir ("V_" ^ vg_name ^ ":aux") in
+  Lwt.catch (fun () ->
+    mkdir_rec lock_dir 0o0700;
+    Lwt_unix.(openfile lock_path [O_CREAT; O_TRUNC; O_RDWR] 0o644)
+    >>= fun fd ->
+    Lwt_unix.(lockf fd F_LOCK) 0;
+  ) (function _ -> fail (Failure "Could_not_obtain_lvm_lock")) >>= fun () ->
+  Lwt.finalize f (fun () -> Lwt_unix.unlink lock_path)
+
 let upgrade config filename =
-  (* LVM locking code can be seen here:
-   * https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/misc/lvm-flock.c#n141 *)
-  let with_lvm_lock vg_name f =
-    let lock_dir = "/run/lock/lvm" in
-    let lock_path = Filename.concat lock_dir ("V_" ^ vg_name ^ ":aux") in
-    Lwt.catch (fun () ->
-      mkdir_rec lock_dir 0o0700;
-      Lwt_unix.(openfile lock_path [O_CREAT; O_TRUNC; O_RDWR] 0o644)
-      >>= fun fd ->
-      Lwt_unix.(lockf fd F_LOCK) 0;
-    ) (function _ -> fail (Failure "Could_not_obtain_lvm_lock")) >>= fun () ->
-    Lwt.finalize f (fun () -> Lwt_unix.unlink lock_path) in
   let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
   let module Label_IO = Label.Make(Block) in
   let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
@@ -117,6 +118,30 @@ let upgrade config filename =
           | `Error e -> `Error e
           end >>*= fun ops ->
           Vg_IO.update vg ops >>|= fun () ->
+          return ()
+        ) (fun exn -> Label_IO.write block orig_label >>:= return)
+      )
+    ) in
+  Lwt_main.run t
+
+let downgrade config filename =
+  let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
+  let module Label_IO = Label.Make(Block) in
+  let (>>:=) m f = m >>= function `Ok x -> f x | `Error (`Msg e) -> fail (Failure e) in
+  let t =
+    let (vg_name, _) = parse_name filename in
+    with_lvm_lock vg_name (fun () ->
+      (* Change the label magic to be LVM to hide from XenVM *)
+      with_block filename (fun block ->
+        Label_IO.read block >>:= fun orig_label ->
+        let label_header = Label.Label_header.create `Lvm in
+        let new_label = { orig_label with Label.label_header } in
+        Label_IO.write block new_label >>:= fun () ->
+        (* Destroy the redo log, first reconnect to pick up the label changes *)
+        Lwt.catch (fun () ->
+          Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+          Vg.remove (Vg_IO.metadata_of vg) Xenvm_interface._journal_name >>*= fun (_, op) ->
+          Vg_IO.update vg [ op ] >>|= fun () ->
           return ()
         ) (fun exn -> Label_IO.write block orig_label >>:= return)
       )
@@ -350,6 +375,15 @@ let upgrade_cmd =
   Term.(pure upgrade $ copts_t $ filename),
   Term.info "upgrade" ~sdocs:copts_sect ~doc ~man
 
+let downgrade_cmd =
+  let doc = "Downgrade the specified VG from XenVM to LVM2" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Downgrades the volume group metadata so that it will be usable by lvm and hidden from xenvm."
+  ] in
+  Term.(pure downgrade $ copts_t $ filename),
+  Term.info "downgrade" ~sdocs:copts_sect ~doc ~man
+
 let host_connect_cmd =
   let doc = "Connect to a host" in
   let man = [
@@ -430,6 +464,7 @@ let cmds = [
   Lvresize.lvextend_cmd;
   format_cmd;
   upgrade_cmd;
+  downgrade_cmd;
   dump_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
