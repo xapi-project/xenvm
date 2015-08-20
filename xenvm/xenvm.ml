@@ -100,19 +100,21 @@ let upgrade config filename =
     with_lvm_lock vg_name (fun () ->
       (* Change the label magic to be Journalled to hide from LVM *)
       with_block filename (fun block ->
-        Label_IO.read block >>:= fun label ->
-        let new_label_header = Label.Label_header.create `Journalled in
-        let new_label = {label with Label.label_header = new_label_header } in
+        Label_IO.read block >>:= fun orig_label ->
+        let label_header = Label.Label_header.create `Journalled in
+        let new_label = { orig_label with Label.label_header } in
         Label_IO.write block new_label >>:= fun () ->
         (* Create the redo log, first reconnect to pick up the label changes *)
-        Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
-        let creation_host = Unix.gethostname () in
-        let creation_time = Unix.gettimeofday () |> Int64.of_float in
-        let size = Int64.mul 4L mib in
-        Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name size
-          ~creation_host ~creation_time >>*= fun (_, op) ->
-        Vg_IO.update vg [ op ] >>|= fun () ->
-        return ()
+        Lwt.catch (fun () ->
+          Vg_IO.connect ~flush_interval:0. [ block ] `RW >>|= fun vg ->
+          let creation_host = Unix.gethostname () in
+          let creation_time = Unix.gettimeofday () |> Int64.of_float in
+          let size = Int64.mul 4L mib in
+          Vg.create (Vg_IO.metadata_of vg) Xenvm_interface._journal_name size
+            ~creation_host ~creation_time >>*= fun (_, op) ->
+          Vg_IO.update vg [ op ] >>|= fun () ->
+          return ()
+        ) (fun exn -> Label_IO.write block orig_label >>:= return)
       )
     ) in
   Lwt_main.run t
