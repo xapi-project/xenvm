@@ -82,15 +82,8 @@ let format config name filenames =
 (* LVM locking code can be seen here:
  * https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/misc/lvm-flock.c#n141 *)
 let with_lvm_lock vg_name f =
-  let lock_dir = "/run/lock/lvm" in
-  let lock_path = Filename.concat lock_dir ("V_" ^ vg_name ^ ":aux") in
-  Lwt.catch (fun () ->
-    mkdir_rec lock_dir 0o0700;
-    Lwt_unix.(openfile lock_path [O_CREAT; O_TRUNC; O_RDWR] 0o644)
-    >>= fun fd ->
-    Lwt_unix.(lockf fd F_LOCK) 0;
-  ) (function _ -> fail (Failure "Could_not_obtain_lvm_lock")) >>= fun () ->
-  Lwt.finalize f (fun () -> Lwt_unix.unlink lock_path)
+  let lock_path = Filename.concat "/run/lock/lvm" ("V_" ^ vg_name ^ ":aux") in
+  Flock.with_flock lock_path f
 
 (* Change the label on the PV and revert it if the function [f] fails *)
 let with_label_change block magic f =
