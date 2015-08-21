@@ -114,9 +114,9 @@ let upgrade =
           ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
 
         (* Upgrade the volume to journalled *)
-        xenvm [ "upgrade"; "vg" ] |> ignore_string;
+        xenvm [ "upgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
         (* Check it's idempotent *)
-        xenvm [ "upgrade"; "vg" ] |> ignore_string;
+        xenvm [ "upgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         let module Label_IO = Label.Make(Block) in
@@ -140,9 +140,9 @@ let upgrade =
         );
 
         (* Downgrade the volume to lvm2 *)
-        xenvm [ "downgrade"; "vg" ] |> ignore_string;
+        xenvm [ "downgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
         (* Check it's idempotent *)
-        xenvm [ "downgrade"; "vg" ] |> ignore_string;
+        xenvm [ "downgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         Label_IO.read block >>:= fun label ->

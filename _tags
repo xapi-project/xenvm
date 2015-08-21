@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 2190fe0a8a00a6b8cc32c1b1dff4f3d1)
+# DO NOT EDIT (digest: 00f88924b9b0edd9fbbc611789a0ccdc)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -21,6 +21,7 @@ true: annot, bin_annot
 <idl/xenvmidl.{cma,cmxa}>: oasis_library_xenvmidl_native
 <idl/*.ml{,i,y}>: oasis_library_xenvmidl_native
 <idl/*.ml{,i,y}>: pkg_cohttp.lwt
+<idl/*.ml{,i,y}>: pkg_core
 <idl/*.ml{,i,y}>: pkg_devmapper
 <idl/*.ml{,i,y}>: pkg_lvm
 <idl/*.ml{,i,y}>: pkg_mirage-block-unix
@@ -36,6 +37,7 @@ true: annot, bin_annot
 <xenvmd/*.ml{,i,y}>: oasis_executable_xenvmd_native
 <xenvmd/xenvmd.{native,byte}>: pkg_cmdliner
 <xenvmd/xenvmd.{native,byte}>: pkg_cohttp.lwt
+<xenvmd/xenvmd.{native,byte}>: pkg_core
 <xenvmd/xenvmd.{native,byte}>: pkg_cstruct
 <xenvmd/xenvmd.{native,byte}>: pkg_devmapper
 <xenvmd/xenvmd.{native,byte}>: pkg_io-page
@@ -57,6 +59,7 @@ true: annot, bin_annot
 <xenvmd/xenvmd.{native,byte}>: use_xenvmidl
 <xenvmd/*.ml{,i,y}>: pkg_cmdliner
 <xenvmd/*.ml{,i,y}>: pkg_cohttp.lwt
+<xenvmd/*.ml{,i,y}>: pkg_core
 <xenvmd/*.ml{,i,y}>: pkg_cstruct
 <xenvmd/*.ml{,i,y}>: pkg_devmapper
 <xenvmd/*.ml{,i,y}>: pkg_io-page
@@ -84,6 +87,7 @@ true: annot, bin_annot
 <xenvm/*.ml{,i,y}>: oasis_executable_xenvm_native
 <xenvm/xenvm.{native,byte}>: pkg_cmdliner
 <xenvm/xenvm.{native,byte}>: pkg_cohttp.lwt
+<xenvm/xenvm.{native,byte}>: pkg_core
 <xenvm/xenvm.{native,byte}>: pkg_devmapper
 <xenvm/xenvm.{native,byte}>: pkg_io-page.unix
 <xenvm/xenvm.{native,byte}>: pkg_lvm
@@ -100,6 +104,7 @@ true: annot, bin_annot
 <xenvm/xenvm.{native,byte}>: use_xenvmidl
 <xenvm/*.ml{,i,y}>: pkg_cmdliner
 <xenvm/*.ml{,i,y}>: pkg_cohttp.lwt
+<xenvm/*.ml{,i,y}>: pkg_core
 <xenvm/*.ml{,i,y}>: pkg_devmapper
 <xenvm/*.ml{,i,y}>: pkg_io-page.unix
 <xenvm/*.ml{,i,y}>: pkg_lvm
@@ -122,6 +127,7 @@ true: annot, bin_annot
 <xenvm-local-allocator/*.ml{,i,y}>: oasis_executable_xenvm_local_allocator_native
 <xenvm-local-allocator/local_allocator.{native,byte}>: pkg_cmdliner
 <xenvm-local-allocator/local_allocator.{native,byte}>: pkg_cohttp.lwt
+<xenvm-local-allocator/local_allocator.{native,byte}>: pkg_core
 <xenvm-local-allocator/local_allocator.{native,byte}>: pkg_cstruct
 <xenvm-local-allocator/local_allocator.{native,byte}>: pkg_devmapper
 <xenvm-local-allocator/local_allocator.{native,byte}>: pkg_io-page
@@ -142,6 +148,7 @@ true: annot, bin_annot
 <xenvm-local-allocator/local_allocator.{native,byte}>: use_xenvmidl
 <xenvm-local-allocator/*.ml{,i,y}>: pkg_cmdliner
 <xenvm-local-allocator/*.ml{,i,y}>: pkg_cohttp.lwt
+<xenvm-local-allocator/*.ml{,i,y}>: pkg_core
 <xenvm-local-allocator/*.ml{,i,y}>: pkg_cstruct
 <xenvm-local-allocator/*.ml{,i,y}>: pkg_devmapper
 <xenvm-local-allocator/*.ml{,i,y}>: pkg_io-page
@@ -168,6 +175,7 @@ true: annot, bin_annot
 <test/*.ml{,i,y}>: oasis_executable_test_native
 <test/test.{native,byte}>: pkg_cmdliner
 <test/test.{native,byte}>: pkg_cohttp.lwt
+<test/test.{native,byte}>: pkg_core
 <test/test.{native,byte}>: pkg_cstruct
 <test/test.{native,byte}>: pkg_devmapper
 <test/test.{native,byte}>: pkg_io-page
@@ -188,6 +196,7 @@ true: annot, bin_annot
 <test/test.{native,byte}>: use_xenvmidl
 <test/*.ml{,i,y}>: pkg_cmdliner
 <test/*.ml{,i,y}>: pkg_cohttp.lwt
+<test/*.ml{,i,y}>: pkg_core
 <test/*.ml{,i,y}>: pkg_cstruct
 <test/*.ml{,i,y}>: pkg_devmapper
 <test/*.ml{,i,y}>: pkg_io-page
