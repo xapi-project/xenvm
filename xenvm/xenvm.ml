@@ -103,12 +103,11 @@ let with_label_change block magic f =
   Lwt.catch f (fun exn -> Label_IO.write block orig_label >>:= fun () -> fail exn)
 
 
-let upgrade config filename =
+let upgrade config physical_device (vg_name, _) =
   let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
   let t =
-    let (vg_name, _) = parse_name filename in
     with_lvm_lock vg_name (fun () ->
-      with_block filename (fun block ->
+      with_block physical_device (fun block ->
         (* Change the label magic to be Journalled to hide from LVM *)
         with_label_change block `Journalled (fun () ->
           (* Create the redo log, first reconnect to pick up the label changes *)
@@ -129,12 +128,11 @@ let upgrade config filename =
     ) in
   Lwt_main.run t
 
-let downgrade config filename =
+let downgrade config physical_device (vg_name, _) =
   let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
   let t =
-    let (vg_name, _) = parse_name filename in
     with_lvm_lock vg_name (fun () ->
-      with_block filename (fun block ->
+      with_block physical_device (fun block ->
         (* Change the label magic to be LVM to hide from XenVM *)
         with_label_change block `Lvm (fun () ->
           (* Destroy the redo log, first reconnect to pick up the label changes *)
@@ -375,7 +373,7 @@ let upgrade_cmd =
     `S "DESCRIPTION";
     `P "Upgrades the volume group metadata so that it will be usable by xenvmd and hidden from lvm."
   ] in
-  Term.(pure upgrade $ copts_t $ filename),
+  Term.(pure upgrade $ copts_t $ physical_device_arg_required $ name_arg),
   Term.info "upgrade" ~sdocs:copts_sect ~doc ~man
 
 let downgrade_cmd =
@@ -384,7 +382,7 @@ let downgrade_cmd =
     `S "DESCRIPTION";
     `P "Downgrades the volume group metadata so that it will be usable by lvm and hidden from xenvm."
   ] in
-  Term.(pure downgrade $ copts_t $ filename),
+  Term.(pure downgrade $ copts_t $ physical_device_arg_required $ name_arg),
   Term.info "downgrade" ~sdocs:copts_sect ~doc ~man
 
 let host_connect_cmd =
