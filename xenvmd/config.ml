@@ -12,6 +12,7 @@
  * GNU Lesser General Public License for more details.
  *)
 open Sexplib.Std
+open Sexplib.Conv
 
 type t = {
   listenPort: int option; (* TCP port number to listen on *)
@@ -20,4 +21,5 @@ type t = {
   host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
   vg: string; (* name of the volume group *)
   devices: string list; (* physical device containing the volume group *)
+  rrd_ds_owner: string sexp_option; (* export stats using owner (SR rrd_ds_owner) *)
 } with sexp

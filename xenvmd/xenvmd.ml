@@ -66,6 +66,7 @@ module Impl = struct
 
   let shutdown context () =
     List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
+    Xenvmd_stats.stop ();
     VolumeManager.shutdown ()
     >>= fun () ->
     VolumeManager.FreePool.shutdown ()
@@ -174,7 +175,13 @@ let run port sock_path config =
        they no longer react to API calls. *)
     let stops,stoppers = List.map (fun _ -> Lwt.wait ()) services |> List.split in
     let threads = List.map2 (service_http stoppers) (tcp_mode @ unix_mode) stops in
-    
+
+    (* start reporting stats to rrdd if we have the config option *)
+    begin match config.Config.rrd_ds_owner with
+    | Some owner -> Xenvmd_stats.start owner
+    | None -> ()
+    end;
+
     Lwt.join ((service_queues ())::threads) in
 
   Lwt_main.run t
