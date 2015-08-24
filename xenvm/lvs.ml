@@ -3,6 +3,7 @@
 open Cmdliner
 open Xenvm_common
 open Lwt
+open Errors
 
 let default_fields = [
  "lv_name";
@@ -18,7 +19,7 @@ let default_fields = [
  "convert_lv"]
 
 
-let lvs copts noheadings nosuffix units fields (vg_name,lv_name_opt) =
+let lvs copts noheadings nosuffix units fields offline physical_device (vg_name,lv_name_opt) =
   let open Xenvm_common in
   let segs = has_seg_field fields in
   let do_row dev vg lv =
@@ -36,10 +37,22 @@ let lvs copts noheadings nosuffix units fields (vg_name,lv_name_opt) =
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    let dev = match info with | Some i -> i.local_device | None -> "<unknown>" in
+    let dev : string = match (info,physical_device) with
+      | _, Some d -> d (* cmdline overrides default for the VG *)
+      | Some info, None -> info.local_device (* If we've got a default, use that *)
+      | None, None -> failwith "Need to know the local device!" in
+
     Lwt.catch
-      (Client.get)
-      (fun _ ->
+      (fun () ->
+        if offline then begin
+          with_block dev
+            (fun x ->
+              let module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock) in
+              Vg_IO.connect [ x ] `RO >>|= fun vg ->
+              return (Vg_IO.metadata_of vg)
+            )
+        end else Client.get ()
+      ) (fun _ ->
         stderr "  Volume group \"%s\" not found" vg_name
         >>= fun () ->
         stderr "  Skipping volume group %s" vg_name
@@ -66,5 +79,5 @@ let lvs_cmd =
     `S "DESCRIPTION";
     `P "lvs produces formatted output about logical volumes";
   ] in
-  Term.(pure lvs $ Xenvm_common.copts_t $ noheadings_arg $ nosuffix_arg $ units_arg $ output_arg default_fields $ Xenvm_common.name_arg),
+  Term.(pure lvs $ Xenvm_common.copts_t $ noheadings_arg $ nosuffix_arg $ units_arg $ output_arg default_fields $ Xenvm_common.offline_arg $ Xenvm_common.physical_device_arg $ Xenvm_common.name_arg),
   Term.info "lvs" ~sdocs:"COMMON OPTIONS" ~doc ~man
