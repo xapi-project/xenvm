@@ -493,3 +493,8 @@ let action_arg =
 Activation  of a logical volume creates a symbolic link /dev/VolumeGroupName/LogicalVolumeName pointing to the device node.  This link is removed on deactivation.  All software and scripts should access the device through this symbolic link and present this as the name of the device.  The location and name of the underlying device node may depend on the  distribution and configuration (e.g. udev) and might change from release to release." in
   let a = Arg.(value & opt (some char) None & info ["a"] ~docv:"ACTIVATE" ~doc) in
   Term.(pure parse_action $ a)
+
+let offline_arg =
+  let doc = "Assume xenvmd is offline and read metadata from the disk"
+  in
+  Arg.(value & flag & info [ "offline" ] ~docv:"OFFLINE" ~doc)

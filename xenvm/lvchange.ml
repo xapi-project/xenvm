@@ -170,15 +170,11 @@ let del_tag_arg =
   let doc = "Remove the given tag from the LV" in
   Arg.(value & opt (some string) None & info ["deltag"] ~docv:"DELTAG" ~doc)
 
-let offline_arg =
-  let doc = "Assume xenvmd is offline and read metadata from the disk" in
-  Arg.(value & flag & info [ "offline" ] ~docv:"OFFLINE" ~doc)
- 
 let lvchange_cmd =
   let doc = "Change the attributes of a logical volume" in
   let man = [
     `S "DESCRIPTION";
     `P "lvchange allows you to change the attributes of a logical volume including making them known to the kernel ready for use."
   ] in
-  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg $ refresh_arg $ add_tag_arg $ del_tag_arg $ offline_arg),
+  Term.(pure lvchange $ Xenvm_common.copts_t $ Xenvm_common.name_arg $ Xenvm_common.physical_device_arg $ action_arg $ perm_arg $ refresh_arg $ add_tag_arg $ del_tag_arg $ Xenvm_common.offline_arg),
   Term.info "lvchange" ~sdocs:"COMMON OPTIONS" ~doc ~man
