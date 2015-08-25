@@ -477,6 +477,7 @@ let cmds = [
   Lvremove.lvremove_cmd;
   Lvrename.lvrename_cmd;
   Lvdisplay.lvdisplay_cmd;
+  Lvdump.lvdump_cmd;
 ]
 
 let () =
