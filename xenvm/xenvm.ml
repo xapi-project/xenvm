@@ -184,6 +184,23 @@ let host_disconnect copts (vg_name,_) uncooperative host =
     set_uri copts info;
     Client.Host.disconnect ~cooperative:(not uncooperative) ~name:host in
   Lwt_main.run t 
+let host_dump copts (vg_name,_) physical_device host =
+  let t =
+    get_vg_info_t copts vg_name >>= fun info ->
+    set_uri copts info;
+    let local_device : string = match (info,physical_device) with
+      | _, Some d -> d (* cmdline overrides default for the VG *)
+      | Some info, None -> info.local_device (* If we've got a default, use that *)
+      | None, None -> failwith "Need to know the local device!" in
+    Client.Host.all ()
+    >>= fun all ->
+    let open Xenvm_interface in
+    let h = List.find (fun h -> h.name = host) all in
+    Lwt_io.with_file Lwt_io.Output h.toLVM.lv (Lvdump.to_file (vg_name, h.toLVM.lv) local_device)
+    >>= fun () ->
+    Lwt_io.with_file Lwt_io.Output h.fromLVM.lv (Lvdump.to_file (vg_name, h.fromLVM.lv) local_device) in
+  Lwt_main.run t 
+
 let host_destroy copts (vg_name,_) host =
   let t =
     get_vg_info_t copts vg_name >>= fun info ->
@@ -399,6 +416,15 @@ let host_disconnect_cmd =
   Term.(pure host_disconnect $ copts_t $ name_arg $ uncooperative_flag $ hostname),
   Term.info "host-disconnect" ~sdocs:copts_sect ~doc ~man
 
+let host_dump_cmd =
+  let doc = "Dump a host's metadata volumes" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Copy the contents of a host's metadata volumes to local files in the current directory for forensic analysis.";
+  ] in
+  Term.(pure host_dump $ copts_t $ name_arg $ physical_device_arg $ hostname),
+  Term.info "host-dump" ~sdocs:copts_sect ~doc ~man
+
 let host_create_cmd =
   let doc = "Initialise a host's metadata volumes" in
   let man = [
@@ -462,7 +488,10 @@ let cmds = [
   dump_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
   host_list_cmd;
-  host_connect_cmd; host_disconnect_cmd; benchmark_cmd;
+  host_connect_cmd;
+  host_disconnect_cmd;
+  host_dump_cmd;
+  benchmark_cmd;
   Lvcreate.lvcreate_cmd;
   Lvchange.lvchange_cmd;
   Vgchange.vgchange_cmd;
@@ -477,6 +506,7 @@ let cmds = [
   Lvremove.lvremove_cmd;
   Lvrename.lvrename_cmd;
   Lvdisplay.lvdisplay_cmd;
+  Lvdump.lvdump_cmd;
 ]
 
 let () =
