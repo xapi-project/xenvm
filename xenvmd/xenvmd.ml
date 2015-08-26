@@ -649,7 +649,7 @@ module FreePool = struct
                J.push j (Op.FreeAllocation (host, allocated_extents))
                >>|= fun wait ->
                (* The operation is now in the journal *)
-               wait ()
+               wait.J.sync ()
                (* The operation has been performed *)
              | None, `Ok _ ->
                error "Unable to extend LV %s because the journal is not configured" freename;
