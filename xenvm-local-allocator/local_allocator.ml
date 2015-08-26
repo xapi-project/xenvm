@@ -449,7 +449,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
                   J.push j { Op.volume; device }
                   >>|= fun wait ->
                   (* The operation is now in the journal *)
-                  wait ()
+                  wait.J.sync ()
                   (* The operation is now complete *)
                   >>= fun () ->
                   let action = match action with
