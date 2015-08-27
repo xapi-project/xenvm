@@ -182,7 +182,18 @@ let host_disconnect copts (vg_name,_) uncooperative host =
   let t =
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    Client.Host.disconnect ~cooperative:(not uncooperative) ~name:host in
+    let rec retry n =
+      Lwt.catch
+        (fun () ->
+           Client.Host.disconnect ~cooperative:(not uncooperative) ~name:host)
+        (fun e ->
+           Printf.printf "Caught exception: %s\n%!" (Printexc.to_string e);
+           if n = 0 then Lwt.fail e else
+             Lwt_unix.sleep 5.0
+             >>= fun () ->
+             retry (n-1))
+    in
+    retry 12 in
   Lwt_main.run t 
 let host_dump copts (vg_name,_) physical_device host =
   let t =
