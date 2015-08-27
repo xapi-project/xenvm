@@ -138,21 +138,22 @@ module VolumeManager = struct
   let myvg, myvg_u = Lwt.task ()
   let lock = Lwt_mutex.create ()
 
-  let vgopen ~devices:devices' =
+  let vgopen ~devices =
     Lwt_list.map_s
       (fun filename -> Block.connect filename >>= function
         | `Error _ -> fatal_error_t ("open " ^ filename)
         | `Ok x -> return x
-      ) devices'
+      ) devices
     >>= fun devices' ->
     let module Label_IO = Lvm.Label.Make(Block) in
     Lwt_list.iter_s
-      (fun device ->
+      (fun (filename, device) ->
         Label_IO.read device >>= function
         | `Error (`Msg m) ->
           error "Failed to read PV label from device: %s" m;
           fail (Failure "Failed to read PV label from device")
         | `Ok label ->
+          info "opened %s: %s" filename (Lvm.Label.to_string label);
           begin match Lvm.Label.Label_header.magic_of label.Lvm.Label.label_header with
           | Some `Lvm ->
             error "Device has normal LVM PV label. I will only open devices with the new PV label.";
@@ -163,7 +164,7 @@ module VolumeManager = struct
             error "Device has an unrecognised LVM PV label. I will only open devices with the new PV label.";
             fail (Failure "Device has wrong PV label")
           end
-      ) devices'
+      ) (List.combine devices devices')
     >>= fun () ->
     Vg_IO.connect ~flush_interval:5. devices' `RW >>|= fun vg ->
     Lwt.wakeup_later myvg_u vg;
