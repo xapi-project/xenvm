@@ -50,7 +50,7 @@ let vgs_offline =
 let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
   let with_xenvmd_running loop =
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
-      file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")))");
+      file_of_string "test.xenvmd.conf" ("( (listenPort ()) (listenPath (Some \"/tmp/xenvmd\")) (host_allocation_quantum 128) (host_low_water_mark 8) (vg "^vg^") (devices ("^loop^")) (rrd_ds_owner \"rrd-ds-owner\"))");
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";

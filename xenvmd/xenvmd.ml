@@ -66,7 +66,8 @@ module Impl = struct
 
   let shutdown context () =
     List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
-    Xenvmd_stats.stop ();
+    Xenvmd_stats.stop ()
+    >>= fun () ->
     VolumeManager.shutdown ()
     >>= fun () ->
     VolumeManager.FreePool.shutdown ()
