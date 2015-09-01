@@ -3,4 +3,4 @@ install: wget https://raw.githubusercontent.com/ocaml/ocaml-travisci-skeleton/ma
 script: cp .travis.oasis _oasis && bash -ex .travis-opam.sh && bash -ex .travis.sh
 sudo: true
 env:
-  - OCAML_VERSION=4.02 PACKAGE=thin_lvhd_tools EXTRA_REMOTES="git://github.com/xapi-project/thin-lvhd-opam-repo" TESTS=true PINS="conduit:git://github.com/mirage/ocaml-conduit"
+  - OCAML_VERSION=4.02 PACKAGE=thin_lvhd_tools EXTRA_REMOTES="git://github.com/xapi-project/opam-repo-dev" TESTS=true PINS="conduit:git://github.com/mirage/ocaml-conduit"
