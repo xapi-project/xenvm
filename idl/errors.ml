@@ -20,3 +20,15 @@ let (>>*=) m f = match m with
   | `Error (`UnknownLV lv) -> fail (Failure (Printf.sprintf "The LV with name %s was not found" lv))
   | `Ok x -> f x
 let (>>|=) m f = m >>= fun x -> x >>*= f
+
+(* This error must cause the system to stop for manual maintenance.
+ * Perhaps we could scope this later and take down only a single connection? *)
+let fatal_error_t msg =
+  Log.error "%s" msg;
+  fail (Failure msg)
+
+let fatal_error msg m = m >>= function
+  | `Error (`Msg x) -> fatal_error_t (msg ^ ": " ^ x)
+  | `Error `Suspended -> fatal_error_t (msg ^ ": queue is suspended")
+  | `Error `Retry -> fatal_error_t (msg ^ ": queue temporarily unavailable")
+  | `Ok x -> return x
