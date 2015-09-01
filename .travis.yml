@@ -8,4 +8,4 @@ env:
     - OCAML_VERSION=4.02
     - TESTS=true
     - EXTRA_REMOTES="git://github.com/xapi-project/opam-repo-dev"
-    - PINS="conduit:git://github.com/mirage/ocaml-conduit"
+    - PINS="conduit:git://github.com/mirage/ocaml-conduit camldm:git://github.com/xapi-project/camldm mirage-block-volume:git://github.com/mirage/mirage-block-volume shared-block-ring:git://github.com/mirage/shared-block-ring"
