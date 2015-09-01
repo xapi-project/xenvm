@@ -14,7 +14,7 @@
 open Sexplib.Std
 open Sexplib.Conv
 
-type t = {
+type xenvmd_config = {
   listenPort: int option; (* TCP port number to listen on *)
   listenPath: string option; (* path of a unix-domain socket to listen on *)
   host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)

@@ -10,8 +10,8 @@ end
 module FreePool : sig
   val start : string -> unit Lwt.t
   val shutdown : unit -> unit Lwt.t
-  val resend_free_volumes : Config.t -> unit Lwt.t
-  val top_up_free_volumes : Config.t -> unit Lwt.t
+  val resend_free_volumes : Config.xenvmd_config -> unit Lwt.t
+  val top_up_free_volumes : Config.xenvmd_config -> unit Lwt.t
 end
 
 val vgopen : devices:string list -> unit Lwt.t

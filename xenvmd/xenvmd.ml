@@ -109,7 +109,7 @@ let run port sock_path config =
   maybe_write_pid config;
   
   let t =
-    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_xenvmd_config config));
     VolumeManager.vgopen ~devices:config.Config.devices
     >>= fun () ->
     VolumeManager.FreePool.start Xenvm_interface._journal_name
@@ -231,7 +231,7 @@ let daemonize config =
   Lwt_daemon.daemonize ()
   
 let main port sock_path config daemon =
-  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  let config = Config.xenvmd_config_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
   let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
 
