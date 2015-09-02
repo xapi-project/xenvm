@@ -188,10 +188,18 @@ let host_disconnect copts (vg_name,_) uncooperative host =
            Client.Host.disconnect ~cooperative:(not uncooperative) ~name:host)
         (fun e ->
            Printf.printf "Caught exception: %s\n%!" (Printexc.to_string e);
-           if n = 0 then Lwt.fail e else
-             Lwt_unix.sleep 5.0
-             >>= fun () ->
-             retry (n-1))
+           match e with
+           | Xenvm_interface.HostStillConnecting _ ->
+             if n = 0 then Lwt.fail e else begin
+               Printf.printf "Exception is non-fatal: retrying\n%!";
+               Lwt_unix.sleep 5.0
+               >>= fun () ->
+               retry (n-1)
+             end
+           | _ ->
+             Printf.printf "Giving up\n%!";
+             Lwt.return ()
+        )
     in
     retry 12 in
   Lwt_main.run t 
