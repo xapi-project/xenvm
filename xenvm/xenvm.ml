@@ -263,6 +263,16 @@ let shutdown copts (vg_name,_) =
     lwt_while (fun () -> is_alive pid) (fun () -> Lwt_unix.sleep 1.0)
   in Lwt_main.run t
 
+let flush copts (vg_name, lv_name_opt) =
+  match lv_name_opt with
+  | None -> failwith "Need LV name"
+  | Some lv_name ->
+    let t =
+      get_vg_info_t copts vg_name >>= fun info ->
+      set_uri copts info;
+      Client.flush ~name:lv_name in
+    Lwt_main.run t
+
 let benchmark copts (vg_name,_) volumes threads =
   let t =
     let creation_host = Unix.gethostname () in
@@ -480,6 +490,17 @@ let shutdown_cmd =
   Term.(pure shutdown $ copts_t $ name_arg),
   Term.info "shutdown" ~sdocs:copts_sect ~doc ~man
 
+let flush_cmd =
+  let doc = "Flush all pending operations for the LV to the on-disk metadata" in
+  let man = [
+    `S "DESCRIPTION";
+    `P "Flushes all pending operations for the LV to the on-disk metadata, this
+        is sometimes necessary if you wish to use commands with the --offline
+        flag, e.g. xenvm-lvs.";
+  ] in
+  Term.(pure flush $ copts_t $ name_arg),
+  Term.info "flush" ~sdocs:copts_sect ~doc ~man
+
 let benchmark_cmd =
   let doc = "Perform some microbenchmarks" in
   let man = [
@@ -506,6 +527,7 @@ let cmds = [
   downgrade_cmd;
   dump_cmd;
   shutdown_cmd; host_create_cmd; host_destroy_cmd;
+  flush_cmd;
   host_list_cmd;
   host_connect_cmd;
   host_disconnect_cmd;
