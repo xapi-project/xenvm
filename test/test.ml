@@ -83,6 +83,7 @@ let lvchange_offline =
   let name = Uuid.(to_string (create ())) in
   with_xenvmd ~cleanup_vg:false (fun vg ->
     xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
+    xenvm [ "flush"; vg ^ "/" ^ name ] |> ignore_string;
     xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string
   )
 
