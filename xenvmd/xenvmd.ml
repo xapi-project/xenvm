@@ -62,7 +62,8 @@ module Impl = struct
 
   let flush context ~name =
     (* We don't know where [name] is attached so we have to flush everything *)
-    VolumeManager.flush_all ()
+    VolumeManager.flush_all () >>=
+    VolumeManager.sync
 
   let shutdown context () =
     List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
