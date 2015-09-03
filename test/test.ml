@@ -51,7 +51,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
   let with_xenvmd_running loop =
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       let config = {
-        Config.listenPort = None;
+        Config.Xenvmd.listenPort = None;
         listenPath = Some "/tmp/xenvmd";
         host_allocation_quantum = 128L;
         host_low_water_mark = 8L;
@@ -59,7 +59,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
         devices = [loop];
         rrd_ds_owner = Some (Printf.sprintf "xenvmd-%d-stats" (Unix.getpid ()));
       } in
-      Sexplib.Sexp.to_string_hum (Config.sexp_of_xenvmd_config config)
+      Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config)
       |> file_of_string "test.xenvmd.conf";
       xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;

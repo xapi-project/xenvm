@@ -123,7 +123,9 @@ let lock = Lwt_mutex.create ()
 
 let vgopen ~devices =
   Lwt_list.map_s
-    (fun filename -> Block.connect filename >>= function
+    (fun filename ->
+       Printf.printf "filename: %s\n%!" filename;
+       Block.connect filename >>= function
       | `Error _ -> fatal_error_t ("open " ^ filename)
       | `Ok x -> return x
     ) devices
@@ -569,7 +571,7 @@ module FreePool = struct
       return ()
 
   let resend_free_volumes config =
-    Device.read_sector_size config.Config.devices
+    Device.read_sector_size config.Config.Xenvmd.devices
     >>= fun sector_size ->
 
     fatal_error "resend_free_volumes unable to read LVM metadata"
@@ -606,7 +608,8 @@ module FreePool = struct
       ) !free_LVs
 
   let top_up_free_volumes config =
-    Device.read_sector_size config.Config.devices
+    let open Config.Xenvmd in
+    Device.read_sector_size config.devices
     >>= fun sector_size ->
 
     read (fun x -> return (`Ok x))
@@ -622,14 +625,14 @@ module FreePool = struct
          match try Some(Lvm.Vg.LVs.find freeid x.Lvm.Vg.lvs) with _ -> None with
          | Some lv ->
            let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
-           if size_mib < config.Config.host_low_water_mark then begin
+           if size_mib < config.host_low_water_mark then begin
              info "LV %s is %Ld MiB < low_water_mark %Ld MiB; allocating %Ld MiB"
-               freename size_mib config.Config.host_low_water_mark config.Config.host_allocation_quantum;
+               freename size_mib config.host_low_water_mark config.host_allocation_quantum;
              (* find free space in the VG *)
-             begin match !journal, Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.Config.host_allocation_quantum extent_size_mib) with
+             begin match !journal, Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.host_allocation_quantum extent_size_mib) with
              | _, `Error (`OnlyThisMuchFree (needed_extents, free_extents)) ->
                info "LV %s is %Ld MiB but total space free (%Ld MiB) is less than allocation quantum (%Ld MiB)"
-                 freename size_mib Int64.(mul free_extents extent_size_mib) config.Config.host_allocation_quantum;
+                 freename size_mib Int64.(mul free_extents extent_size_mib) config.host_allocation_quantum;
                (* try again later *)
                return ()
              | Some j, `Ok allocated_extents ->
