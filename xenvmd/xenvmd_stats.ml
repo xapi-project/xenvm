@@ -17,29 +17,25 @@ open Lwt
 open Log
 module D = Debug.Make(struct let name = "xenvmd_stats" end)
 
-let phys_util () =
+let phys_util vg =
   let open Lvm in
   let size_of_lv_in_extents lv =
     List.map Lv.Segment.to_allocation lv.Lv.segments
     |> List.fold_left Pv.Allocator.merge []
     |> Pv.Allocator.size in
-  let t =
-    VolumeManager.read (fun x -> return x) >>= fun vg ->
-    let bytes_of_extents = Int64.(mul (mul vg.Vg.extent_size 512L)) in
-    Vg.LVs.bindings vg.Vg.lvs
-    |> List.map (fun (_, lv) -> size_of_lv_in_extents lv)
-    |> List.map bytes_of_extents
-    |> List.fold_left Int64.add 0L
-    |> return in
-  Lwt_main.run t
+  let bytes_of_extents = Int64.(mul (mul vg.Vg.extent_size 512L)) in
+  Vg.LVs.bindings vg.Vg.lvs
+  |> List.map (fun (_, lv) -> size_of_lv_in_extents lv)
+  |> List.map bytes_of_extents
+  |> List.fold_left Int64.add 0L
 
-let generate_stats owner =
+let generate_stats owner vg =
   let phys_util_ds =
     Rrd.SR owner,
     Ds.ds_make
       ~name:"physical_utilisation"
       ~description:(Printf.sprintf "Physical uitilisation of SR %s" owner)
-      ~value:(Rrd.VT_Int64 (phys_util ()))
+      ~value:(Rrd.VT_Int64 (phys_util !vg))
       ~ty:Rrd.Gauge
       ~default:true
       ~min:0.0
@@ -55,7 +51,7 @@ let stop_signal_t, stop_signal_u = Lwt.wait ()
 (* xenvmd currently exports just 1 datasource; a single page will suffice *)
 let shared_page_count = 1
 
-let start owner =
+let start owner vg =
   let rec loop () =
     Lwt_mutex.with_lock reporter_m (fun () ->
       match !reporter_cache with
@@ -69,7 +65,7 @@ let start owner =
             ~neg_shift:0.5
             ~target:(Reporter.Local shared_page_count)
             ~protocol:Rrd_interface.V2
-            ~dss_f:(fun () -> generate_stats owner) in
+            ~dss_f:(fun () -> generate_stats owner vg) in
         reporter_cache := (Some reporter);
         return reporter
     ) >>= fun reporter ->
