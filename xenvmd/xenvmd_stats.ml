@@ -56,53 +56,50 @@ let stop_signal_t, stop_signal_u = Lwt.wait ()
 let shared_page_count = 1
 
 let start owner =
-  Lwt.async (fun () ->
-    let rec loop () =
-      Lwt_mutex.with_lock reporter_m (fun () ->
-        match !reporter_cache with
-        | Some r -> return r
-        | None ->
-          let reporter =
-            info "Starting RRDD reporter";
-            Reporter.start_async
-              (module D : Debug.DEBUG)
-              ~uid:(Printf.sprintf "xenvmd-%d-stats" (Unix.getpid ()))
-              ~neg_shift:0.5
-              ~target:(Reporter.Local shared_page_count)
-              ~protocol:Rrd_interface.V2
-              ~dss_f:(fun () -> generate_stats owner) in
-          reporter_cache := (Some reporter);
-          return reporter
-      ) >>= fun reporter ->
-      stop_signal_t >>= return <?> Lwt_unix.sleep 0.1 >>= fun () ->
-      let open Reporter in
-      match get_state reporter with
-      | Running ->
-        debug "RRDD reporter currently running; will check again in 60s...";
-        stop_signal_t >>= return <?> Lwt_unix.sleep 60. >>= loop
-      | Stopped `New ->
-        debug "RRDD reporter not yet started; will check again in 5s...";
-        stop_signal_t >>= return <?> Lwt_unix.sleep 5. >>= loop
-      | Stopped (`Failed exn) ->
-        debug "RRDD reporter has failed with exception: %s; restarting in 60s..."
-          (Printexc.to_string exn);
-        reporter_cache := None;
-        stop_signal_t >>= return <?> Lwt_unix.sleep 60. >>= loop
-      | Stopped `Cancelled | Cancelled ->
-        debug "RRDD reporter was explictly stopped; not restarting.";
-        return ()
-    in
-    loop ()
-  )
+  let rec loop () =
+    Lwt_mutex.with_lock reporter_m (fun () ->
+      match !reporter_cache with
+      | Some r -> return r
+      | None ->
+        let reporter =
+          info "Starting RRDD reporter";
+          Reporter.start_async
+            (module D : Debug.DEBUG)
+            ~uid:(Printf.sprintf "xenvmd-%d-stats" (Unix.getpid ()))
+            ~neg_shift:0.5
+            ~target:(Reporter.Local shared_page_count)
+            ~protocol:Rrd_interface.V2
+            ~dss_f:(fun () -> generate_stats owner) in
+        reporter_cache := (Some reporter);
+        return reporter
+    ) >>= fun reporter ->
+    let open Reporter in
+    match get_state reporter with
+    | Running ->
+      debug "RRDD reporter currently running; will check again in 60s...";
+      Lwt_unix.sleep 60. >>= loop
+    | Stopped `New ->
+      debug "RRDD reporter not yet started; will check again in 5s...";
+      Lwt_unix.sleep 5. >>= loop
+    | Stopped (`Failed exn) ->
+      debug "RRDD reporter has failed with exception: %s; restarting in 60s..."
+        (Printexc.to_string exn);
+      reporter_cache := None;
+      Lwt_unix.sleep 60. >>= loop
+    | Stopped `Cancelled | Cancelled ->
+      debug "RRDD reporter was explictly stopped; not restarting.";
+      return ()
+  in
+  Lwt.async (fun () -> Lwt.pick [stop_signal_t; loop ()])
 
 let stop () =
+  info "Stopping RRDD reporter";
+  Lwt.wakeup_later stop_signal_u ();
   Lwt_mutex.with_lock reporter_m (fun () ->
     match !reporter_cache with
     | None -> return ()
     | Some reporter ->
-        info "Stopping RRDD reporter";
         Reporter.cancel reporter;
         reporter_cache := None;
-        Lwt.wakeup_later stop_signal_u ();
         return ()
   )
