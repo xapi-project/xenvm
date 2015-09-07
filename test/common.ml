@@ -255,3 +255,10 @@ let xenvm = function
     let args = if !use_mock then "--mock-devmapper" :: "--configdir" :: "/tmp/xenvm.d" :: args else args in
     run "./xenvm.native" (cmd :: args)
 let xenvmd = run "./xenvmd.native"
+let local_allocator =
+  let cmd = "./local_allocator.native" in
+  function
+  | [] -> run cmd []
+  | args ->
+    let args = if !use_mock then args @ ["--mock-devmapper"] else args in
+    run cmd args

@@ -47,7 +47,7 @@ let vgs_offline =
     )
   )
 
-let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
+let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
   let with_xenvmd_running loop =
       xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       let config = {
@@ -65,7 +65,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
       finally
-        (fun () -> f vg)
+        (fun () -> f vg loop)
         (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string) in
   match existing_vg with
   | Some path -> with_xenvmd_running path
@@ -77,11 +77,28 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> 'a) =
       )
     )
 
+let start_local_allocator host devices =
+  ignore(xenvm [ "host-create"; vg; host]);
+  let config_file = Printf.sprintf "local_allocator.%s.conf" host in
+  let config = {
+    Config.Local_allocator.socket = Printf.sprintf "/tmp/%s-socket" host;
+    allocation_quantum = 0L;
+    localJournal = Printf.sprintf "%s-localJournal" host;
+    devices = devices;
+    toLVM = Printf.sprintf "%s-toLVM" host;
+    fromLVM = Printf.sprintf "%s-fromLVM" host;
+  } in
+  Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
+  |> file_of_string config_file;
+  let local_allocator_thread = Lwt_preemptive.detach local_allocator [ "--config"; config_file; ] in
+  ignore(xenvm [ "host-connect"; vg; host]);
+  local_allocator_thread
+
 let lvchange_offline =
   "lvchange vg/lv --offline: check that we can activate volumes offline" >::
   fun () ->
   let name = Uuid.(to_string (create ())) in
-  with_xenvmd ~cleanup_vg:false (fun vg ->
+  with_xenvmd ~cleanup_vg:false (fun vg _ ->
     xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
     xenvm [ "flush"; vg ^ "/" ^ name ] |> ignore_string;
     xenvm [ "lvchange"; "-ay"; vg ^ "/" ^ name; "--offline" ] |> ignore_string
@@ -142,7 +159,7 @@ let upgrade =
         assert_equal ~msg:"Unexpected number of LVs on LVM after upgrade"
           ~printer:string_of_int 3 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
         (* Check xenvmd is happy to connect *)
-        with_xenvmd ~existing_vg:filename (fun vg ->
+        with_xenvmd ~existing_vg:filename (fun vg _ ->
           let lv_count =
             xenvm [ "vgs"; "/dev/" ^ vg; "--noheadings"; "-o"; "lv_count" ]
             |> String.trim |> int_of_string in
@@ -379,6 +396,31 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   vgs_online;
 ]
 
+exception Timeout
+
+let la_start device =
+  "Start and shutdown the local allocator" >::
+  (fun () ->
+     ignore(Lwt_main.run (
+         let rec n_times n =
+           if n=0 then Lwt.return () else begin
+             let la_thread = start_local_allocator "host1" [device] in
+             ignore(xenvm ["host-disconnect"; vg; "host1"]);
+             Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
+             >>= fun _ ->
+             n_times (n-1)
+           end
+         in
+         n_times 1))
+           
+  )
+
+let local_allocator_suite device = "Commands which require the local allocator" >::: [
+    la_start device;
+]
+
+
+
 let _ =
   Random.self_init ();
   mkdir_rec "/tmp/xenvm.d" 0o0755;
@@ -386,4 +428,5 @@ let _ =
     if List.exists (function RFailure _ | RError _ -> true | _ -> false) results
     then exit 1 in
   run_test_tt_main no_xenvmd_suite |> check_results_with_exit_code;
-  with_xenvmd (fun _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
+  with_xenvmd (fun _ _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
+  with_xenvmd (fun _ device -> run_test_tt_main (local_allocator_suite device) |> check_results_with_exit_code)
