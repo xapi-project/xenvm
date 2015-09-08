@@ -108,7 +108,7 @@ let maybe_write_pid config =
 
 let run port sock_path config =
   maybe_write_pid config;
-  
+
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_xenvmd_config config));
     VolumeManager.vgopen ~devices:config.Config.devices
@@ -116,8 +116,11 @@ let run port sock_path config =
     VolumeManager.FreePool.start Xenvm_interface._journal_name
     >>= fun () ->
     VolumeManager.Host.reconnect_all ()
-    >>= fun () -> 
-    
+    >>= fun () ->
+    (* Create a snapshot cache of the metadata for the stats thread *)
+    VolumeManager.read return >>= fun vg ->
+    let stats_vg_cache = ref vg in
+
     let rec service_queues () =
       (* 0. Have any local allocators restarted? *)
       VolumeManager.FreePool.resend_free_volumes config
@@ -125,10 +128,11 @@ let run port sock_path config =
       (* 1. Do any of the host free LVs need topping up? *)
       VolumeManager.FreePool.top_up_free_volumes config
       >>= fun () ->
-
       (* 2. Are there any pending LVM updates from hosts? *)
       VolumeManager.flush_all ()
       >>= fun () ->
+      (* 3. Update the metadata snapshot for the stats collection *)
+      VolumeManager.read return >>= fun vg -> stats_vg_cache := vg;
 
       Lwt_unix.sleep 5.
       >>= fun () ->
@@ -180,7 +184,7 @@ let run port sock_path config =
 
     (* start reporting stats to rrdd if we have the config option *)
     begin match config.Config.rrd_ds_owner with
-    | Some owner -> Xenvmd_stats.start owner
+    | Some owner -> Xenvmd_stats.start owner stats_vg_cache
     | None -> ()
     end;
 
