@@ -230,7 +230,7 @@ let make_copts config uri_override sockpath_override mock_dm =
 
 let config =
   let doc = "Path to the config directory" in
-  Arg.(value & opt dir "/etc/xenvm.d" & info [ "configdir" ] ~docv:"CONFIGDIR" ~doc)
+  Arg.(value & opt dir "/var/run/nonpersistent/xenvm.d" & info [ "configdir" ] ~docv:"CONFIGDIR" ~doc)
 
 let uri_arg =
   let doc = "Overrides the URI of the XenVM daemon in charge of the volume group." in
