@@ -18,8 +18,6 @@ open Log
 open Lvm
 module D = Debug.Make(struct let name = "xenvmd_stats" end)
 
-
-
 let generate_stats owner vg =
   (* Dereference vg once and shadow so that all stats see the same world *)
   let vg = !vg in
@@ -57,7 +55,7 @@ let generate_stats owner vg =
     Rrd.SR owner,
     Ds.ds_make
       ~name:"physical_utilisation"
-      ~description:(Printf.sprintf "Physical uitilisation of SR %s" owner)
+      ~description:(Printf.sprintf "Physical utilisation of SR %s" owner)
       ~value:(Rrd.VT_Int64 phys_util)
       ~ty:Rrd.Gauge
       ~default:true
