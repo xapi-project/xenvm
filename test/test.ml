@@ -407,7 +407,10 @@ let la_start device =
              let la_thread = start_local_allocator "host1" [device] in
              ignore(xenvm ["host-disconnect"; vg; "host1"]);
              Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
-             >>= fun _ ->
+             >>= fun log ->
+             Lwt_io.(with_file output (Printf.sprintf "local_allocator.%d.log" n)
+               (fun chan -> write chan log))
+             >>= fun () ->
              n_times (n-1)
            end
          in
