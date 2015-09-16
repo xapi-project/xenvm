@@ -33,6 +33,9 @@ uninstall:
 test: setup.bin build
 	@./setup.bin -test
 
+bench: setup.bin build
+	@TEST_BENCHMARK=yes ./setup.bin -test
+
 reinstall: setup.bin
 	@ocamlfind remove $(NAME) || true
 	@./setup.bin -reinstall
