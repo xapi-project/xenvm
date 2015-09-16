@@ -293,12 +293,12 @@ let benchmark copts (vg_name,_) volumes threads =
       then stderr "%d %% complete" ((n * 100) / volumes)
       else return () in
     let rec worker f =
-      Lwt_mutex.with_lock m
-        (fun () ->
-          if !n_pending > 0 then begin
-            decr n_pending;
-            return (Some (volumes - !n_pending))
-          end else return None)
+      Lwt_mutex.with_lock m (fun () ->
+        if !n_pending > 0 then begin
+          decr n_pending;
+          return (Some (volumes - !n_pending))
+        end else return None
+      )
       >>= function
       | Some n ->
         f n
