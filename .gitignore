@@ -11,3 +11,6 @@ localJournal
 toLVM
 fromLVM
 *.out
+*.dat
+*.gp
+*.png
