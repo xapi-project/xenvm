@@ -2,6 +2,8 @@ open Lwt
 open Xenvm_common
 open Cmdliner
 
+let ( *** ) a b = Int64.mul a b
+
 let time_this f x =
   let start_time = Unix.gettimeofday () in
   f x >>= fun () ->
@@ -35,17 +37,20 @@ let benchmark copts (vg_name,_) volumes =
 
     let creation_host = Unix.gethostname () in
     let creation_time = Unix.gettimeofday () |> Int64.of_float in
-    let size = Int64.mul 1048576L 4L in
+    let size = Int64.mul 1024L 1024L in
 
     let name = Printf.sprintf "test-lv-%d" in
     let create name = Client.create ~name ~size ~creation_host ~creation_time ~tags:[] in
     let remove name = Client.remove ~name in
+    let resize name = Client.resize ~name ~size:(60L *** 1024L *** 1024L *** 1024L) in
 
-    let rec loop ((create_times, remove_times) as times) i =
-      if i >= volumes then return times
+    let rec loop create_times resize_times remove_times i =
+      if i >= volumes then return (create_times, resize_times, remove_times)
       else
         time_this create (name i)
         >>= fun create_time ->
+        time_this resize (name i)
+        >>= fun resize_time ->
         time_this remove (name i)
         >>= fun remove_time ->
         begin
@@ -56,15 +61,21 @@ let benchmark copts (vg_name,_) volumes =
         >>= fun () ->
         create (name i) (* recreate LV so there is +1 LV next loop iteration *)
         >>= fun () ->
-        loop ((i, create_time)::create_times, (i, remove_time)::remove_times) (succ i) in
-    loop ([], []) 0 >>= fun (create_times, remove_times) ->
+        loop
+          ((i, create_time)::create_times)
+          ((i, resize_time)::resize_times)
+          ((i, remove_time)::remove_times)
+          (succ i) in
+    loop [] [] [] 0 >>= fun (create_times, resize_times, remove_times) ->
 
     write_gnuplot ~title:(Printf.sprintf "Creating %d LVs" volumes)
       ~x_axis:"Existing LVs" ~y_axis:"Create time/s" create_times;
+    write_gnuplot ~title:(Printf.sprintf "Resizing %d LVs to 60G" volumes)
+      ~x_axis:"Existing LVs" ~y_axis:"Resize time/s" resize_times;
     write_gnuplot ~title:(Printf.sprintf "Remove %d LVs" volumes)
       ~x_axis:"Existing LVs" ~y_axis:"Remove time/s" remove_times;
 
-    Lwt_list.iter_p (fun (i, _) -> remove (name i)) create_times
+    Lwt_list.iter_s (fun (i, _) -> remove (name i)) create_times
 
     >>= return in
   Lwt_main.run t
