@@ -86,18 +86,17 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         return () in
     match live, info with
     | true, Some { Xenvm_common.local_allocator_path = Some allocator } ->
-      if device_is_active then begin
-        match size with
-        | `Absolute size ->
-          (* The local allocator can only allocate. When in this state we cannot shrink:
-             deactivate the device first. *)
-          if size < existing_size
-          then failwith (Printf.sprintf "Existing size is %Ld: cannot decrease to %Ld" existing_size size);
-          if size = existing_size
-          then return ()
-          else resize_locally allocator
-        | _ -> resize_locally allocator
-      end else resize_remotely ()
+      begin match size with
+      | `Absolute size ->
+        (* The local allocator can only allocate. When in this state we cannot shrink:
+            deactivate the device first. *)
+        if size < existing_size
+        then failwith (Printf.sprintf "Existing size is %Ld: cannot decrease to %Ld" existing_size size);
+        if size = existing_size
+        then return ()
+        else resize_locally allocator
+      | _ -> resize_locally allocator
+      end
     | _, _ ->
       (* safe to allocate remotely *)
       resize_remotely ()
