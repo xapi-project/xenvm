@@ -331,7 +331,7 @@ let lvchange_n =
   xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
   assert_lv_exists ~expected_size_in_extents:1L name;
   let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
-  let map_name = Mapper.name_of vg_metadata lv_metadata in
+  let map_name = Mapper.name_of vg_metadata.name lv_metadata.Lv.name in
   xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
   if not !Common.use_mock then begin (* FIXME: #99 *)
   assert_equal ~printer:string_of_bool true (file_exists (dev_path_of name));
