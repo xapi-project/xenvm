@@ -46,28 +46,6 @@ let resize_remotely info vg_name lv_name size =
 let resize_locally allocator vg_name lv_name size =
   let module DM = (val !dm : Devmapper.S.DEVMAPPER) in
   let dm_name = Mapper.name_of vg_name lv_name in
-  match DM.stat dm_name with
-  | None ->
-    stderr "Device mapper device does not exist: %s" dm_name
-    >>= fun () ->
-    exit 1
-  | Some dm_info ->
-    List.map (fun t -> t.Devmapper.Target.size) dm_info.DM.targets
-    |> List.fold_left Int64.add 0L |> return
-  >>= fun existing_size ->
-  begin match size with
-  | `Absolute size when size < existing_size ->
-    (* The local allocator can only allocate, i.e. can only grow the LV *)
-    stderr "Existing size is %Ld: cannot decrease to %Ld" existing_size size
-    >>= fun () ->
-    exit 3;
-  | `Absolute size when size = existing_size ->
-    stdout "Existing size is already %Ld: nothing to do." existing_size
-    >>= fun () ->
-    exit 0
-  | `Absolute _ | `IncreaseBy _ -> return ()
-  end
-  >>= fun () ->
   let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
   Lwt_unix.connect s (Unix.ADDR_UNIX allocator)
   >>= fun () ->
@@ -82,16 +60,17 @@ let resize_locally allocator vg_name lv_name size =
   Lwt_io.close oc
   >>= fun () ->
   match resp with
-  | ResizeResponse.Device_mapper_device_does_not_exist dm_name ->
-    stderr "Device mapper device does not exist: %s" dm_name
-    >>= fun () ->
-    exit 1
+  | ResizeResponse.Success
+  | ResizeResponse.Request_for_no_segments 0L ->
+    return ()
   | ResizeResponse.Request_for_no_segments nr ->
     stderr "Request for an illegal number of segments: %Ld" nr
     >>= fun () ->
     exit 2
-  | ResizeResponse.Success ->
-    return ()
+  | ResizeResponse.Device_mapper_device_does_not_exist dm_name ->
+    stderr "Device mapper device does not exist: %s" dm_name
+    >>= fun () ->
+    exit 1
 
 let lvresize copts live (vg_name,lv_opt) real_size percent_size =
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
