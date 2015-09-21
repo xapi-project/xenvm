@@ -17,11 +17,6 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
-    if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
-    let local_device = match info with
-    | Some info -> info.local_device (* If we've got a default, use that *)
-    | None -> failwith "Need to know the local device!" in
 
     let dm_name = Mapper.name_of vg_name lv_name in
     let device_is_active =
@@ -29,6 +24,12 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       List.mem dm_name all in
 
     let resize_remotely () =
+      Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
+      if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
+      let local_device = match info with
+      | Some info -> info.local_device (* If we've got a default, use that *)
+      | None -> failwith "Need to know the local device!" in
+
       let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
       if device_is_active then DM.suspend dm_name;
       Lwt.catch
