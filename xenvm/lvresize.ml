@@ -59,6 +59,19 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       end else return () in
 
     let resize_locally allocator =
+      begin match size with
+      | `Absolute size when size < existing_size ->
+        (* The local allocator can only allocate, i.e. can only grow the LV *)
+        stderr "Existing size is %Ld: cannot decrease to %Ld" existing_size size
+        >>= fun () ->
+        exit 3;
+      | `Absolute size when size = existing_size ->
+        stdout "Existing size is already %Ld: nothing to do." existing_size
+        >>= fun () ->
+        exit 0
+      | `Absolute _ | `IncreaseBy _ -> return ()
+      end
+      >>= fun () ->
       let name = Mapper.name_of vg lv in
       let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
       Lwt_unix.connect s (Unix.ADDR_UNIX allocator)
@@ -86,19 +99,8 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         return () in
     match live, info with
     | true, Some { Xenvm_common.local_allocator_path = Some allocator } ->
-      begin match size with
-      | `Absolute size ->
-        (* The local allocator can only allocate. When in this state we cannot shrink:
-            deactivate the device first. *)
-        if size < existing_size
-        then failwith (Printf.sprintf "Existing size is %Ld: cannot decrease to %Ld" existing_size size);
-        if size = existing_size
-        then return ()
-        else resize_locally allocator
-      | _ -> resize_locally allocator
-      end
+      resize_locally allocator
     | _, _ ->
-      (* safe to allocate remotely *)
       resize_remotely ()
   )
 let live_arg =
