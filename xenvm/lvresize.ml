@@ -23,14 +23,13 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
     | Some info -> info.local_device (* If we've got a default, use that *)
     | None -> failwith "Need to know the local device!" in
 
-    let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
-
     let name = Mapper.name_of vg lv in
     let device_is_active =
       let all = DM.ls () in
       List.mem name all in
 
     let resize_remotely () =
+      let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
       if device_is_active then DM.suspend name;
       Lwt.catch
         (fun () ->
@@ -59,6 +58,16 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       end else return () in
 
     let resize_locally allocator =
+      let name = Mapper.name_of vg lv in
+      match DM.stat name with
+      | None ->
+        stderr "Device mapper device does not exist: %s" name
+        >>= fun () ->
+        exit 1
+      | Some dm_info ->
+        List.map (fun t -> t.Devmapper.Target.size) dm_info.DM.targets
+        |> List.fold_left Int64.add 0L |> return
+      >>= fun existing_size ->
       begin match size with
       | `Absolute size when size < existing_size ->
         (* The local allocator can only allocate, i.e. can only grow the LV *)
@@ -72,7 +81,6 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       | `Absolute _ | `IncreaseBy _ -> return ()
       end
       >>= fun () ->
-      let name = Mapper.name_of vg lv in
       let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
       Lwt_unix.connect s (Unix.ADDR_UNIX allocator)
       >>= fun () ->
@@ -97,6 +105,7 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         exit 2
       | ResizeResponse.Success ->
         return () in
+
     match live, info with
     | true, Some { Xenvm_common.local_allocator_path = Some allocator } ->
       resize_locally allocator
