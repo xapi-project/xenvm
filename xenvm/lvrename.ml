@@ -41,14 +41,14 @@ let lvrename copts (vg_name,lv_opt) newname physical_device =
     (* Delete the old device node *)
     Lwt.catch (fun () -> Lwt_unix.unlink (Printf.sprintf "/dev/%s/%s" vg_name lv_name)) (fun _ -> Lwt.return ()) >>= fun () ->
     let all = Devmapper.ls () in
-    let old_name = Mapper.name_of vg lv in
+    let old_name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
     if List.mem old_name all then begin
       retry (fun () -> Devmapper.remove old_name)
       >>= fun () ->
       Mapper.read [ local_device ]
       >>= fun devices ->
       let targets = Mapper.to_targets devices vg lv in
-      let new_name = Mapper.name_of vg { lv with Lvm.Lv.name = newname } in
+      let new_name = Mapper.name_of vg.Lvm.Vg.name newname in
       Devmapper.create new_name targets;
       Devmapper.mknod new_name (Printf.sprintf "/dev/%s/%s" vg_name newname) 0x0600;
       return ()

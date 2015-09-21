@@ -17,7 +17,7 @@ let activate vg lv local_device =
   Mapper.read [ local_device ]
   >>= fun devices ->
   let targets = Mapper.to_targets devices vg lv in
-  let name = Mapper.name_of vg lv in
+  let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   (* Don't recreate it if it already exists *)
   let all = Devmapper.ls () in
   if not(List.mem name all)
@@ -55,7 +55,7 @@ let lvchange_activate copts vg_name lv_name physical_device (offline:bool) : uni
 let deactivate vg lv =
   let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let open Xenvm_common in
-  let name = Mapper.name_of vg lv in
+  let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   (* This can fail with an EBUSY *)
   let rec retry n =
     let all = Devmapper.ls () in
@@ -86,7 +86,7 @@ let reload vg lv local_device =
   Mapper.read [ local_device ]
   >>= fun devices ->
   let targets = Mapper.to_targets devices vg lv in
-  let name = Mapper.name_of vg lv in
+  let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   Devmapper.suspend name;
   Devmapper.reload name targets;
   Devmapper.resume name;

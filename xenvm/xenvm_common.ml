@@ -74,7 +74,7 @@ let attr_of_lv vg lv =
     else None
   in
 
-  let name = Mapper.name_of vg lv in
+  let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   let info = devmapper_stat name in
   Printf.sprintf "%c%c%c%c%c%c%c%c%c%c"
     ('-')

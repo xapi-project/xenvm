@@ -22,7 +22,7 @@ let print_verbose vg lv =
 
   let device =
     let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
-    let name = Mapper.name_of vg lv in
+    let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
     match Devmapper.stat name with
     | Some info ->
       Some (Printf.sprintf "%ld:%ld" info.Devmapper.major info.Devmapper.minor)
@@ -61,7 +61,7 @@ let print_colon vg lv =
   let sectors = Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv) in
   let major, minor =
     let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
-    let name = Mapper.name_of vg lv in
+    let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
     match Devmapper.stat name with
     | Some info ->
       Int32.to_string info.Devmapper.major, Int32.to_string info.Devmapper.minor

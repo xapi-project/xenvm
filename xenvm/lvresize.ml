@@ -23,7 +23,7 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
     | Some info -> info.local_device (* If we've got a default, use that *)
     | None -> failwith "Need to know the local device!" in
 
-    let name = Mapper.name_of vg lv in
+    let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
     let device_is_active =
       let all = DM.ls () in
       List.mem name all in
@@ -51,14 +51,14 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         Mapper.read [ local_device ]
         >>= fun devices ->
         let targets = Mapper.to_targets devices vg lv in
-        let name = Mapper.name_of vg lv in
+        let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
         DM.reload name targets;
         DM.resume name;
         return ()
       end else return () in
 
     let resize_locally allocator =
-      let name = Mapper.name_of vg lv in
+      let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
       match DM.stat name with
       | None ->
         stderr "Device mapper device does not exist: %s" name
