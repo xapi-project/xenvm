@@ -4,7 +4,7 @@ open Cmdliner
 open Lwt
 
 let lvresize copts live (vg_name,lv_opt) real_size percent_size =
-  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
+  let module DM = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
   let open Xenvm_common in
   let size = match parse_size real_size percent_size with
@@ -27,11 +27,11 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
 
     let name = Mapper.name_of vg lv in
     let device_is_active =
-      let all = Devmapper.ls () in
+      let all = DM.ls () in
       List.mem name all in
 
     let resize_remotely () =
-      if device_is_active then Devmapper.suspend name;
+      if device_is_active then DM.suspend name;
       Lwt.catch
         (fun () ->
           match size with
@@ -40,10 +40,10 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         ) (function
           | Xenvm_interface.Insufficient_free_space(needed, available) ->
             Printf.fprintf Pervasives.stderr "Insufficient free space: %Ld extents needed, but only %Ld available\n%!" needed available;
-            if device_is_active then Devmapper.resume name;
+            if device_is_active then DM.resume name;
             exit 5
           | e ->
-            if device_is_active then Devmapper.resume name;
+            if device_is_active then DM.resume name;
             fail e
         )
       >>= fun () ->
@@ -53,8 +53,8 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         >>= fun devices ->
         let targets = Mapper.to_targets devices vg lv in
         let name = Mapper.name_of vg lv in
-        Devmapper.reload name targets;
-        Devmapper.resume name;
+        DM.reload name targets;
+        DM.resume name;
         return ()
       end else return () in
 
