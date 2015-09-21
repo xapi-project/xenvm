@@ -253,9 +253,8 @@ end
 
 (* Return the virtual size of the volume *)
 let sizeof dm_targets =
-  let open Devmapper in
-  let ends = List.map (fun t -> Int64.add t.Target.start t.Target.size) dm_targets in
-  List.fold_left max 0L ends
+  List.map (fun t -> t.Devmapper.Target.size) dm_targets
+  |> List.fold_left Int64.add 0L
 
 (* Compute the new segments and device mapper targets if [extents] are appended onto [lv] *)
 let extend_volume device vg existing_targets extents =
