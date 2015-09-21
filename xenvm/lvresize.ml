@@ -23,14 +23,14 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
     | Some info -> info.local_device (* If we've got a default, use that *)
     | None -> failwith "Need to know the local device!" in
 
-    let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
+    let dm_name = Mapper.name_of vg_name lv_name in
     let device_is_active =
       let all = DM.ls () in
-      List.mem name all in
+      List.mem dm_name all in
 
     let resize_remotely () =
       let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
-      if device_is_active then DM.suspend name;
+      if device_is_active then DM.suspend dm_name;
       Lwt.catch
         (fun () ->
           match size with
@@ -39,10 +39,10 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         ) (function
           | Xenvm_interface.Insufficient_free_space(needed, available) ->
             Printf.fprintf Pervasives.stderr "Insufficient free space: %Ld extents needed, but only %Ld available\n%!" needed available;
-            if device_is_active then DM.resume name;
+            if device_is_active then DM.resume dm_name;
             exit 5
           | e ->
-            if device_is_active then DM.resume name;
+            if device_is_active then DM.resume dm_name;
             fail e
         )
       >>= fun () ->
@@ -51,17 +51,15 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
         Mapper.read [ local_device ]
         >>= fun devices ->
         let targets = Mapper.to_targets devices vg lv in
-        let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
-        DM.reload name targets;
-        DM.resume name;
+        DM.reload dm_name targets;
+        DM.resume dm_name;
         return ()
       end else return () in
 
     let resize_locally allocator =
-      let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
-      match DM.stat name with
+      match DM.stat dm_name with
       | None ->
-        stderr "Device mapper device does not exist: %s" name
+        stderr "Device mapper device does not exist: %s" dm_name
         >>= fun () ->
         exit 1
       | Some dm_info ->
@@ -85,7 +83,7 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       Lwt_unix.connect s (Unix.ADDR_UNIX allocator)
       >>= fun () ->
       let oc = Lwt_io.of_fd ~mode:Lwt_io.output s in
-      let r = { ResizeRequest.local_dm_name = name; action = size } in
+      let r = { ResizeRequest.local_dm_name = dm_name; action = size } in
       Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeRequest.sexp_of_t r))
       >>= fun () ->
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input ~close:return s in
@@ -95,8 +93,8 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
       Lwt_io.close oc
       >>= fun () ->
       match resp with
-      | ResizeResponse.Device_mapper_device_does_not_exist name ->
-        stderr "Device mapper device does not exist: %s" name
+      | ResizeResponse.Device_mapper_device_does_not_exist dm_name ->
+        stderr "Device mapper device does not exist: %s" dm_name
         >>= fun () ->
         exit 1
       | ResizeResponse.Request_for_no_segments nr ->
