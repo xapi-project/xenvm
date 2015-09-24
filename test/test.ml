@@ -515,4 +515,6 @@ let _ =
     then exit 1 in
   run_test_tt_main no_xenvmd_suite |> check_results_with_exit_code;
   with_xenvmd (fun _ _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
-  with_xenvmd (fun _ device -> run_test_tt_main (local_allocator_suite device) |> check_results_with_exit_code)
+  if not !Common.use_mock then begin (* FIXME: #99 *)
+    with_xenvmd (fun _ device -> run_test_tt_main (local_allocator_suite device) |> check_results_with_exit_code)
+  end
