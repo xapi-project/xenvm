@@ -23,6 +23,8 @@ end
 
 module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
 
+let xenvmd_generation_tag = "xenvmd_gen"
+
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let create ~disk () =
@@ -117,7 +119,7 @@ module FromLVM = struct
     fatal_error "FromLVM.advance" (R.Producer.advance ~t ~position ())
 end
 
-
+let sector_size, sector_size_u = Lwt.task ()
 let myvg, myvg_u = Lwt.task ()
 let lock = Lwt_mutex.create ()
 
@@ -153,6 +155,9 @@ let vgopen ~devices =
   >>= fun () ->
   Vg_IO.connect ~flush_interval:5. devices' `RW >>|= fun vg ->
   Lwt.wakeup_later myvg_u vg;
+  Device.read_sector_size devices
+  >>= fun sector_size ->
+  Lwt.wakeup_later sector_size_u sector_size;
   return ()
 
 let read fn =
@@ -170,6 +175,19 @@ let write fn =
     >>|= fun () ->
     Lwt.return ()
   )
+
+let maybe_write fn =
+  Lwt_mutex.with_lock lock (fun () ->
+      myvg >>= fun myvg ->
+      fn (Vg_IO.metadata_of myvg)
+      >>*= (function
+      | Some ops ->
+        Vg_IO.update myvg ops
+      | None ->
+        Lwt.return (`Ok ()))
+      >>|= fun () ->
+      Lwt.return ()
+    )
 
 let sync () =
   Lwt_mutex.with_lock lock (fun () ->
@@ -517,8 +535,13 @@ module FreePool = struct
   module Op = struct
     module T = struct
       type host = string with sexp
+      type fa = {
+        host : string;
+        old_allocation : FreeAllocation.t;
+        extra_size : int64;
+      } with sexp
       type t =
-        | FreeAllocation of (host * FreeAllocation.t)
+        | FreeAllocation of fa
       (* Assign a block allocation to a host *)
       with sexp
     end
@@ -527,33 +550,121 @@ module FreePool = struct
     include T
   end
 
+  let op_of_free_allocation vg host allocation =
+    let connected_host = Hashtbl.find connected_hosts host in
+    let freeid = connected_host.free_LV_uuid in
+    let lv = Lvm.Vg.LVs.find freeid vg.Lvm.Vg.lvs in
+    let size = Lvm.Lv.size_in_extents lv in
+    let segments = Lvm.Lv.Segment.linear size allocation in
+    Lvm.Redo.Op.(LvExpand(freeid, { lvex_segments = segments }))
+
+  let allocation_of_lv vg lv_id =
+    let open Lvm in
+    Vg.LVs.find lv_id vg.Vg.lvs |> Lv.to_allocation
+
+  let generation_of_tag tag =
+    match Stringext.split ~on:':' (Lvm.Name.Tag.to_string tag) with
+    | [ x ; n ] when x=xenvmd_generation_tag -> (try Some (int_of_string n) with _ -> None)
+    | _ -> None
+
+  let tag_of_generation n =
+    match Lvm.Name.Tag.of_string (Printf.sprintf "%s:%d" xenvmd_generation_tag n) with
+    | `Ok x -> x
+    | `Error (`Msg y) -> failwith y
+
   let perform t =
     let open Op in
     debug "%s" (sexp_of_t t |> Sexplib.Sexp.to_string_hum);
     match t with
-    | FreeAllocation (host, allocation) ->
-      try
-        let connected_host = Hashtbl.find connected_hosts host in
-        let from_lvm = connected_host.from_LVM in
-        let freename = connected_host.free_LV in
-        let freeid = connected_host.free_LV_uuid in
-        write
+    | FreeAllocation fa ->
+      Lwt.catch (fun () ->
+        let connected_host = Hashtbl.find connected_hosts fa.host in
+        sector_size >>= fun sector_size ->
+
+        (* Two operations to perform for this one journalled operation.
+           So we need to be careful to ensure either that we only do
+           each bit once, or that doing it twice is not harmful.
+
+           Firstly, we've got to increase the allocation of the free
+           pool for the host. We have numerical size increase
+           journalled, and we have the allocation of the pool at the
+           point we decided to do the operation. Therefore we can tell
+           whether we've done this already or not by checking to see
+           whether there are any new blocks allocated in the current
+           LVM metadata.
+
+           The second thing we need to do is tell the local allocator
+           precisely which new blocks have been allocated for it.  We
+           can't tell if we've done this already, so we need to ensure
+           that the message is idempotent. Since if the LA has already
+           received this update and may have already allocated blocks
+           from it, it is imperative that there needs to be enough
+           information in the message to allow the LA to ignore it
+           away if it has already received it - this is the function
+           of the generation count. We store the generation count in
+           the LV tags so that it can be updated atomically alongside
+           the increase in size. *)
+
+        maybe_write
           (fun vg ->
-             match (try Some(Lvm.Vg.LVs.find freeid vg.Lvm.Vg.lvs) with Not_found -> None) with
-             | None ->
-               `Error (`Msg (Printf.sprintf "Failed to find volume %s" freename))
-             | Some lv ->
-               let size = Lvm.Lv.size_in_extents lv in
-               let segments = Lvm.Lv.Segment.linear size allocation in
-               Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvExpand(freeid, { lvex_segments = segments })))
-          )
+             let current_allocation = allocation_of_lv vg connected_host.free_LV_uuid in
+             let new_space = Lvm.Pv.Allocator.sub current_allocation fa.old_allocation |> Lvm.Pv.Allocator.size in
+             if new_space = 0L then begin
+               try
+                 let lv = Lvm.Vg.LVs.find connected_host.free_LV_uuid vg.Lvm.Vg.lvs in (* Not_found here caught by the try-catch block *)
+                 let extent_size = vg.Lvm.Vg.extent_size in (* in sectors *)
+                 let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
+                 let old_gen = List.fold_left
+                     (fun acc tag ->
+                        match generation_of_tag tag with
+                        | None -> acc
+                        | x -> x) None lv.Lvm.Lv.tags
+                 in
+                 let allocation =
+                   match Lvm.Pv.Allocator.find vg.Lvm.Vg.free_space Int64.(div fa.extra_size extent_size_mib) with
+                   | `Ok allocation -> allocation
+                   | `Error (`OnlyThisMuchFree (needed_extents, free_extents)) ->
+                     info "LV %s expansion required, but number of free extents (%Ld) is less than needed extents (%Ld)" connected_host.free_LV free_extents needed_extents;
+                     info "Expanding to use all the available space.";
+                     vg.Lvm.Vg.free_space
+                 in
+                 match Lvm.Vg.do_op vg (op_of_free_allocation vg fa.host allocation) with
+                 | `Ok (_,op1) ->
+                   let genops =
+                     match old_gen
+                     with
+                     | Some g -> [
+                         Lvm.Redo.Op.LvRemoveTag (connected_host.free_LV_uuid, tag_of_generation g);
+                         Lvm.Redo.Op.LvAddTag (connected_host.free_LV_uuid, tag_of_generation (g+1))]
+                     | None -> [
+                         Lvm.Redo.Op.LvAddTag (connected_host.free_LV_uuid, tag_of_generation 1)]
+                   in
+                   `Ok (Some (op1::genops))
+                 | `Error x -> `Error x
+               with
+               | Not_found ->
+                 error "Couldn't find the free LV for host: %s" connected_host.free_LV;
+                 error "This is fatal for this host's update.";
+                 `Error (`Msg "not found")
+             end else `Ok None)
         >>= fun () ->
-        FromLVM.push from_lvm allocation
+        read (fun vg ->
+            let current_allocation = allocation_of_lv vg connected_host.free_LV_uuid in
+            let old_allocation = fa.old_allocation in
+            let new_extents = Lvm.Pv.Allocator.sub current_allocation old_allocation in
+            Lwt.return new_extents)
+        >>= fun allocation ->
+        FromLVM.push connected_host.from_LVM allocation
         >>= fun pos ->
-        FromLVM.advance from_lvm pos
-      with Not_found ->
-        info "unable to push block update to host %s because it has disappeared" host;
-        return ()
+        FromLVM.advance connected_host.from_LVM pos)
+        (fun e ->
+           match e with
+           | Failure "not found" ->
+             info "unable to push block update to host %s because it has disappeared" fa.host;
+             return ()
+           | e ->
+             error "Unhandled error when replaying journal entry for host %s" fa.host;
+             fail e)
 
   let perform ops =
     Lwt_list.iter_s perform ops
@@ -587,8 +698,7 @@ module FreePool = struct
       return ()
 
   let resend_free_volumes config =
-    Device.read_sector_size config.Config.Xenvmd.devices
-    >>= fun sector_size ->
+
 
     fatal_error "resend_free_volumes unable to read LVM metadata"
       ( read (fun x -> return (`Ok x)) )
@@ -626,48 +736,40 @@ module FreePool = struct
           FromLVM.advance from_lvm pos
       ) hosts
 
-  let top_up_free_volumes config =
+  let top_up_host config host =
     let open Config.Xenvmd in
-    Device.read_sector_size config.devices
-    >>= fun sector_size ->
-
-    read (fun x -> return (`Ok x))
-    >>= function
-    | `Error _ -> return () (* skip if there's no LVM to read *)
-    | `Ok x ->
-      let extent_size = x.Lvm.Vg.extent_size in (* in sectors *)
+    sector_size >>= fun sector_size ->
+    let connected_host = Hashtbl.find connected_hosts host in
+    read (Lwt.return) >>= fun vg ->
+    match try Some(Lvm.Vg.LVs.find connected_host.free_LV_uuid vg.Lvm.Vg.lvs) with _ -> None with
+    | Some lv ->
+      let extent_size = vg.Lvm.Vg.extent_size in (* in sectors *)
       let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
+      let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
+      if size_mib < config.host_low_water_mark then begin
+        info "LV %s is %Ld MiB < low_water_mark %Ld MiB; allocating"
+          connected_host.free_LV size_mib config.host_low_water_mark;
+        match !journal with
+        | Some j ->
+          J.push j
+            (Op.FreeAllocation
+               Op.{ host;
+                    old_allocation=Lvm.Lv.to_allocation lv;
+                    extra_size=config.host_allocation_quantum })
+          >>|= fun wait ->
+          wait.J.sync ()
+        | None ->
+          error "No journal configured!";
+          Lwt.return ()
+      end else return ()
+    | None ->
+      error "Host has disappeared!";
+      Lwt.return ()
 
-      let hosts = Hashtbl.fold (fun k v acc -> (k,v)::acc) connected_hosts [] in
-      (* XXX: avoid double-allocating the same free blocks *)
-      Lwt_list.iter_s
-       (fun (host, connected_host) ->
-         match try Some(Lvm.Vg.LVs.find connected_host.free_LV_uuid x.Lvm.Vg.lvs) with _ -> None with
-         | Some lv ->
-           let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
-           if size_mib < config.host_low_water_mark then begin
-             info "LV %s is %Ld MiB < low_water_mark %Ld MiB; allocating %Ld MiB"
-               connected_host.free_LV size_mib config.host_low_water_mark config.host_allocation_quantum;
-             (* find free space in the VG *)
-             begin match !journal, Lvm.Pv.Allocator.find x.Lvm.Vg.free_space Int64.(div config.host_allocation_quantum extent_size_mib) with
-             | _, `Error (`OnlyThisMuchFree (needed_extents, free_extents)) ->
-               info "LV %s is %Ld MiB but total space free (%Ld MiB) is less than allocation quantum (%Ld MiB)"
-                 connected_host.free_LV size_mib Int64.(mul free_extents extent_size_mib) config.host_allocation_quantum;
-               (* try again later *)
-               return ()
-             | Some j, `Ok allocated_extents ->
-               J.push j (Op.FreeAllocation (host, allocated_extents))
-               >>|= fun wait ->
-               (* The operation is now in the journal *)
-               wait.J.sync ()
-               (* The operation has been performed *)
-             | None, `Ok _ ->
-               error "Unable to extend LV %s because the journal is not configured" connected_host.free_LV;
-               return ()
-             end
-           end else return ()
-         | None ->
-           error "Failed to find host %s free LV %s" host connected_host.free_LV;
-           return ()
-       ) hosts
+  let top_up_free_volumes config =
+    let hosts = Hashtbl.fold (fun k v acc -> (k,v)::acc) connected_hosts [] in
+    Lwt_list.iter_s
+      (fun (host, connected_host) ->
+         top_up_host config host
+      ) hosts
 end
