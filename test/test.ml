@@ -20,6 +20,12 @@ open Lwt
 
 let vg = "myvg"
 
+let get_hostname host =
+  Printf.sprintf "host%d" host
+
+let get_local_allocator_sockpath host =
+  Printf.sprintf "/tmp/host%d-socket" host
+
 let vgcreate =
   "vgcreate <vg name> <device>: check that we can create a volume group and re-read the metadata." >::
   fun () ->
@@ -42,15 +48,25 @@ let vgs_offline =
     with_temp_file (fun filename ->
       xenvm [ "vgcreate"; vg; filename ] |> ignore_string;
       mkdir_rec "/tmp/xenvm.d" 0o0755;
-      xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
+      xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; (get_local_allocator_sockpath 1); "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
       xenvm [ "vgs"; vg ] |> ignore_string
     )
   )
 
+let set_vg_info pvpath vg host =
+  xenvm ~host [ "set-vg-info";
+          "--pvpath"; pvpath;
+          "-S"; "/tmp/xenvmd";
+          vg;
+          "--local-allocator-path"; get_local_allocator_sockpath host;
+          "--uri"; "file://local/services/xenvmd/"^vg ]
+  |> ignore_string
+
 let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
+  let host = 1 in
   let with_xenvmd_running loop =
-      xenvm [ "set-vg-info"; "--pvpath"; loop; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; "/tmp/xenvm-local-allocator"; "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
-      let config = {
+    set_vg_info loop vg host;
+    let config = {
         Config.Xenvmd.listenPort = None;
         listenPath = Some "/tmp/xenvmd";
         host_allocation_quantum = 128L;
@@ -66,7 +82,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
       finally
         (fun () -> f vg loop)
-        (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string) in
+        (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string ) in
   match existing_vg with
   | Some path -> with_xenvmd_running path
   | None ->
@@ -78,20 +94,21 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
     )
 
 let start_local_allocator host devices =
-  ignore(xenvm [ "host-create"; vg; host]);
-  let config_file = Printf.sprintf "local_allocator.%s.conf" host in
+  let hostname = get_hostname host in
+  ignore(xenvm [ "host-create"; vg; hostname]);
+  let config_file = Printf.sprintf "local_allocator.%s.conf" hostname in
   let config = {
-    Config.Local_allocator.socket = Printf.sprintf "/tmp/%s-socket" host;
+    Config.Local_allocator.socket = get_local_allocator_sockpath host;
     allocation_quantum = 0L;
-    localJournal = Printf.sprintf "%s-localJournal" host;
+    localJournal = Printf.sprintf "%s-localJournal" hostname;
     devices = devices;
-    toLVM = Printf.sprintf "%s-toLVM" host;
-    fromLVM = Printf.sprintf "%s-fromLVM" host;
+    toLVM = Printf.sprintf "%s-toLVM" hostname;
+    fromLVM = Printf.sprintf "%s-fromLVM" hostname;
   } in
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
   |> file_of_string config_file;
   let local_allocator_thread = Lwt_preemptive.detach local_allocator [ "--config"; config_file; ] in
-  ignore(xenvm [ "host-connect"; vg; host]);
+  ignore(xenvm [ "host-connect"; vg; hostname]);
   local_allocator_thread
 
 let lvchange_offline =
@@ -312,7 +329,7 @@ let dm_exists name = match Devmapper.Linux.stat name with
   | Some _ -> true
 
 let dev_path_of name = "/dev/" ^ vg ^ "/" ^ name
-let mapper_path_of name = "/dev/mapper/" ^ vg ^ "-" ^ name
+let mapper_path_of name = "/dev/mapper/" ^ (Mapper.name_of vg name)
 
 let lvchange_addtag =
   "lvchange vg/lv [--addtag|--removetag]: check that we can add tags" >::
@@ -350,15 +367,23 @@ let lvchange_n =
   let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
   let map_name = Mapper.name_of vg_metadata.name lv_metadata.Lv.name in
   xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
+  run "udevadm" [ "settle" ] |> ignore_string;
   if not !Common.use_mock then begin (* FIXME: #99 *)
+  Printf.printf "Checking dev path does not exist...\n%!";
   assert_equal ~printer:string_of_bool true (file_exists (dev_path_of name));
+  Printf.printf "Checking mapper path does not exist... (mapper_path_of_name=%s)\n%!" (mapper_path_of name);
   assert_equal ~printer:string_of_bool true (file_exists (mapper_path_of name));
+  Printf.printf "Checking map name does not exist\n%!";
   assert_equal ~printer:string_of_bool true (dm_exists map_name);
   end;
   xenvm [ "lvchange"; "-an"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
+  run "udevadm" [ "settle" ] |> ignore_string;
   if not !Common.use_mock then begin (* FIXME: #99 *)
+  Printf.printf "Checking dev path does not exist...\n%!";
   assert_equal ~printer:string_of_bool false (file_exists (dev_path_of name));
+  Printf.printf "Checking mapper path does not exist...\n%!";
   assert_equal ~printer:string_of_bool false (file_exists (mapper_path_of name));
+  Printf.printf "Checking map name does not exist\n%!";
   assert_equal ~printer:string_of_bool false (dm_exists map_name);
   
   end;
@@ -404,7 +429,7 @@ let la_start device =
      ignore(Lwt_main.run (
          let rec n_times n =
            if n=0 then Lwt.return () else begin
-             let la_thread = start_local_allocator "host1" [device] in
+             let la_thread = start_local_allocator 1 [device] in
              ignore(xenvm ["host-disconnect"; vg; "host1"]);
              Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
              >>= fun log ->
@@ -415,18 +440,76 @@ let la_start device =
            end
          in
          n_times 1))
-           
   )
 
+let la_extend device =
+  "Extend an LV with the local allocator" >::
+  (fun () ->
+     ignore(Lwt_main.run (
+         let lvname = "test" in
+         let la_thread = start_local_allocator 1 [device] in
+         Lwt_unix.sleep 20.0 >>= fun () ->
+         ignore(xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
+         ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
+         Lwt_unix.sleep 10.0 >>= fun () ->
+         Client.get_lv lvname >>= fun (myvg, lv) ->
+         ignore(myvg,lv);
+         let size = Lvm.Lv.size_in_extents lv in
+         Printf.printf "final size=%Ld\n%!" size;
+         ignore(xenvm ["host-disconnect"; vg; "host1"]);
+         Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
+         >>= fun log ->
+         Lwt_io.(with_file output "local_allocator.log"
+                   (fun chan -> write chan log)))))
+
+let la_extend_multi device =
+  "Extend an LV with the local allocator" >::
+  (fun () ->
+     ignore(Lwt_main.run (
+         let lvname = "test2" in
+         let lvname2 = "test3" in
+         let la_thread = start_local_allocator 1 [device] in
+         Lwt_unix.sleep 10.0 >>= fun () ->
+         let la_thread2 = start_local_allocator 2 [device] in
+         set_vg_info device vg 2;
+         Lwt_unix.sleep 20.0 >>= fun () ->
+         ignore(xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
+         ignore(xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg]);
+         ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
+         ignore(xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2]);
+         Lwt_unix.sleep 10.0 >>= fun () ->
+         Client.get_lv lvname >>= fun (myvg, lv) ->
+         Client.get_lv lvname2 >>= fun (_, lv2) ->
+         ignore(myvg,lv,lv2);
+         let size = Lvm.Lv.size_in_extents lv in
+         let size2 = Lvm.Lv.size_in_extents lv2 in
+         Printf.printf "Sanity checking VG\n%!";
+         Client.get () >>= fun myvg -> 
+         Common.sanity_check myvg;
+         Printf.printf "final size=%Ld final_size2=%Ld\n%!" size size2;
+         ignore(xenvm ["host-disconnect"; vg; "host1"]);
+         ignore(xenvm ["host-disconnect"; vg; "host2"]);
+         let la_dead = la_thread >>= fun _ -> la_thread2 in
+         Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
+         >>= fun _ ->
+         la_thread >>= fun log ->
+         Lwt_io.(with_file output "local_allocator.log"
+                   (fun chan -> write chan log))
+         >>= fun _ ->
+         la_thread2 >>= fun log ->
+         Lwt_io.(with_file output "local_allocator2.log"
+                   (fun chan -> write chan log))
+       )))
+
 let local_allocator_suite device = "Commands which require the local allocator" >::: [
-    la_start device;
+(*    la_start device;
+      la_extend device;*)
+    la_extend_multi device;
 ]
-
-
 
 let _ =
   Random.self_init ();
-  mkdir_rec "/tmp/xenvm.d" 0o0755;
+  List.iter (fun host -> let configdir = Common.get_configdir host in mkdir_rec configdir 0o0755) [1;2;3;4] in
   let check_results_with_exit_code results =
     if List.exists (function RFailure _ | RError _ -> true | _ -> false) results
     then exit 1 in
