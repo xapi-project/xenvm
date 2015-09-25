@@ -751,9 +751,10 @@ module FreePool = struct
           connected_host.free_LV size_mib config.host_low_water_mark;
         match !journal with
         | Some j ->
+          let open Op in
           J.push j
-            (Op.FreeAllocation
-               Op.{ host;
+            (FreeAllocation
+               { host;
                     old_allocation=Lvm.Lv.to_allocation lv;
                     extra_size=config.host_allocation_quantum })
           >>|= fun wait ->
