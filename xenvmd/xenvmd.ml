@@ -98,7 +98,7 @@ let handler ~info stoppers (ch,conn) req body =
   Server.respond_string ~status:`OK ~body:(Jsonrpc.string_of_response result) ()
 
 let maybe_write_pid config =
-  match config.Config.listenPath with
+  match config.Config.Xenvmd.listenPath with
   | None ->
       (* don't need a lock file because we'll fail to bind to the port *)
     ()
@@ -110,8 +110,8 @@ let run port sock_path config =
   maybe_write_pid config;
 
   let t =
-    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_xenvmd_config config));
-    VolumeManager.vgopen ~devices:config.Config.devices
+    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config));
+    VolumeManager.vgopen ~devices:config.Config.Xenvmd.devices
     >>= fun () ->
     VolumeManager.FreePool.start Xenvm_interface._journal_name
     >>= fun () ->
@@ -155,13 +155,13 @@ let run port sock_path config =
 
     
     let tcp_mode =
-      match config.Config.listenPort with
+      match config.Config.Xenvmd.listenPort with
       | Some port -> [`TCP (`Port port)]
       | None -> []
     in
     
     begin
-      match config.Config.listenPath with
+      match config.Config.Xenvmd.listenPath with
       | Some p ->
         (* Remove the socket first, if it already exists *)
         Lwt.catch (fun () -> Lwt_unix.unlink p) (fun _ -> Lwt.return ()) >>= fun () -> 
@@ -183,7 +183,7 @@ let run port sock_path config =
     let threads = List.map2 (service_http stoppers) (tcp_mode @ unix_mode) stops in
 
     (* start reporting stats to rrdd if we have the config option *)
-    begin match config.Config.rrd_ds_owner with
+    begin match config.Config.Xenvmd.rrd_ds_owner with
     | Some owner -> Xenvmd_stats.start owner stats_vg_cache
     | None -> ()
     end;
@@ -204,7 +204,7 @@ let daemonize config =
         Printf.fprintf stderr "Failed to communicate with xenvmd: check the configuration and try again.\n%!";
         exit 1;
       end;
-      begin match config.Config.listenPort with
+      begin match config.Config.Xenvmd.listenPort with
       | Some port ->
         let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
         (try
@@ -215,7 +215,7 @@ let daemonize config =
           Unix.close s)
       | None -> ()
       end;
-      begin match config.Config.listenPath with
+      begin match config.Config.Xenvmd.listenPath with
       | Some path ->
         let s = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
         (try
@@ -236,9 +236,10 @@ let daemonize config =
   Lwt_daemon.daemonize ()
   
 let main port sock_path config daemon =
-  let config = Config.xenvmd_config_of_sexp (Sexplib.Sexp.load_sexp config) in
-  let config = { config with Config.listenPort = match port with None -> config.Config.listenPort | Some x -> Some x } in
-  let config = { config with Config.listenPath = match sock_path with None -> config.Config.listenPath | Some x -> Some x } in
+  let open Config.Xenvmd in
+  let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  let config = { config with listenPort = match port with None -> config.listenPort | Some x -> Some x } in
+  let config = { config with listenPath = match sock_path with None -> config.listenPath | Some x -> Some x } in
 
   if daemon then daemonize config;
 

@@ -14,12 +14,25 @@
 open Sexplib.Std
 open Sexplib.Conv
 
-type xenvmd_config = {
-  listenPort: int option; (* TCP port number to listen on *)
-  listenPath: string option; (* path of a unix-domain socket to listen on *)
-  host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)
-  host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
-  vg: string; (* name of the volume group *)
-  devices: string list; (* physical device containing the volume group *)
-  rrd_ds_owner: string sexp_option; (* export stats using owner (SR rrd_ds_owner) *)
-} with sexp
+module Xenvmd = struct
+  type t = {
+    listenPort: int option; (* TCP port number to listen on *)
+    listenPath: string option; (* path of a unix-domain socket to listen on *)
+    host_allocation_quantum: int64; (* amount of allocate each host at a time (MiB) *)
+    host_low_water_mark: int64; (* when the free memory drops below, we allocate (MiB) *)
+    vg: string; (* name of the volume group *)
+    devices: string list; (* physical device containing the volume group *)
+    rrd_ds_owner: string sexp_option; (* export stats using owner (SR rrd_ds_owner) *)
+  } with sexp
+end
+
+module Local_allocator = struct
+  type t = {
+    socket: string; (* listen on this socket *)
+    allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
+    localJournal: string; (* path to the host local journal *)
+    devices: string list; (* devices containing the PVs *)
+    toLVM: string; (* pending updates for LVM *)
+    fromLVM: string; (* received updates from LVM *)
+  } with sexp
+end

@@ -3,17 +3,6 @@ open Sexplib.Std
 open Log
 open Errors
 
-module Config = struct
-  type t = {
-    socket: string; (* listen on this socket *)
-    allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
-    localJournal: string; (* path to the host local journal *)
-    devices: string list; (* devices containing the PVs *)
-    toLVM: string; (* pending updates for LVM *)
-    fromLVM: string; (* received updates from LVM *)
-  } with sexp
-end
-
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
@@ -67,7 +56,7 @@ let with_block filename f =
 
 module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
 
-let get_device config = match config.Config.devices with
+let get_device config = match config.Config.Local_allocator.devices with
   | [ x ] -> return x
   | _ ->
     fail (Failure "I require exactly one physical device")
@@ -190,12 +179,12 @@ module FreePool = struct
 
     let start config vg =
       debug "Initialising the FreePool";
-      ( match Vg_IO.find vg config.Config.fromLVM with
+      ( match Vg_IO.find vg config.Config.Local_allocator.fromLVM with
         | Some x -> return x
         | None -> assert false ) >>= fun v ->
       Vg_IO.Volume.connect v
       >>= function
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.fromLVM))
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.Local_allocator.fromLVM))
       | `Ok disk ->
       FromLVM.attach ~disk ()
       >>= fun from_lvm ->
@@ -298,24 +287,25 @@ let targets_of x =
     return (`Error `Retry)
 
 let main use_mock config daemon socket journal fromLVM toLVM =
-  let config = Config.t_of_sexp (Sexplib.Sexp.load_sexp config) in
+  let open Config.Local_allocator in
+  let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
-    Config.socket = (match socket with None -> config.Config.socket | Some x -> x);
-    localJournal = (match journal with None -> config.Config.localJournal | Some x -> x);
-    toLVM = (match toLVM with None -> config.Config.toLVM | Some x -> x);
-    fromLVM = (match fromLVM with None -> config.Config.fromLVM | Some x -> x);
+    socket = (match socket with None -> config.socket | Some x -> x);
+    localJournal = (match journal with None -> config.localJournal | Some x -> x);
+    toLVM = (match toLVM with None -> config.toLVM | Some x -> x);
+    fromLVM = (match fromLVM with None -> config.fromLVM | Some x -> x);
   } in
-  debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (Config.sexp_of_t config));
+  debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config));
   dm := if use_mock then (module Devmapper.Mock: Devmapper.S.DEVMAPPER) else (module Devmapper.Linux: Devmapper.S.DEVMAPPER);
 
   let module D = (val !dm: Devmapper.S.DEVMAPPER) in
 
   if daemon then Lwt_daemon.daemonize ();
 
-  Pidfile.write_pid (config.Config.socket ^ ".lock");
+  Pidfile.write_pid (config.socket ^ ".lock");
 
   let t =
-    Device.read_sector_size config.Config.devices
+    Device.read_sector_size config.devices
     >>= fun sector_size ->
 
     get_device config
@@ -325,12 +315,12 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     >>= fun vg ->
     let metadata = Vg_IO.metadata_of vg in
 
-    ( match Vg_IO.find vg config.Config.toLVM with
+    ( match Vg_IO.find vg config.toLVM with
       | Some x -> return x
       | None -> assert false ) >>= fun v ->
     Vg_IO.Volume.connect v
     >>= function
-    | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.toLVM))
+    | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.toLVM))
     | `Ok disk ->
     ToLVM.attach ~disk ()
     >>= fun tolvm ->
@@ -341,7 +331,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     let extent_size = metadata.Lvm.Vg.extent_size in (* in sectors *)
     let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
 
-    info "Device %s has %d byte sectors" (List.hd config.Config.devices) sector_size;
+    info "Device %s has %d byte sectors" (List.hd config.devices) sector_size;
     info "The Volume Group has %Ld sector (%Ld MiB) extents" extent_size extent_size_mib;
 
     let rec wait_for_shutdown_forever () =
@@ -384,17 +374,17 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       return (`Ok ()) in
 
     let module J = Shared_block.Journal.Make(Log)(Block)(Time)(Clock)(Op) in
-    ( if not (Sys.file_exists config.Config.localJournal) then begin
-        info "Creating an empty journal: %s" config.Config.localJournal;
-        Lwt_unix.openfile config.Config.localJournal [ Lwt_unix.O_CREAT; Lwt_unix.O_WRONLY ] 0o0666 >>= fun fd ->
+    ( if not (Sys.file_exists config.localJournal) then begin
+        info "Creating an empty journal: %s" config.localJournal;
+        Lwt_unix.openfile config.localJournal [ Lwt_unix.O_CREAT; Lwt_unix.O_WRONLY ] 0o0666 >>= fun fd ->
         Lwt_unix.LargeFile.lseek fd Int64.(sub journal_size 1L) Lwt_unix.SEEK_CUR >>= fun _ ->
         Lwt_unix.write_string fd "\000" 0 1 >>= fun _ ->
         Lwt_unix.close fd
       end else return () ) >>= fun () ->
-    ( Block.connect config.Config.localJournal
+    ( Block.connect config.localJournal
       >>= function
       | `Ok x -> return x
-      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open localJournal device: %s" config.Config.localJournal))
+      | `Error _ -> fail (Failure (Printf.sprintf "Failed to open localJournal device: %s" config.localJournal))
     ) >>= fun device ->
 
     (* We must replay the journal before resynchronising free blocks *)
@@ -473,13 +463,13 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       Lwt_io.write_line Lwt_io.stdout (Sexplib.Sexp.to_string_hum (ResizeResponse.sexp_of_t resp))
       >>= fun () ->
       stdin () in
-    debug "Creating Unix domain socket %s" config.Config.socket;
+    debug "Creating Unix domain socket %s" config.socket;
     let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
     Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR true;
-    Lwt.catch (fun () -> Lwt_unix.unlink config.Config.socket) (fun _ -> return ())
+    Lwt.catch (fun () -> Lwt_unix.unlink config.socket) (fun _ -> return ())
     >>= fun () ->
     debug "Binding and listening on the socket";
-    Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.Config.socket));
+    Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.socket));
     Lwt_unix.listen s 5;
     let conn_handler fd () =
       let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in

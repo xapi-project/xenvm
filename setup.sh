@@ -57,7 +57,18 @@ sleep 2
 cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host1|g" > test.local_allocator.host1.conf
 ./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > local_allocator.host1.log &
 
-sleep 30 # the local allocator daemonizes too soon
+./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
+./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > local_allocator.host1.log2 &
+
+for ((i=0; i<10; i++)); do
+  ./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
+  ./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
+  ./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > local_allocator.host1.log3 &
+done
+
+
+sleep 20
 
 ./xenvm.native lvextend /dev/djstest/live -L 128M --live --configdir /tmp/xenvm.d $MOCK_ARG
 

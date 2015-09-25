@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 61479b4d37775c46d8e39394432b7989)
+# DO NOT EDIT (digest: b196d31c5b75c3caa9cf12fb8750a776)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -185,6 +185,7 @@ true: annot, bin_annot
 <test/test.{native,byte}>: pkg_lvm
 <test/test.{native,byte}>: pkg_lvm.mapper
 <test/test.{native,byte}>: pkg_lwt
+<test/test.{native,byte}>: pkg_lwt.preemptive
 <test/test.{native,byte}>: pkg_lwt.unix
 <test/test.{native,byte}>: pkg_mirage-block-unix
 <test/test.{native,byte}>: pkg_mirage-clock-unix
@@ -206,6 +207,7 @@ true: annot, bin_annot
 <test/*.ml{,i,y}>: pkg_lvm
 <test/*.ml{,i,y}>: pkg_lvm.mapper
 <test/*.ml{,i,y}>: pkg_lwt
+<test/*.ml{,i,y}>: pkg_lwt.preemptive
 <test/*.ml{,i,y}>: pkg_lwt.unix
 <test/*.ml{,i,y}>: pkg_mirage-block-unix
 <test/*.ml{,i,y}>: pkg_mirage-clock-unix

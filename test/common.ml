@@ -98,6 +98,32 @@ let rm_f x =
     debug "%s already deleted" x;
     ()
 
+exception InsanityDetected of string * string
+
+let sanity_check vg =
+  Printf.printf "In sanity_check. size of vg.Lvm.Vg.lvs = %d\n%!" (Lvm.Vg.LVs.cardinal vg.Lvm.Vg.lvs);
+  let allocations =
+    Lvm.Vg.LVs.fold (fun k v acc ->
+        let allocation = Lvm.Lv.to_allocation v in
+        Printf.printf "LV: %s\nAllocation:\n%s\n%!" v.Lvm.Lv.name (Lvm.Pv.Allocator.to_string allocation);
+        (v.Lvm.Lv.name, allocation) :: acc) vg.Lvm.Vg.lvs []
+  in
+  let rec check allocations =
+    match allocations with
+    | (name, alloc) :: rest ->
+      List.iter
+          (fun (name', alloc') ->
+             let open Lvm.Pv.Allocator in
+             let size1 = size alloc in
+             let size2 = size alloc' in
+             let merged = merge alloc alloc' in
+             let size3 = size merged in
+             let diff = Int64.(sub (add size1 size2) size3) in
+             if diff <> 0L then raise (InsanityDetected (name, name'))) rest;
+      check rest
+    | _ -> ()
+  in check allocations
+
 (* From Xcp_service: *)
 let colon = Re_str.regexp_string ":"
 
@@ -249,9 +275,22 @@ let with_block filename f =
   | `Ok x ->
     f x (* no point catching errors here *)
 
-let xenvm = function
+let get_configdir host =
+  Printf.sprintf "/tmp/xenvm.host%d.d" host
+
+let xenvm ?(host=1) args =
+  let configdir = get_configdir host in
+  match args with
   | [] -> run "./xenvm.native" []
   | cmd :: args ->
-    let args = if !use_mock then "--mock-devmapper" :: "--configdir" :: "/tmp/xenvm.d" :: args else args in
+    let args = "--configdir" :: configdir :: args in
+    let args = if !use_mock then "--mock-devmapper" :: args else args in
     run "./xenvm.native" (cmd :: args)
 let xenvmd = run "./xenvmd.native"
+let local_allocator =
+  let cmd = "./local_allocator.native" in
+  function
+  | [] -> run cmd []
+  | args ->
+    let args = if !use_mock then args @ ["--mock-devmapper"] else args in
+    run cmd args
