@@ -40,7 +40,7 @@ Executable "xenvm"
   MainIs:             xenvm.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax
+  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax, stringext
 
 Executable "xenvm-local-allocator"
   ByteOpt:            -warn-error +a
