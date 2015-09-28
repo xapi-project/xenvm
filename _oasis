@@ -60,7 +60,7 @@ Executable "test"
   MainIs:             test.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, lwt.preemptive, mirage-block-unix, mirage-clock-unix, devmapper, threads, lvm, lvm.mapper, cstruct, oUnit, io-page, io-page.unix, cmdliner, sexplib.syntax, xenvmidl, shared-block-ring
+  BuildDepends:       xenvmidl, oUnit, lwt.preemptive, lvm.mapper, mirage-clock-unix, mirage-block-unix, io-page.unix
 
 Test xenvm_test
   Command:            ./test.native
