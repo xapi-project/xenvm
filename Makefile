@@ -33,6 +33,12 @@ uninstall:
 test: setup.bin build
 	@./setup.bin -test
 
+bench: setup.bin build
+	@TEST_BENCHMARK=yes ./setup.bin -test
+
+%.png: %.gp
+	@GNUTERM=png gnuplot $< > $@
+
 reinstall: setup.bin
 	@ocamlfind remove $(NAME) || true
 	@./setup.bin -reinstall

@@ -409,6 +409,13 @@ let vgs_online =
     xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
   )
 
+let benchmark =
+  "benchmark <device>: check the timing characteristics of xenvm commands at scale" >::
+  fun () ->
+  let should_skip = not (try Sys.getenv "TEST_BENCHMARK" <> "" with _ -> false) in
+  skip_if should_skip "Skipping benchmarks (export $TEST_BENCHMARK) to enable";
+  xenvm [ "benchmark"; vg ] |> print_endline
+
 let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvcreate_L;
   lvcreate_l;
@@ -419,6 +426,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvchange_n;
   lvextend_toobig;
   vgs_online;
+  benchmark;
 ]
 
 exception Timeout
