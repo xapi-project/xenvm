@@ -29,7 +29,7 @@ end
 module Local_allocator = struct
   type t = {
     socket: string; (* listen on this socket *)
-    allocation_quantum: int64; (* amount of allocate each device at a time (MiB) *)
+    allocation_quantum: int64 sexp_option; (* deprecated, unused *)
     localJournal: string; (* path to the host local journal *)
     devices: string list; (* devices containing the PVs *)
     toLVM: string; (* pending updates for LVM *)
