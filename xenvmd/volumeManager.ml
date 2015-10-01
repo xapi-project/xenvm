@@ -355,7 +355,7 @@ let shutdown () =
 module FreePool = struct
   (* Manage the Free LVs *)
 
-  let op_of_free_allocation vg host allocation =
+  let lvm_op_of_free_allocation vg host allocation =
     let connected_host = Hashtbl.find connected_hosts host in
     let freeid = connected_host.free_LV_uuid in
     let lv = Lvm.Vg.LVs.find freeid vg.Lvm.Vg.lvs in
@@ -433,7 +433,7 @@ module FreePool = struct
                      info "Expanding to use all the available space.";
                      vg.Lvm.Vg.free_space
                  in
-                 match Lvm.Vg.do_op vg (op_of_free_allocation vg ef.host allocation) with
+                 match Lvm.Vg.do_op vg (lvm_op_of_free_allocation vg ef.host allocation) with
                  | `Ok (_,op1) ->
                    let genops =
                      match old_gen
