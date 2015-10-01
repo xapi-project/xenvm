@@ -437,24 +437,6 @@ let shutdown () =
 module FreePool = struct
   (* Manage the Free LVs *)
 
-  module Op = struct
-    module T = struct
-      type host = string with sexp
-      type fa = {
-        host : string;
-        old_allocation : FreeAllocation.t;
-        extra_size : int64;
-      } with sexp
-      type t =
-        | FreeAllocation of fa
-      (* Assign a block allocation to a host *)
-      with sexp
-    end
-
-    include SexpToCstruct.Make(T)
-    include T
-  end
-
   let op_of_free_allocation vg host allocation =
     let connected_host = Hashtbl.find connected_hosts host in
     let freeid = connected_host.free_LV_uuid in
@@ -478,7 +460,7 @@ module FreePool = struct
     | `Error (`Msg y) -> failwith y
 
   let perform t =
-    let open Op in
+    let open Journal.Op in
     debug "%s" (sexp_of_t t |> Sexplib.Sexp.to_string_hum);
     match t with
     | FreeAllocation fa ->
@@ -576,8 +558,6 @@ module FreePool = struct
     >>= fun () ->
     return (`Ok ())
 
-  module J = Shared_block.Journal.Make(Log)(Vg_IO.Volume)(Time)(Clock)(Op)
-
   let journal = ref None
 
   let start name =
@@ -590,7 +570,7 @@ module FreePool = struct
       | `Error _ -> fatal_error_t ("open " ^ name)
       | `Ok x -> return x )
     >>= fun device ->
-    J.start ~client:"xenvmd" ~name:"allocation journal" device perform
+    Journal.J.start ~client:"xenvmd" ~name:"allocation journal" device perform
     >>|= fun j' ->
     journal := Some j';
     return ()
@@ -598,13 +578,11 @@ module FreePool = struct
   let shutdown () =
     match !journal with
     | Some j ->
-      J.shutdown j
+      Journal.J.shutdown j
     | None ->
       return ()
 
   let resend_free_volumes config =
-
-
     fatal_error "resend_free_volumes unable to read LVM metadata"
       ( read (fun x -> return (`Ok x)) )
     >>= fun lvm ->
@@ -656,14 +634,14 @@ module FreePool = struct
           connected_host.free_LV size_mib config.host_low_water_mark;
         match !journal with
         | Some j ->
-          let open Op in
-          J.push j
+          let open Journal.Op in
+          Journal.J.push j
             (FreeAllocation
                { host;
                     old_allocation=Lvm.Lv.to_allocation lv;
                     extra_size=config.host_allocation_quantum })
           >>|= fun wait ->
-          wait.J.sync ()
+          wait.Journal.J.sync ()
         | None ->
           error "No journal configured!";
           Lwt.return ()
