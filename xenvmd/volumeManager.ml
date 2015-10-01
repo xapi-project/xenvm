@@ -15,109 +15,14 @@ open Sexplib.Std
 open Lwt
 open Log
 open Errors
+open Vg_io
 
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
 end
 
-module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
-
 let xenvmd_generation_tag = "xenvmd_gen"
-
-module ToLVM = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
-  let create ~disk () =
-    fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let attach ~name ~disk () =
-    fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~queue:(name ^ " ToLVM Consumer") ~client:"xenvmd" ~disk ())
-  let state t =
-    fatal_error "querying ToLVM state" (R.Consumer.state t)
-  let debug_info t =
-    fatal_error "querying ToLVM debug_info" (R.Consumer.debug_info t)
-  let rec suspend t =
-    R.Consumer.suspend t
-    >>= function
-    | `Error (`Msg msg) -> fatal_error_t msg
-    | `Error `Suspended -> return ()
-    | `Error `Retry ->
-      Lwt_unix.sleep 5.
-      >>= fun () ->
-      suspend t
-    | `Ok () ->
-      let rec wait () =
-        R.Consumer.state t
-        >>= function
-        | `Error _ -> fatal_error_t "reading state of ToLVM"
-        | `Ok `Running ->
-          Lwt_unix.sleep 5.
-          >>= fun () ->
-          wait ()
-        | `Ok `Suspended -> return () in
-      wait ()
-  let rec resume t =
-    R.Consumer.resume t
-    >>= function
-    | `Error (`Msg msg) -> fatal_error_t msg
-    | `Error `Retry ->
-      Lwt_unix.sleep 5.
-      >>= fun () ->
-      resume t
-    | `Error `Suspended -> return ()
-    | `Ok () ->
-      let rec wait () =
-        R.Consumer.state t
-        >>= function
-        | `Error _ -> fatal_error_t "reading state of ToLVM"
-        | `Ok `Suspended ->
-          Lwt_unix.sleep 5.
-          >>= fun () ->
-          wait ()
-        | `Ok `Running -> return () in
-      wait ()
-  let rec pop t =
-    fatal_error "ToLVM.pop"
-      (R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ())
-    >>= fun (position, rev_items) ->
-      let items = List.rev rev_items in
-      return (position, items)
-  let advance t position =
-    fatal_error "toLVM.advance" (R.Consumer.advance ~t ~position ())
-end
-
-module FromLVM = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
-  let create ~disk () =
-    fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let attach ~name ~disk () =
-    let initial_state = ref `Running in
-    let rec loop () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
-      | `Error `Suspended ->
-        Lwt_unix.sleep 5.
-        >>= fun () ->
-        initial_state := `Suspended;
-        loop ()
-      | x -> fatal_error "FromLVM.attach" (return x) in
-    loop ()
-    >>= fun x ->
-    return (!initial_state, x)
-  let state t = fatal_error "FromLVM.state" (R.Producer.state t)
-  let debug_info t =
-    fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)
-  let rec push t item = R.Producer.push ~t ~item () >>= function
-  | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
-  | `Error `Retry ->
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    push t item
-  | `Error `Suspended ->
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    push t item
-  | `Ok x -> return x
-  let advance t position =
-    fatal_error "FromLVM.advance" (R.Producer.advance ~t ~position ())
-end
 
 let sector_size, sector_size_u = Lwt.task ()
 let myvg, myvg_u = Lwt.task ()
@@ -199,8 +104,8 @@ let sync () =
 
 type connected_host = {
   mutable state : Xenvm_interface.connection_state;
-  to_LVM : ToLVM.R.Consumer.t;
-  from_LVM : FromLVM.R.Producer.t;
+  to_LVM : Rings.ToLVM.R.Consumer.t;
+  from_LVM : Rings.FromLVM.R.Producer.t;
   free_LV : string;
   free_LV_uuid : Lvm.Vg.LVs.key;
 }
@@ -254,7 +159,7 @@ module Host = struct
         >>= function
         | `Error _ -> fail (Failure (Printf.sprintf "Failed to erase %s" toLVM))
         | `Ok () ->
-        ToLVM.create ~disk ()
+        Rings.ToLVM.create ~disk ()
         >>= fun () ->
         Vg_IO.Volume.disconnect disk
         >>= fun () ->
@@ -270,7 +175,7 @@ module Host = struct
         >>= function
         | `Error _ -> fail (Failure (Printf.sprintf "Failed to erase %s" fromLVM))
         | `Ok () ->
-        FromLVM.create ~disk ()
+        Rings.FromLVM.create ~disk ()
         >>= fun () ->
         Vg_IO.Volume.disconnect disk >>= fun () ->
         (* Create the freeLVM LV at the end - we can use the existence
@@ -320,19 +225,19 @@ module Host = struct
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
           | `Ok disk ->
-          ToLVM.attach ~name ~disk ()
+          Rings.ToLVM.attach ~name ~disk ()
           >>= fun toLVM_q ->
-          ToLVM.state toLVM_q
+          Rings.ToLVM.state toLVM_q
           >>= fun state ->
-          debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
-          ToLVM.resume toLVM_q
+          debug "Rings.ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+          Rings.ToLVM.resume toLVM_q
           >>= fun () ->
 
           Vg_IO.Volume.connect fromLVM_id
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
           | `Ok disk ->
-          FromLVM.attach ~name ~disk ()
+          Rings.FromLVM.attach ~name ~disk ()
           >>= fun (initial_state, fromLVM_q) ->
           let connected_host = {
             state = Xenvm_interface.Resuming_to_LVM;
@@ -346,23 +251,23 @@ module Host = struct
           ( if initial_state = `Suspended
             then begin
             connected_host.state <- Xenvm_interface.Resending_free_blocks;
-            debug "The FromLVM queue was already suspended: resending the free blocks";
+            debug "The Rings.FromLVM queue was already suspended: resending the free blocks";
             let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of freeLVM_id) in
-            FromLVM.push fromLVM_q allocation
+            Rings.FromLVM.push fromLVM_q allocation
             >>= fun pos ->
-            FromLVM.advance fromLVM_q pos
+            Rings.FromLVM.advance fromLVM_q pos
             >>= fun () ->
             debug "Free blocks pushed";
             return ()
           end else begin
-            debug "The FromLVM queue was running: no need to resend the free blocks";
+            debug "The Rings.FromLVM queue was running: no need to resend the free blocks";
             return ()
           end )
           >>= fun () ->
           debug "querying state";
-          FromLVM.state fromLVM_q
+          Rings.FromLVM.state fromLVM_q
           >>= fun state ->
-          debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+          debug "Rings.FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
           return connected_host in
 
         (* Run the blocking stuff in the background *)
@@ -392,7 +297,7 @@ module Host = struct
         fail Xenvm_interface.HostNotCreated
     end
 
-  (* Hold this mutex when actively flushing from the ToLVM queues *)
+  (* Hold this mutex when actively flushing from the Rings.ToLVM queues *)
   let flush_m = Lwt_mutex.create ()
 
   let flush_already_locked name =
@@ -401,9 +306,9 @@ module Host = struct
     else begin
       let connected_host = Hashtbl.find connected_hosts name in
       let to_lvm = connected_host.to_LVM in
-      ToLVM.pop to_lvm
+      Rings.ToLVM.pop to_lvm
       >>= fun (pos, items) ->
-      debug "FromLVM queue %s has %d items" name (List.length items);
+      debug "Rings.FromLVM queue %s has %d items" name (List.length items);
       Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
         write (fun vg ->
           debug "Expanding volume %s" volume;
@@ -413,7 +318,7 @@ module Host = struct
         )
       ) items
       >>= fun () ->
-      ToLVM.advance to_lvm pos
+      Rings.ToLVM.advance to_lvm pos
     end
 
   let disconnect ~cooperative name =
@@ -426,12 +331,12 @@ module Host = struct
       | Xenvm_interface.Connected ->
         let to_lvm = connected_host.to_LVM in
         ( if cooperative then begin
-            debug "Cooperative disconnect: suspending ToLVM queue for %s" name;
-            ToLVM.suspend to_lvm
+            debug "Cooperative disconnect: suspending Rings.ToLVM queue for %s" name;
+            Rings.ToLVM.suspend to_lvm
           end else return ()
         ) >>= fun () ->
-        (* There may still be updates in the ToLVM queue *)
-        debug "Flushing ToLVM queue for %s" name;
+        (* There may still be updates in the Rings.ToLVM queue *)
+        debug "Flushing Rings.ToLVM queue for %s" name;
         Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
         >>= fun () ->
         let toLVM = toLVM name in
@@ -466,18 +371,18 @@ module Host = struct
       (fun (name, connected_host) ->
         let lv = toLVM name in
         let t = connected_host.to_LVM in
-        ( ToLVM.state t >>= function
+        ( Rings.ToLVM.state t >>= function
           | `Suspended -> return true
           | `Running -> return false ) >>= fun suspended ->
-        ToLVM.debug_info t
+        Rings.ToLVM.debug_info t
         >>= fun debug_info ->
         let toLVM = { Xenvm_interface.lv; suspended; debug_info } in
         let lv = fromLVM name in
         let t = connected_host.from_LVM in
-        ( FromLVM.state t >>= function
+        ( Rings.FromLVM.state t >>= function
           | `Suspended -> return true
           | `Running -> return false ) >>= fun suspended ->
-        FromLVM.debug_info t
+        Rings.FromLVM.debug_info t
         >>= fun debug_info ->
         let fromLVM = { Xenvm_interface.lv; suspended; debug_info } in
         read (fun vg ->
@@ -654,9 +559,9 @@ module FreePool = struct
             let new_extents = Lvm.Pv.Allocator.sub current_allocation old_allocation in
             Lwt.return new_extents)
         >>= fun allocation ->
-        FromLVM.push connected_host.from_LVM allocation
+        Rings.FromLVM.push connected_host.from_LVM allocation
         >>= fun pos ->
-        FromLVM.advance connected_host.from_LVM pos)
+        Rings.FromLVM.advance connected_host.from_LVM pos)
         (fun e ->
            match e with
            | Failure "not found" ->
@@ -712,12 +617,12 @@ module FreePool = struct
         let from_lvm = connected_host.from_LVM in
         let freeid = connected_host.free_LV_uuid in
         let freename = connected_host.free_LV in
-        FromLVM.state from_lvm
+        Rings.FromLVM.state from_lvm
         >>= function
         | `Running -> return ()
         | `Suspended ->
           let rec wait () =
-            FromLVM.state from_lvm
+            Rings.FromLVM.state from_lvm
             >>= function
             | `Suspended ->
               Lwt_unix.sleep 5.
@@ -731,9 +636,9 @@ module FreePool = struct
               | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
               | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" freename))) )
           >>= fun allocation ->
-          FromLVM.push from_lvm allocation
+          Rings.FromLVM.push from_lvm allocation
           >>= fun pos ->
-          FromLVM.advance from_lvm pos
+          Rings.FromLVM.advance from_lvm pos
       ) hosts
 
   let top_up_host config host =
