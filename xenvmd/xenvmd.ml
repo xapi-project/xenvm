@@ -62,16 +62,16 @@ module Impl = struct
 
   let flush context ~name =
     (* We don't know where [name] is attached so we have to flush everything *)
-    VolumeManager.Host.flush_all () >>=
+    Host.flush_all () >>=
     Vg_io.sync
 
   let shutdown context () =
     List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
     Xenvmd_stats.stop ()
     >>= fun () ->
-    VolumeManager.Host.shutdown ()
+    Host.shutdown ()
     >>= fun () ->
-    VolumeManager.FreePool.shutdown ()
+    Freepool.shutdown ()
     >>= fun () ->
     let (_: unit Lwt.t) =
       Lwt_unix.sleep 1.
@@ -80,11 +80,11 @@ module Impl = struct
     return (Unix.getpid ())
 
   module Host = struct
-    let create context ~name = VolumeManager.Host.create name
-    let connect context ~name = VolumeManager.Host.connect name
-    let disconnect context ~cooperative ~name = VolumeManager.Host.disconnect ~cooperative name
-    let destroy context ~name = VolumeManager.Host.destroy name
-    let all context () = VolumeManager.Host.all ()
+    let create context ~name = Host.create name
+    let connect context ~name = Host.connect name
+    let disconnect context ~cooperative ~name = Host.disconnect ~cooperative name
+    let destroy context ~name = Host.destroy name
+    let all context () = Host.all ()
   end
 end
 
@@ -113,9 +113,9 @@ let run port sock_path config =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config));
     Vg_io.vgopen ~devices:config.Config.Xenvmd.devices
     >>= fun () ->
-    VolumeManager.FreePool.start Xenvm_interface._journal_name
+    Freepool.start Xenvm_interface._journal_name
     >>= fun () ->
-    VolumeManager.Host.reconnect_all ()
+    Host.reconnect_all ()
     >>= fun () ->
     (* Create a snapshot cache of the metadata for the stats thread *)
     Vg_io.read return >>= fun vg ->
@@ -123,13 +123,13 @@ let run port sock_path config =
 
     let rec service_queues () =
       (* 0. Have any local allocators restarted? *)
-      VolumeManager.FreePool.resend_free_volumes config
+      Freepool.resend_free_volumes config
       >>= fun () ->
       (* 1. Do any of the host free LVs need topping up? *)
-      VolumeManager.FreePool.top_up_free_volumes config
+      Freepool.top_up_free_volumes config
       >>= fun () ->
       (* 2. Are there any pending LVM updates from hosts? *)
-      VolumeManager.Host.flush_all ()
+      Host.flush_all ()
       >>= fun () ->
       (* 3. Update the metadata snapshot for the stats collection *)
       Vg_io.read return >>= fun vg -> stats_vg_cache := vg;
