@@ -17,11 +17,6 @@ open Log
 open Errors
 open Vg_io
 
-module Time = struct
-  type 'a io = 'a Lwt.t
-  let sleep = Lwt_unix.sleep
-end
-
 let xenvmd_generation_tag = "xenvmd_gen"
 
 let sector_size, sector_size_u = Lwt.task ()
@@ -463,9 +458,9 @@ module FreePool = struct
     let open Journal.Op in
     debug "%s" (sexp_of_t t |> Sexplib.Sexp.to_string_hum);
     match t with
-    | FreeAllocation fa ->
+    | ExpandFree ef ->
       Lwt.catch (fun () ->
-        let connected_host = Hashtbl.find connected_hosts fa.host in
+        let connected_host = Hashtbl.find connected_hosts ef.host in
         sector_size >>= fun sector_size ->
 
         (* Two operations to perform for this one journalled operation.
@@ -495,7 +490,7 @@ module FreePool = struct
         maybe_write
           (fun vg ->
              let current_allocation = allocation_of_lv vg connected_host.free_LV_uuid in
-             let new_space = Lvm.Pv.Allocator.sub current_allocation fa.old_allocation |> Lvm.Pv.Allocator.size in
+             let new_space = Lvm.Pv.Allocator.sub current_allocation ef.old_allocation |> Lvm.Pv.Allocator.size in
              if new_space = 0L then begin
                try
                  let lv = Lvm.Vg.LVs.find connected_host.free_LV_uuid vg.Lvm.Vg.lvs in (* Not_found here caught by the try-catch block *)
@@ -508,14 +503,14 @@ module FreePool = struct
                         | x -> x) None lv.Lvm.Lv.tags
                  in
                  let allocation =
-                   match Lvm.Pv.Allocator.find vg.Lvm.Vg.free_space Int64.(div fa.extra_size extent_size_mib) with
+                   match Lvm.Pv.Allocator.find vg.Lvm.Vg.free_space Int64.(div ef.extra_size extent_size_mib) with
                    | `Ok allocation -> allocation
                    | `Error (`OnlyThisMuchFree (needed_extents, free_extents)) ->
                      info "LV %s expansion required, but number of free extents (%Ld) is less than needed extents (%Ld)" connected_host.free_LV free_extents needed_extents;
                      info "Expanding to use all the available space.";
                      vg.Lvm.Vg.free_space
                  in
-                 match Lvm.Vg.do_op vg (op_of_free_allocation vg fa.host allocation) with
+                 match Lvm.Vg.do_op vg (op_of_free_allocation vg ef.host allocation) with
                  | `Ok (_,op1) ->
                    let genops =
                      match old_gen
@@ -537,7 +532,7 @@ module FreePool = struct
         >>= fun () ->
         read (fun vg ->
             let current_allocation = allocation_of_lv vg connected_host.free_LV_uuid in
-            let old_allocation = fa.old_allocation in
+            let old_allocation = ef.old_allocation in
             let new_extents = Lvm.Pv.Allocator.sub current_allocation old_allocation in
             Lwt.return new_extents)
         >>= fun allocation ->
@@ -547,10 +542,10 @@ module FreePool = struct
         (fun e ->
            match e with
            | Failure "not found" ->
-             info "unable to push block update to host %s because it has disappeared" fa.host;
+             info "unable to push block update to host %s because it has disappeared" ef.host;
              return ()
            | e ->
-             error "Unhandled error when replaying journal entry for host %s" fa.host;
+             error "Unhandled error when replaying journal entry for host %s" ef.host;
              fail e)
 
   let perform ops =
@@ -636,10 +631,10 @@ module FreePool = struct
         | Some j ->
           let open Journal.Op in
           Journal.J.push j
-            (FreeAllocation
+            (ExpandFree
                { host;
-                    old_allocation=Lvm.Lv.to_allocation lv;
-                    extra_size=config.host_allocation_quantum })
+                 old_allocation=Lvm.Lv.to_allocation lv;
+                 extra_size=config.host_allocation_quantum })
           >>|= fun wait ->
           wait.Journal.J.sync ()
         | None ->

@@ -4,13 +4,13 @@ open Vg_io
 module Op = struct
   module T = struct
     type host = string with sexp
-    type fa = {
+    type ef = {
       host : string;
-      old_allocation : FreeAllocation.t;
+      old_allocation : Lvm.Pv.Allocator.t;
       extra_size : int64;
     } with sexp
     type t =
-      | FreeAllocation of fa
+      | ExpandFree of ef
       (* Assign a block allocation to a host *)
     with sexp
   end
