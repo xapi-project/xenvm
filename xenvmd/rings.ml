@@ -4,6 +4,10 @@ open Vg_io
 
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
+  type t = R.Consumer.t
+  type item = ExpandVolume.t
+  type position = R.Consumer.position
+
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
   let attach ~name ~disk () =
@@ -64,6 +68,9 @@ end
 
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
+  type t = R.Producer.t
+  type item = FreeAllocation.t
+  type position = R.Producer.position
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
   let attach ~name ~disk () =

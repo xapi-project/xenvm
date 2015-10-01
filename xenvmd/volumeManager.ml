@@ -99,8 +99,8 @@ let sync () =
 
 type connected_host = {
   mutable state : Xenvm_interface.connection_state;
-  to_LVM : Rings.ToLVM.R.Consumer.t;
-  from_LVM : Rings.FromLVM.R.Producer.t;
+  to_LVM : Rings.ToLVM.t;
+  from_LVM : Rings.FromLVM.t;
   free_LV : string;
   free_LV_uuid : Lvm.Vg.LVs.key;
 }
