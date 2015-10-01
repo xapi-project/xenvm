@@ -22,3 +22,11 @@ sig
   end
   val find : vg -> string -> Volume.id option
 end
+
+val vgopen : devices:string list -> unit Lwt.t
+val read : (Lvm.Vg.metadata -> 'a Lwt.t) -> 'a Lwt.t
+val write : (Lvm.Vg.metadata -> ('a * Lvm.Redo.Op.t) Lvm.Vg.result) -> unit Lwt.t
+val sync : unit -> unit Lwt.t
+val maybe_write : (Lvm.Vg.metadata -> Lvm.Redo.Op.t list option Lvm.Vg.result) -> unit Lwt.t
+val myvg : Vg_IO.vg Lwt.t
+val sector_size : int Lwt.t

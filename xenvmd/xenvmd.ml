@@ -15,47 +15,47 @@ module Impl = struct
   }
 
   let get context () =
-    fatal_error "get" (VolumeManager.read (fun x -> return (`Ok x)))
+    fatal_error "get" (Vg_io.read (fun x -> return (`Ok x)))
 
   let create context ~name ~size ~creation_host ~creation_time ~tags =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.create vg name ~creation_host ~creation_time ~tags size
     )
 
   let rename context ~oldname ~newname =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.rename vg oldname newname
     )
 
   let remove context ~name =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.remove vg name
     )
 
   let resize context ~name ~size =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.resize vg name size
     )
 
   let set_status context ~name ~readonly =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.set_status vg name Lvm.Lv.Status.(if readonly then [Read] else [Read; Write])
     )
 
   let add_tag context ~name ~tag =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.add_tag vg name tag
     )
 
   let remove_tag context ~name ~tag =
-    VolumeManager.write (fun vg ->
+    Vg_io.write (fun vg ->
       Lvm.Vg.remove_tag vg name tag
     )
 
   let get_lv context ~name =
     let open Lvm in
     fatal_error "get_lv"
-      (VolumeManager.read (fun vg ->
+      (Vg_io.read (fun vg ->
         let lv = Lvm.Vg.LVs.find_by_name name vg.Vg.lvs in
         return (`Ok ({ vg with Vg.lvs = Vg.LVs.empty }, lv))
       ))
@@ -63,7 +63,7 @@ module Impl = struct
   let flush context ~name =
     (* We don't know where [name] is attached so we have to flush everything *)
     VolumeManager.flush_all () >>=
-    VolumeManager.sync
+    Vg_io.sync
 
   let shutdown context () =
     List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
@@ -111,14 +111,14 @@ let run port sock_path config =
 
   let t =
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config));
-    VolumeManager.vgopen ~devices:config.Config.Xenvmd.devices
+    Vg_io.vgopen ~devices:config.Config.Xenvmd.devices
     >>= fun () ->
     VolumeManager.FreePool.start Xenvm_interface._journal_name
     >>= fun () ->
     VolumeManager.Host.reconnect_all ()
     >>= fun () ->
     (* Create a snapshot cache of the metadata for the stats thread *)
-    VolumeManager.read return >>= fun vg ->
+    Vg_io.read return >>= fun vg ->
     let stats_vg_cache = ref vg in
 
     let rec service_queues () =
@@ -132,7 +132,7 @@ let run port sock_path config =
       VolumeManager.flush_all ()
       >>= fun () ->
       (* 3. Update the metadata snapshot for the stats collection *)
-      VolumeManager.read return >>= fun vg -> stats_vg_cache := vg;
+      Vg_io.read return >>= fun vg -> stats_vg_cache := vg;
 
       Lwt_unix.sleep 5.
       >>= fun () ->

@@ -14,13 +14,5 @@ module FreePool : sig
   val top_up_free_volumes : Config.Xenvmd.t -> unit Lwt.t
 end
 
-val vgopen : devices:string list -> unit Lwt.t
-val read : (Lvm.Vg.metadata -> 'a Lwt.t) -> 'a Lwt.t
-val write :
-  (Lvm.Vg.metadata ->
-   [< `Error of Lvm.Vg.error
-    | `Ok of 'a * Lvm.Redo.Op.t ]) ->
-  unit Lwt.t
-val sync : unit -> unit Lwt.t
 val flush_all : unit -> unit Lwt.t
 val shutdown : unit -> unit Lwt.t

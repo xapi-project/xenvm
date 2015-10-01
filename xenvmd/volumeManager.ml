@@ -19,83 +19,6 @@ open Vg_io
 
 let xenvmd_generation_tag = "xenvmd_gen"
 
-let sector_size, sector_size_u = Lwt.task ()
-let myvg, myvg_u = Lwt.task ()
-let lock = Lwt_mutex.create ()
-
-let vgopen ~devices =
-  Lwt_list.map_s
-    (fun filename ->
-       Printf.printf "filename: %s\n%!" filename;
-       Block.connect filename >>= function
-      | `Error _ -> fatal_error_t ("open " ^ filename)
-      | `Ok x -> return x
-    ) devices
-  >>= fun devices' ->
-  let module Label_IO = Lvm.Label.Make(Block) in
-  Lwt_list.iter_s
-    (fun (filename, device) ->
-      Label_IO.read device >>= function
-      | `Error (`Msg m) ->
-        error "Failed to read PV label from device: %s" m;
-        fail (Failure "Failed to read PV label from device")
-      | `Ok label ->
-        info "opened %s: %s" filename (Lvm.Label.to_string label);
-        begin match Lvm.Label.Label_header.magic_of label.Lvm.Label.label_header with
-        | Some `Lvm ->
-          error "Device has normal LVM PV label. I will only open devices with the new PV label.";
-          fail (Failure "Device has wrong LVM PV label")
-        | Some `Journalled ->
-          return ()
-        | _ ->
-          error "Device has an unrecognised LVM PV label. I will only open devices with the new PV label.";
-          fail (Failure "Device has wrong PV label")
-        end
-    ) (List.combine devices devices')
-  >>= fun () ->
-  Vg_IO.connect ~flush_interval:5. devices' `RW >>|= fun vg ->
-  Lwt.wakeup_later myvg_u vg;
-  Device.read_sector_size devices
-  >>= fun sector_size ->
-  Lwt.wakeup_later sector_size_u sector_size;
-  return ()
-
-let read fn =
-  Lwt_mutex.with_lock lock (fun () ->
-    myvg >>= fun myvg ->
-    fn (Vg_IO.metadata_of myvg)
-  )
-
-let write fn =
-  Lwt_mutex.with_lock lock (fun () ->
-    myvg >>= fun myvg ->
-    fn (Vg_IO.metadata_of myvg)
-    >>*= fun (_, op) ->
-    Vg_IO.update myvg [ op ]
-    >>|= fun () ->
-    Lwt.return ()
-  )
-
-let maybe_write fn =
-  Lwt_mutex.with_lock lock (fun () ->
-      myvg >>= fun myvg ->
-      fn (Vg_IO.metadata_of myvg)
-      >>*= (function
-      | Some ops ->
-        Vg_IO.update myvg ops
-      | None ->
-        Lwt.return (`Ok ()))
-      >>|= fun () ->
-      Lwt.return ()
-    )
-
-let sync () =
-  Lwt_mutex.with_lock lock (fun () ->
-    myvg >>= fun myvg ->
-    Vg_IO.sync myvg
-    >>|= fun () ->
-    Lwt.return ()
-  )
 
 type connected_host = {
   mutable state : Xenvm_interface.connection_state;
@@ -121,7 +44,7 @@ module Host = struct
     let freeLVM = freeLVM name in
     let toLVM = toLVM name in
     let fromLVM = fromLVM name in
-    myvg >>= fun vg ->
+    Vg_io.myvg >>= fun vg ->
     match Vg_IO.find vg freeLVM with
     | Some lv ->
       debug "Found freeLVM exists already";
@@ -139,8 +62,8 @@ module Host = struct
           Lvm.Vg.create vg fromLVM size ~creation_host ~creation_time
         ) >>= fun () ->
         (* The local allocator needs to see the volumes now *)
-        sync () >>= fun () ->
-        myvg >>= fun vg ->
+        Vg_io.sync () >>= fun () ->
+        Vg_io.myvg >>= fun vg ->
 
         ( match Vg_IO.find vg toLVM with
           | Some lv -> return lv
@@ -178,13 +101,13 @@ module Host = struct
         write (fun vg ->
           Lvm.Vg.create vg freeLVM size ~creation_host ~creation_time
         ) >>= fun () ->
-        sync ()
+        Vg_io.sync ()
       end
 
   let sexp_of_exn e = Sexplib.Sexp.Atom (Printexc.to_string e)
 
   let connect name =
-    myvg >>= fun vg ->
+    Vg_io.myvg >>= fun vg ->
     info "Registering host %s" name;
     let toLVM = toLVM name in
     let fromLVM = fromLVM name in
@@ -556,7 +479,7 @@ module FreePool = struct
   let journal = ref None
 
   let start name =
-    myvg >>= fun vg ->
+    Vg_io.myvg >>= fun vg ->
     debug "Opening LV '%s' to use as a freePool journal" name;
     ( match Vg_IO.find vg name with
       | Some lv -> return lv
