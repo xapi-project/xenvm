@@ -336,21 +336,20 @@ module Host = struct
     Lwt_list.iter_s (fun (host, was_connected) ->
         if was_connected then connect host else disconnect ~cooperative:false host) host_states
 
+  let flush_one host =
+    Lwt_mutex.with_lock flush_m
+      (fun () -> flush_already_locked host)
+      
+  let flush_all () =
+    let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
+    Lwt_list.iter_s flush_one hosts
+      
+  let shutdown () =
+    let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
+    Lwt_list.iter_s (disconnect ~cooperative:true) hosts
+    >>= fun () ->
+    sync ()
 end
-
-let flush_one host =
-  Lwt_mutex.with_lock Host.flush_m
-    (fun () -> Host.flush_already_locked host)
-
-let flush_all () =
-  let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
-  Lwt_list.iter_s flush_one hosts
-
-let shutdown () =
-  let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
-  Lwt_list.iter_s (Host.disconnect ~cooperative:true) hosts
-  >>= fun () ->
-  sync ()
 
 module FreePool = struct
   (* Manage the Free LVs *)

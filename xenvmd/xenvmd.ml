@@ -62,14 +62,14 @@ module Impl = struct
 
   let flush context ~name =
     (* We don't know where [name] is attached so we have to flush everything *)
-    VolumeManager.flush_all () >>=
+    VolumeManager.Host.flush_all () >>=
     Vg_io.sync
 
   let shutdown context () =
     List.iter (fun u -> Lwt.wakeup u ()) context.stoppers;
     Xenvmd_stats.stop ()
     >>= fun () ->
-    VolumeManager.shutdown ()
+    VolumeManager.Host.shutdown ()
     >>= fun () ->
     VolumeManager.FreePool.shutdown ()
     >>= fun () ->
@@ -129,7 +129,7 @@ let run port sock_path config =
       VolumeManager.FreePool.top_up_free_volumes config
       >>= fun () ->
       (* 2. Are there any pending LVM updates from hosts? *)
-      VolumeManager.flush_all ()
+      VolumeManager.Host.flush_all ()
       >>= fun () ->
       (* 3. Update the metadata snapshot for the stats collection *)
       Vg_io.read return >>= fun vg -> stats_vg_cache := vg;
