@@ -26,16 +26,6 @@ let retry ~dbg ~retries ~interval f =
         aux (retries - 1) in
   aux retries
 
-(* This error must cause the system to stop for manual maintenance.
-   Perhaps we could scope this later and take down only a single connection? *)
-let fatal_error_t msg =
-  error "%s" msg;
-  fail (Failure msg)
-
-let fatal_error msg m = m >>= function
-  | `Error _ -> fatal_error_t msg
-  | `Ok x -> return x
-
 let with_block filename f =
   let open Lwt in
   Block.connect filename
