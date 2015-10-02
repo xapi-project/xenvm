@@ -62,29 +62,19 @@ module FromLVM = struct
     >>= fun x ->
     fatal_error "FromLVM.suspend" (return x)
     >>= fun () ->
-      let rec wait () =
-        fatal_error "reading state of FromLVM" (R.Consumer.state t)
-        >>= function
-        | `Suspended -> return ()
-        | `Running ->
-          Lwt_unix.sleep 5.
-          >>= fun () ->
-          wait () in
-      wait ()
+    wait_for (fun () -> R.Consumer.state t) `Suspended
+    >>= function
+    | `Ok _ -> Lwt.return ()
+    | _ -> fatal_error_t "FromLVM.suspend"
   let rec resume t =
     retry_forever (fun () -> R.Consumer.resume t)
     >>= fun x ->
-    fatal_error "FromLVM.suspend" (return x)
+    fatal_error "FromLVM.resume" (return x)
     >>= fun () ->
-      let rec wait () =
-        fatal_error "reading state of FromLVM" (R.Consumer.state t)
-        >>= function
-        | `Suspended ->
-          Lwt_unix.sleep 5.
-          >>= fun () ->
-          wait ()
-        | `Running -> return () in
-      wait ()
+    wait_for (fun () -> R.Consumer.state t) `Running
+    >>= function
+    | `Ok _ -> Lwt.return ()
+    | _ -> fatal_error_t "FromLVM.resume"
   let rec pop t =
     R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
     >>= fun x ->
