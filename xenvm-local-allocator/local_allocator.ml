@@ -26,16 +26,6 @@ let retry ~dbg ~retries ~interval f =
         aux (retries - 1) in
   aux retries
 
-let rec try_forever f =
-  f ()
-  >>= function
-  | `Ok x -> return (`Ok x)
-  | `Error `Retry ->
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    try_forever f
-  | `Error x -> return (`Error x)
-
 (* This error must cause the system to stop for manual maintenance.
    Perhaps we could scope this later and take down only a single connection? *)
 let fatal_error_t msg =
@@ -78,7 +68,7 @@ module FromLVM = struct
   let state t =
     fatal_error "querying FromLVM state" (R.Consumer.state t)
   let rec suspend t =
-    try_forever (fun () -> R.Consumer.suspend t)
+    retry_forever (fun () -> R.Consumer.suspend t)
     >>= fun x ->
     fatal_error "FromLVM.suspend" (return x)
     >>= fun () ->
@@ -92,7 +82,7 @@ module FromLVM = struct
           wait () in
       wait ()
   let rec resume t =
-    try_forever (fun () -> R.Consumer.resume t)
+    retry_forever (fun () -> R.Consumer.resume t)
     >>= fun x ->
     fatal_error "FromLVM.suspend" (return x)
     >>= fun () ->
@@ -137,6 +127,7 @@ module ToLVM = struct
   let advance t position =
     fatal_error "advancing ToLVM pointer" (R.Producer.advance ~t ~position ())
 end
+
 
 module FreePool = struct
   let m = Lwt_mutex.create ()
@@ -354,7 +345,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
         ToLVM.push tolvm t.volume
         >>= fun position ->
         let msg = Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device in
-        try_forever (fun () -> targets_of t.device.ExpandDevice.device)
+        retry_forever (fun () -> targets_of t.device.ExpandDevice.device)
         >>= fun x ->
         fatal_error msg (return x)
         >>= fun to_device_targets ->
