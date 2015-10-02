@@ -26,14 +26,14 @@ let retry ~dbg ~retries ~interval f =
         aux (retries - 1) in
   aux retries
 
-let rec try_forever msg f =
+let rec try_forever f =
   f ()
   >>= function
   | `Ok x -> return (`Ok x)
   | `Error `Retry ->
     Lwt_unix.sleep 5.
     >>= fun () ->
-    try_forever msg f
+    try_forever f
   | `Error x -> return (`Error x)
 
 (* This error must cause the system to stop for manual maintenance.
@@ -78,7 +78,7 @@ module FromLVM = struct
   let state t =
     fatal_error "querying FromLVM state" (R.Consumer.state t)
   let rec suspend t =
-    try_forever "FromLVM.suspend" (fun () -> R.Consumer.suspend t)
+    try_forever (fun () -> R.Consumer.suspend t)
     >>= fun x ->
     fatal_error "FromLVM.suspend" (return x)
     >>= fun () ->
@@ -92,7 +92,7 @@ module FromLVM = struct
           wait () in
       wait ()
   let rec resume t =
-    try_forever "FromLVM.resume" (fun () -> R.Consumer.resume t)
+    try_forever (fun () -> R.Consumer.resume t)
     >>= fun x ->
     fatal_error "FromLVM.suspend" (return x)
     >>= fun () ->
@@ -354,7 +354,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
         ToLVM.push tolvm t.volume
         >>= fun position ->
         let msg = Printf.sprintf "Querying dm device %s" t.device.ExpandDevice.device in
-        try_forever msg (fun () -> targets_of t.device.ExpandDevice.device)
+        try_forever (fun () -> targets_of t.device.ExpandDevice.device)
         >>= fun x ->
         fatal_error msg (return x)
         >>= fun to_device_targets ->
