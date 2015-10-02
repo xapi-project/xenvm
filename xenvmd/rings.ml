@@ -50,25 +50,14 @@ module ToLVM = struct
     | `Ok _ -> Lwt.return ()
     |  _ -> fatal_error_t "ToLVM.suspend"
   let rec resume t =
-    R.Consumer.resume t
+    try_forever (fun () -> R.Consumer.resume t)
+    >>= fun r ->
+    fatal_error "ToLVM.resume" (return r)
+    >>= fun () ->
+    wait_for (fun () -> R.Consumer.state t) `Running
     >>= function
-    | `Error (`Msg msg) -> fatal_error_t msg
-    | `Error `Retry ->
-      Time.sleep 5.
-      >>= fun () ->
-      resume t
-    | `Error `Suspended -> return ()
-    | `Ok () ->
-      let rec wait () =
-        R.Consumer.state t
-        >>= function
-        | `Error _ -> fatal_error_t "reading state of ToLVM"
-        | `Ok `Suspended ->
-          Time.sleep 5.
-          >>= fun () ->
-          wait ()
-        | `Ok `Running -> return () in
-      wait ()
+    | `Ok _ -> Lwt.return ()
+    |  _ -> fatal_error_t "ToLVM.resume"
   let rec pop t =
     fatal_error "ToLVM.pop"
       (R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ())
