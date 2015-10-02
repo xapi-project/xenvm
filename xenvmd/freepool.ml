@@ -151,7 +151,7 @@ let shutdown () =
   | None ->
     return ()
 
-let resend_free_volumes config =
+let resend_free_volumes () =
   fatal_error "resend_free_volumes unable to read LVM metadata"
     ( read (fun x -> return (`Ok x)) )
   >>= fun lvm ->

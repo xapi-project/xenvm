@@ -123,7 +123,7 @@ let run port sock_path config =
 
     let rec service_queues () =
       (* 0. Have any local allocators restarted? *)
-      Freepool.resend_free_volumes config
+      Freepool.resend_free_volumes ()
       >>= fun () ->
       (* 1. Do any of the host free LVs need topping up? *)
       Freepool.top_up_free_volumes config
