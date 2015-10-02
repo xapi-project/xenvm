@@ -2,6 +2,30 @@ open Errors
 open Lwt
 open Vg_io
 
+
+let rec try_forever f =
+  f ()
+  >>= function
+  | `Ok x -> return (`Ok x)
+  | `Error `Retry ->
+    Vg_io.Time.sleep 5.
+    >>= fun () ->
+    try_forever f
+  | `Error x -> return (`Error x)
+
+let wait_for f state =
+  let new_f () =
+    f () >>= function
+    | `Error _ as x -> return x
+    | `Ok s when s=state -> return (`Ok ())
+    | `Ok _ -> return (`Error `Retry)
+  in try_forever new_f
+
+let suspended_is_ok x =
+  match x with
+  | `Error `Suspended -> return (`Ok ())
+  | y -> return y
+
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   type t = R.Consumer.t
@@ -17,25 +41,14 @@ module ToLVM = struct
   let debug_info t =
     fatal_error "querying ToLVM debug_info" (R.Consumer.debug_info t)
   let rec suspend t =
-    R.Consumer.suspend t
+    try_forever (fun () -> R.Consumer.suspend t)
+    >>= fun r ->
+    fatal_error "ToLVM.suspend" (suspended_is_ok r)
+    >>= fun () ->
+    wait_for (fun () -> R.Consumer.state t) `Suspended
     >>= function
-    | `Error (`Msg msg) -> fatal_error_t msg
-    | `Error `Suspended -> return ()
-    | `Error `Retry ->
-      Time.sleep 5.
-      >>= fun () ->
-      suspend t
-    | `Ok () ->
-      let rec wait () =
-        R.Consumer.state t
-        >>= function
-        | `Error _ -> fatal_error_t "reading state of ToLVM"
-        | `Ok `Running ->
-          Time.sleep 5.
-          >>= fun () ->
-          wait ()
-        | `Ok `Suspended -> return () in
-      wait ()
+    | `Ok _ -> Lwt.return ()
+    |  _ -> fatal_error_t "ToLVM.suspend"
   let rec resume t =
     R.Consumer.resume t
     >>= function
