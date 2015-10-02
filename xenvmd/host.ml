@@ -14,6 +14,15 @@ module StringSet = Set.Make(String)
 let connecting_hosts : StringSet.t ref = ref StringSet.empty
 let connected_hosts : (string, connected_host) Hashtbl.t = Hashtbl.create 11
 
+let get_connected_hosts () =
+  Hashtbl.fold (fun k v acc -> (k,v)::acc) connected_hosts []
+
+let get_connected_host host =
+  try
+    Some (Hashtbl.find connected_hosts host)
+  with Not_found ->
+    None
+
 let connected_tag = "xenvm_connected"
 
 (* Conventional names of the metadata volumes *)
