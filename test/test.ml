@@ -493,6 +493,8 @@ let la_extend_multi device =
          ignore(myvg,lv,lv2);
          let size = Lvm.Lv.size_in_extents lv in
          let size2 = Lvm.Lv.size_in_extents lv2 in
+         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname]);
+         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname2]);
          Printf.printf "Sanity checking VG\n%!";
          Client.get () >>= fun myvg -> 
          Common.sanity_check myvg;
