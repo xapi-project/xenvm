@@ -59,11 +59,11 @@ module FromLVM = struct
 
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let rec attach ~name ~disk () =
+  let rec attach_as_consumer ~name ~disk () =
     fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~queue:(name ^ " FromLVM Consumer") ~client:"xenvm-local-allocator" ~disk ()) 
-  let state t =
+  let c_state t =
     fatal_error "querying FromLVM state" (R.Consumer.state t)
-  let debug_info t =
+  let c_debug_info t =
     fatal_error "querying FromLVM debug_info" (R.Consumer.debug_info t)
   let rec suspend t =
     retry_forever (fun () -> R.Consumer.suspend t)
@@ -90,7 +90,7 @@ module FromLVM = struct
     >>= fun (position, rev_items) ->
     let items = List.rev rev_items in
     return (position, items)
-  let advance t position =
+  let c_advance t position =
     fatal_error "advancing the FromLVM consumer pointer" (R.Consumer.advance ~t ~position ())
 end
 module ToLVM = struct
@@ -100,7 +100,7 @@ module ToLVM = struct
   type pposition = R.Producer.position
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let rec attach ~name ~disk () =
+  let rec attach_as_producer ~name ~disk () =
     let initial_state = ref `Running in
     let rec loop () = R.Producer.attach ~queue:(name ^ "ToLVM Producer") ~client:"xenvm-local-allocator" ~disk ()
       >>= function
@@ -113,9 +113,9 @@ module ToLVM = struct
     loop ()
     >>= fun x ->
     return (!initial_state, x)
-  let state t =
+  let p_state t =
     fatal_error "querying ToLVM state" (R.Producer.state t)
-  let debug_info t =
+  let p_debug_info t =
     fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)  let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Retry | `Suspended) ->
     Lwt_unix.sleep 5.
@@ -123,7 +123,7 @@ module ToLVM = struct
     push t item
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the ToLVM queue: %s" x)
   | `Ok x -> return x
-  let advance t position =
+  let p_advance t position =
     fatal_error "advancing ToLVM pointer" (R.Producer.advance ~t ~position ())
 end
 
@@ -176,9 +176,9 @@ module FreePool = struct
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.Local_allocator.fromLVM))
       | `Ok disk ->
-      FromLVM.attach ~name:"local-allocator" ~disk ()
+      FromLVM.attach_as_consumer ~name:"local-allocator" ~disk ()
       >>= fun from_lvm ->
-      FromLVM.state from_lvm
+      FromLVM.c_state from_lvm
       >>= fun state ->
       debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
 
@@ -192,7 +192,7 @@ module FreePool = struct
       debug "Dropping FromLVM allocations";
       FromLVM.pop from_lvm
       >>= fun (pos, _) ->
-      FromLVM.advance from_lvm pos
+      FromLVM.c_advance from_lvm pos
       >>= fun () ->
       debug "Resuming FromLVM queue";
       (* Resume the queue and we're good to go! *)
@@ -213,7 +213,7 @@ module FreePool = struct
             add t
           ) ts
         >>= fun () ->
-        FromLVM.advance from_lvm pos
+        FromLVM.c_advance from_lvm pos
         >>= fun () ->
         loop_forever () in
       return loop_forever
@@ -312,9 +312,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     >>= function
     | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.toLVM))
     | `Ok disk ->
-    ToLVM.attach ~name:"local-allocator" ~disk ()
+    ToLVM.attach_as_producer ~name:"local-allocator" ~disk ()
     >>= fun (_,tolvm) ->
-    ToLVM.state tolvm
+    ToLVM.p_state tolvm
     >>= fun state ->
     debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
 
@@ -325,7 +325,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     info "The Volume Group has %Ld sector (%Ld MiB) extents" extent_size extent_size_mib;
 
     let rec wait_for_shutdown_forever () =
-      ToLVM.state tolvm
+      ToLVM.p_state tolvm
       >>= function
       | `Suspended ->
         info "The ToLVM queue has been suspended. We will acknowledge and exit";
@@ -354,7 +354,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
           D.suspend t.device.ExpandDevice.device);
         retry ~dbg:"Reload local dm device" ~retries:3 ~interval:1 (fun () ->
           D.reload t.device.ExpandDevice.device to_targets);
-        ToLVM.advance tolvm position
+        ToLVM.p_advance tolvm position
         >>= fun () ->
         retry ~dbg:"Resume local dm device" ~retries:3 ~interval:1 (fun () ->
           D.resume t.device.ExpandDevice.device);

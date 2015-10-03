@@ -133,9 +133,9 @@ let connect name =
         >>= function
         | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
         | `Ok disk ->
-          Rings.ToLVM.attach ~name ~disk ()
+          Rings.ToLVM.attach_as_consumer ~name ~disk ()
           >>= fun toLVM_q ->
-          Rings.ToLVM.state toLVM_q
+          Rings.ToLVM.c_state toLVM_q
           >>= fun state ->
           debug "Rings.ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
           Rings.ToLVM.resume toLVM_q
@@ -145,7 +145,7 @@ let connect name =
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
           | `Ok disk ->
-            Rings.FromLVM.attach ~name ~disk ()
+            Rings.FromLVM.attach_as_producer ~name ~disk ()
             >>= fun (initial_state, fromLVM_q) ->
             let connected_host = {
               state = Xenvm_interface.Resuming_to_LVM;
@@ -163,7 +163,7 @@ let connect name =
                 let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of freeLVM_id) in
                 Rings.FromLVM.push fromLVM_q allocation
                 >>= fun pos ->
-                Rings.FromLVM.advance fromLVM_q pos
+                Rings.FromLVM.p_advance fromLVM_q pos
                 >>= fun () ->
                 debug "Free blocks pushed";
                 return ()
@@ -173,7 +173,7 @@ let connect name =
               end )
             >>= fun () ->
             debug "querying state";
-            Rings.FromLVM.state fromLVM_q
+            Rings.FromLVM.p_state fromLVM_q
             >>= fun state ->
             debug "Rings.FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
             return connected_host in
@@ -226,7 +226,7 @@ let flush_already_locked name =
           )
       ) items
     >>= fun () ->
-    Rings.ToLVM.advance to_lvm pos
+    Rings.ToLVM.c_advance to_lvm pos
   end
 
 let disconnect ~cooperative name =
@@ -279,18 +279,18 @@ let all () =
     (fun (name, connected_host) ->
        let lv = toLVM name in
        let t = connected_host.to_LVM in
-       ( Rings.ToLVM.state t >>= function
+       ( Rings.ToLVM.c_state t >>= function
            | `Suspended -> return true
            | `Running -> return false ) >>= fun suspended ->
-       Rings.ToLVM.debug_info t
+       Rings.ToLVM.c_debug_info t
        >>= fun debug_info ->
        let toLVM = { Xenvm_interface.lv; suspended; debug_info } in
        let lv = fromLVM name in
        let t = connected_host.from_LVM in
-       ( Rings.FromLVM.state t >>= function
+       ( Rings.FromLVM.p_state t >>= function
            | `Suspended -> return true
            | `Running -> return false ) >>= fun suspended ->
-       Rings.FromLVM.debug_info t
+       Rings.FromLVM.p_debug_info t
        >>= fun debug_info ->
        let fromLVM = { Xenvm_interface.lv; suspended; debug_info } in
        read (fun vg ->

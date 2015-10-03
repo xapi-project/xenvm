@@ -107,7 +107,7 @@ let perform_expand_free ef connected_host =
   >>= fun allocation ->
   Rings.FromLVM.push connected_host.Host.from_LVM allocation
   >>= fun pos ->
-  Rings.FromLVM.advance connected_host.Host.from_LVM pos
+  Rings.FromLVM.p_advance connected_host.Host.from_LVM pos
 
 let perform t =
   debug "%s" (Journal.Op.sexp_of_t t |> Sexplib.Sexp.to_string_hum);
@@ -164,12 +164,12 @@ let resend_free_volumes () =
        let from_lvm = connected_host.Host.from_LVM in
        let freeid = connected_host.Host.free_LV_uuid in
        let freename = connected_host.Host.free_LV in
-       Rings.FromLVM.state from_lvm
+       Rings.FromLVM.p_state from_lvm
        >>= function
        | `Running -> return ()
        | `Suspended ->
          let rec wait () =
-           Rings.FromLVM.state from_lvm
+           Rings.FromLVM.p_state from_lvm
            >>= function
            | `Suspended ->
              Lwt_unix.sleep 5.
@@ -185,7 +185,7 @@ let resend_free_volumes () =
          >>= fun allocation ->
          Rings.FromLVM.push from_lvm allocation
          >>= fun pos ->
-         Rings.FromLVM.advance from_lvm pos
+         Rings.FromLVM.p_advance from_lvm pos
     ) hosts
 
 let top_up_host config host connected_host =

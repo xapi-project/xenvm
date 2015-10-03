@@ -10,11 +10,11 @@ module ToLVM = struct
 
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let attach ~name ~disk () =
+  let attach_as_consumer ~name ~disk () =
     fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~queue:(name ^ " ToLVM Consumer") ~client:"xenvmd" ~disk ())
-  let state t =
+  let c_state t =
     fatal_error "querying ToLVM state" (R.Consumer.state t)
-  let debug_info t =
+  let c_debug_info t =
     fatal_error "querying ToLVM debug_info" (R.Consumer.debug_info t)
   let rec suspend t =
     retry_forever (fun () -> R.Consumer.suspend t)
@@ -40,7 +40,7 @@ module ToLVM = struct
     >>= fun (position, rev_items) ->
       let items = List.rev rev_items in
       return (position, items)
-  let advance t position =
+  let c_advance t position =
     fatal_error "toLVM.advance" (R.Consumer.advance ~t ~position ())
 end
 
@@ -51,7 +51,7 @@ module FromLVM = struct
   type pposition = R.Producer.position
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let attach ~name ~disk () =
+  let attach_as_producer ~name ~disk () =
     let initial_state = ref `Running in
     let rec loop () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
       | `Error `Suspended ->
@@ -63,8 +63,8 @@ module FromLVM = struct
     loop ()
     >>= fun x ->
     return (!initial_state, x)
-  let state t = fatal_error "FromLVM.state" (R.Producer.state t)
-  let debug_info t =
+  let p_state t = fatal_error "FromLVM.state" (R.Producer.state t)
+  let p_debug_info t =
     fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
@@ -77,7 +77,7 @@ module FromLVM = struct
     >>= fun () ->
     push t item
   | `Ok x -> return x
-  let advance t position =
+  let p_advance t position =
     fatal_error "FromLVM.advance" (R.Producer.advance ~t ~position ())
 end
 
