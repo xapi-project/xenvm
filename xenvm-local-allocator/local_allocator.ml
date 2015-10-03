@@ -53,10 +53,18 @@ let query_lvm config =
 
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
-  let rec attach ~disk () =
-    fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~queue:"FromLVM Consumer" ~client:"xenvm-local-allocator" ~disk ()) 
+  type t = R.Consumer.t
+  type item = FreeAllocation.t
+  type position = R.Consumer.position
+
+  let create ~disk () =
+    fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
+  let rec attach ~name ~disk () =
+    fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~queue:(name ^ " FromLVM Consumer") ~client:"xenvm-local-allocator" ~disk ()) 
   let state t =
     fatal_error "querying FromLVM state" (R.Consumer.state t)
+  let debug_info t =
+    fatal_error "querying FromLVM debug_info" (R.Consumer.debug_info t)
   let rec suspend t =
     retry_forever (fun () -> R.Consumer.suspend t)
     >>= fun x ->
@@ -87,9 +95,14 @@ module FromLVM = struct
 end
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
-  let rec attach ~disk () =
+  type t = R.Producer.t
+  type item = ExpandVolume.t
+  type position = R.Producer.position
+  let create ~disk () =
+    fatal_error "FromLVM.create" (R.Producer.create ~disk ())
+  let rec attach ~name ~disk () =
     let initial_state = ref `Running in
-    let rec loop () = R.Producer.attach ~queue:"ToLVM Producer" ~client:"xenvm-local-allocator" ~disk ()
+    let rec loop () = R.Producer.attach ~queue:(name ^ "ToLVM Producer") ~client:"xenvm-local-allocator" ~disk ()
       >>= function
       | `Error `Suspended ->
         Time.sleep 5.
@@ -102,7 +115,8 @@ module ToLVM = struct
     return (!initial_state, x)
   let state t =
     fatal_error "querying ToLVM state" (R.Producer.state t)
-  let rec push t item = R.Producer.push ~t ~item () >>= function
+  let debug_info t =
+    fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)  let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Retry | `Suspended) ->
     Lwt_unix.sleep 5.
     >>= fun () ->
@@ -162,7 +176,7 @@ module FreePool = struct
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.Local_allocator.fromLVM))
       | `Ok disk ->
-      FromLVM.attach ~disk ()
+      FromLVM.attach ~name:"local-allocator" ~disk ()
       >>= fun from_lvm ->
       FromLVM.state from_lvm
       >>= fun state ->
@@ -298,7 +312,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     >>= function
     | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.toLVM))
     | `Ok disk ->
-    ToLVM.attach ~disk ()
+    ToLVM.attach ~name:"local-allocator" ~disk ()
     >>= fun (_,tolvm) ->
     ToLVM.state tolvm
     >>= fun state ->
