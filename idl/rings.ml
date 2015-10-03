@@ -2,17 +2,7 @@ open Errors
 open Lwt
 open Vg_io
 
-module type CSTRUCTABLE = sig
-  type t
-  (** Something that can be read from and written to a Cstruct.t *)
-
-  val to_cstruct: t -> Cstruct.t
-  val of_cstruct: Cstruct.t -> t option
-  val name: string
-end
-
-
-module Ring(Op:CSTRUCTABLE) = struct
+module Ring(Op:S.CSTRUCTABLE) = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(Op)
 
   type item = Op.t

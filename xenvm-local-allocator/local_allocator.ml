@@ -2,7 +2,8 @@ open Lwt
 open Sexplib.Std
 open Log
 open Errors
-
+open Rings
+    
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
@@ -34,8 +35,6 @@ let with_block filename f =
   | `Ok x ->
     Lwt.catch (fun () -> f x) (fun e -> Block.disconnect x >>= fun () -> fail e)
 
-module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
-
 let get_device config = match config.Config.Local_allocator.devices with
   | [ x ] -> return x
   | _ ->
@@ -46,87 +45,10 @@ let query_lvm config =
   >>= fun device ->
   with_block device
     (fun x ->
-      Vg_IO.connect [ x ] `RO
+      Vg_io.Vg_IO.connect [ x ] `RO
       >>|= fun x ->
       return x
     )
-
-module FromLVM = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
-  type consumer = R.Consumer.t
-  type item = FreeAllocation.t
-  type cposition = R.Consumer.position
-
-  let create ~disk () =
-    fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let rec attach_as_consumer ~name ~disk () =
-    fatal_error "attaching to FromLVM queue" (R.Consumer.attach ~queue:(name ^ " FromLVM Consumer") ~client:"xenvm-local-allocator" ~disk ()) 
-  let c_state t =
-    fatal_error "querying FromLVM state" (R.Consumer.state t)
-  let c_debug_info t =
-    fatal_error "querying FromLVM debug_info" (R.Consumer.debug_info t)
-  let rec suspend t =
-    retry_forever (fun () -> R.Consumer.suspend t)
-    >>= fun x ->
-    fatal_error "FromLVM.suspend" (suspended_is_ok x)
-    >>= fun () ->
-    wait_for (fun () -> R.Consumer.state t) `Suspended
-    >>= function
-    | `Ok _ -> Lwt.return ()
-    | _ -> fatal_error_t "FromLVM.suspend"
-  let rec resume t =
-    retry_forever (fun () -> R.Consumer.resume t)
-    >>= fun x ->
-    fatal_error "FromLVM.resume" (return x)
-    >>= fun () ->
-    wait_for (fun () -> R.Consumer.state t) `Running
-    >>= function
-    | `Ok _ -> Lwt.return ()
-    | _ -> fatal_error_t "FromLVM.resume"
-  let rec pop t =
-    R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ()
-    >>= fun x ->
-    fatal_error "FromLVM.pop" (return x)
-    >>= fun (position, rev_items) ->
-    let items = List.rev rev_items in
-    return (position, items)
-  let c_advance t position =
-    fatal_error "advancing the FromLVM consumer pointer" (R.Consumer.advance ~t ~position ())
-end
-module ToLVM = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
-  type producer = R.Producer.t
-  type item = ExpandVolume.t
-  type pposition = R.Producer.position
-  let create ~disk () =
-    fatal_error "FromLVM.create" (R.Producer.create ~disk ())
-  let rec attach_as_producer ~name ~disk () =
-    let initial_state = ref `Running in
-    let rec loop () = R.Producer.attach ~queue:(name ^ "ToLVM Producer") ~client:"xenvm-local-allocator" ~disk ()
-      >>= function
-      | `Error `Suspended ->
-        Time.sleep 5.
-        >>= fun () ->
-        initial_state := `Suspended;
-        loop ()
-      | x -> fatal_error "ToLVM.attach" (return x) in
-    loop ()
-    >>= fun x ->
-    return (!initial_state, x)
-  let p_state t =
-    fatal_error "querying ToLVM state" (R.Producer.state t)
-  let p_debug_info t =
-    fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)  let rec push t item = R.Producer.push ~t ~item () >>= function
-  | `Error (`Retry | `Suspended) ->
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    push t item
-  | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the ToLVM queue: %s" x)
-  | `Ok x -> return x
-  let p_advance t position =
-    fatal_error "advancing ToLVM pointer" (R.Producer.advance ~t ~position ())
-end
-
 
 module FreePool = struct
   let m = Lwt_mutex.create ()
@@ -169,10 +91,10 @@ module FreePool = struct
 
     let start config vg =
       debug "Initialising the FreePool";
-      ( match Vg_IO.find vg config.Config.Local_allocator.fromLVM with
+      ( match Vg_io.Vg_IO.find vg config.Config.Local_allocator.fromLVM with
         | Some x -> return x
         | None -> assert false ) >>= fun v ->
-      Vg_IO.Volume.connect v
+      Vg_io.Vg_IO.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.Local_allocator.fromLVM))
       | `Ok disk ->
@@ -303,12 +225,12 @@ let main use_mock config daemon socket journal fromLVM toLVM =
 
     query_lvm config
     >>= fun vg ->
-    let metadata = Vg_IO.metadata_of vg in
+    let metadata = Vg_io.Vg_IO.metadata_of vg in
 
-    ( match Vg_IO.find vg config.toLVM with
+    ( match Vg_io.Vg_IO.find vg config.toLVM with
       | Some x -> return x
       | None -> assert false ) >>= fun v ->
-    Vg_IO.Volume.connect v
+    Vg_io.Vg_IO.Volume.connect v
     >>= function
     | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.toLVM))
     | `Ok disk ->
