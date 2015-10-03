@@ -88,13 +88,18 @@ end
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
   let rec attach ~disk () =
-    R.Producer.attach ~queue:"ToLVM Producer" ~client:"xenvm-local-allocator" ~disk ()
-    >>= function
-    | `Ok x -> return x
-    | _ ->
-      Lwt_unix.sleep 5.
-      >>= fun () ->
-      attach ~disk ()
+    let initial_state = ref `Running in
+    let rec loop () = R.Producer.attach ~queue:"ToLVM Producer" ~client:"xenvm-local-allocator" ~disk ()
+      >>= function
+      | `Error `Suspended ->
+        Time.sleep 5.
+        >>= fun () ->
+        initial_state := `Suspended;
+        loop ()
+      | x -> fatal_error "ToLVM.attach" (return x) in
+    loop ()
+    >>= fun x ->
+    return (!initial_state, x)
   let state t =
     fatal_error "querying ToLVM state" (R.Producer.state t)
   let rec push t item = R.Producer.push ~t ~item () >>= function
@@ -294,7 +299,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.toLVM))
     | `Ok disk ->
     ToLVM.attach ~disk ()
-    >>= fun tolvm ->
+    >>= fun (_,tolvm) ->
     ToLVM.state tolvm
     >>= fun state ->
     debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
