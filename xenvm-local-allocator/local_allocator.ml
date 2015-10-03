@@ -53,9 +53,9 @@ let query_lvm config =
 
 module FromLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
-  type t = R.Consumer.t
+  type consumer = R.Consumer.t
   type item = FreeAllocation.t
-  type position = R.Consumer.position
+  type cposition = R.Consumer.position
 
   let create ~disk () =
     fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
@@ -95,9 +95,9 @@ module FromLVM = struct
 end
 module ToLVM = struct
   module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
-  type t = R.Producer.t
+  type producer = R.Producer.t
   type item = ExpandVolume.t
-  type position = R.Producer.position
+  type pposition = R.Producer.position
   let create ~disk () =
     fatal_error "FromLVM.create" (R.Producer.create ~disk ())
   let rec attach ~name ~disk () =

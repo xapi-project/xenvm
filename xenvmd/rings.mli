@@ -1,30 +1,30 @@
 module ToLVM :
 sig
-  type t
+  type consumer
   type item = ExpandVolume.t
-  type position
+  type cposition
   val create : disk:Vg_io.Vg_IO.Volume.t -> unit -> unit Lwt.t
   val attach :
-    name:string -> disk:Vg_io.Vg_IO.Volume.t -> unit -> t Lwt.t
-  val state : t -> [ `Running | `Suspended ] Lwt.t
-  val debug_info : t -> (string * string) list Lwt.t
-  val suspend : t -> unit Lwt.t
-  val resume : t -> unit Lwt.t
-  val pop : t -> (position * item list) Lwt.t
-  val advance : t -> position -> unit Lwt.t
+    name:string -> disk:Vg_io.Vg_IO.Volume.t -> unit -> consumer Lwt.t
+  val state : consumer -> [ `Running | `Suspended ] Lwt.t
+  val debug_info : consumer -> (string * string) list Lwt.t
+  val suspend : consumer -> unit Lwt.t
+  val resume : consumer -> unit Lwt.t
+  val pop : consumer -> (cposition * item list) Lwt.t
+  val advance : consumer -> cposition -> unit Lwt.t
 end
 module FromLVM :
 sig
-  type t
+  type producer
   type item = FreeAllocation.t
-  type position
+  type pposition
   val create : disk:Vg_io.Vg_IO.Volume.t -> unit -> unit Lwt.t
   val attach :
     name:string ->
     disk:Vg_io.Vg_IO.Volume.t ->
-    unit -> ([> `Running | `Suspended ] * t) Lwt.t
-  val state : t -> [ `Running | `Suspended ] Lwt.t
-  val debug_info : t -> (string * string) list Lwt.t
-  val push : t -> item -> position Lwt.t
-  val advance : t -> position -> unit Lwt.t
+    unit -> ([> `Running | `Suspended ] * producer) Lwt.t
+  val state : producer -> [ `Running | `Suspended ] Lwt.t
+  val debug_info : producer -> (string * string) list Lwt.t
+  val push : producer -> item -> pposition Lwt.t
+  val advance : producer -> pposition -> unit Lwt.t
 end
