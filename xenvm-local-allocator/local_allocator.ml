@@ -68,7 +68,7 @@ module FromLVM = struct
   let rec suspend t =
     retry_forever (fun () -> R.Consumer.suspend t)
     >>= fun x ->
-    fatal_error "FromLVM.suspend" (return x)
+    fatal_error "FromLVM.suspend" (suspended_is_ok x)
     >>= fun () ->
     wait_for (fun () -> R.Consumer.state t) `Suspended
     >>= function
