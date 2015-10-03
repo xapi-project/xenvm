@@ -2,72 +2,73 @@ open Errors
 open Lwt
 open Vg_io
 
-module ToLVM = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(ExpandVolume)
-  type consumer = R.Consumer.t
-  type item = ExpandVolume.t
-  type cposition = R.Consumer.position
+module type CSTRUCTABLE = sig
+  type t
+  (** Something that can be read from and written to a Cstruct.t *)
 
-  let create ~disk () =
-    fatal_error "creating ToLVM queue" (R.Producer.create ~disk ())
-  let attach_as_consumer ~name ~disk () =
-    fatal_error "attaching to ToLVM queue" (R.Consumer.attach ~queue:(name ^ " ToLVM Consumer") ~client:"xenvmd" ~disk ())
-  let c_state t =
-    fatal_error "querying ToLVM state" (R.Consumer.state t)
-  let c_debug_info t =
-    fatal_error "querying ToLVM debug_info" (R.Consumer.debug_info t)
-  let rec suspend t =
-    retry_forever (fun () -> R.Consumer.suspend t)
-    >>= fun r ->
-    fatal_error "ToLVM.suspend" (suspended_is_ok r)
-    >>= fun () ->
-    wait_for (fun () -> R.Consumer.state t) `Suspended
-    >>= function
-    | `Ok _ -> Lwt.return ()
-    |  _ -> fatal_error_t "ToLVM.suspend"
-  let rec resume t =
-    retry_forever (fun () -> R.Consumer.resume t)
-    >>= fun r ->
-    fatal_error "ToLVM.resume" (return r)
-    >>= fun () ->
-    wait_for (fun () -> R.Consumer.state t) `Running
-    >>= function
-    | `Ok _ -> Lwt.return ()
-    |  _ -> fatal_error_t "ToLVM.resume"
-  let rec pop t =
-    fatal_error "ToLVM.pop"
-      (R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ())
-    >>= fun (position, rev_items) ->
-      let items = List.rev rev_items in
-      return (position, items)
-  let c_advance t position =
-    fatal_error "toLVM.advance" (R.Consumer.advance ~t ~position ())
+  val to_cstruct: t -> Cstruct.t
+  val of_cstruct: Cstruct.t -> t option
+  val name: string
 end
 
-module FromLVM = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(FreeAllocation)
+
+module Ring(Op:CSTRUCTABLE) = struct
+  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(Op)
+
+  type item = Op.t
+
+  type consumer = R.Consumer.t
+  type cposition = R.Consumer.position
+
   type producer = R.Producer.t
-  type item = FreeAllocation.t
   type pposition = R.Producer.position
+
+  let prefix msg =
+    Printf.sprintf "%s: %s" Op.name msg
+  
   let create ~disk () =
-    fatal_error "FromLVM.create" (R.Producer.create ~disk ())
+    fatal_error (prefix "creating queue") (R.Producer.create ~disk ())
+  let attach_as_consumer ~name ~disk () =
+    fatal_error (prefix "attaching to queue") (R.Consumer.attach ~queue:(prefix "Consumer") ~client:"xenvmd" ~disk ())
   let attach_as_producer ~name ~disk () =
     let initial_state = ref `Running in
-    let rec loop () = R.Producer.attach ~queue:(name ^ " FromLVM Producer") ~client:"xenvmd" ~disk () >>= function
+    let rec loop () = R.Producer.attach ~queue:(prefix "Producer") ~client:"xenvmd" ~disk () >>= function
       | `Error `Suspended ->
         Time.sleep 5.
         >>= fun () ->
         initial_state := `Suspended;
         loop ()
-      | x -> fatal_error "FromLVM.attach" (return x) in
+      | x -> fatal_error (prefix "attach") (return x) in
     loop ()
     >>= fun x ->
     return (!initial_state, x)
-  let p_state t = fatal_error "FromLVM.state" (R.Producer.state t)
+  let c_state t =
+    fatal_error (prefix "querying state") (R.Consumer.state t)
+  let p_state t = fatal_error (prefix "state") (R.Producer.state t)
+  let c_debug_info t =
+    fatal_error (prefix "querying debug_info") (R.Consumer.debug_info t)
   let p_debug_info t =
-    fatal_error "querying FromLVM debug_info" (R.Producer.debug_info t)
+    fatal_error (prefix "querying debug_info") (R.Producer.debug_info t)
+  let rec suspend t =
+    retry_forever (fun () -> R.Consumer.suspend t)
+    >>= fun r ->
+    fatal_error (prefix "suspend") (suspended_is_ok r)
+    >>= fun () ->
+    wait_for (fun () -> R.Consumer.state t) `Suspended
+    >>= function
+    | `Ok _ -> Lwt.return ()
+    |  _ -> fatal_error_t (prefix "suspend")
+  let rec resume t =
+    retry_forever (fun () -> R.Consumer.resume t)
+    >>= fun r ->
+    fatal_error (prefix "resume") (return r)
+    >>= fun () ->
+    wait_for (fun () -> R.Consumer.state t) `Running
+    >>= function
+    | `Ok _ -> Lwt.return ()
+    |  _ -> fatal_error_t (prefix "resume")
   let rec push t item = R.Producer.push ~t ~item () >>= function
-  | `Error (`Msg x) -> fatal_error_t (Printf.sprintf "Error pushing to the FromLVM queue: %s" x)
+  | `Error (`Msg x) -> fatal_error_t (prefix (Printf.sprintf "Error pushing to the queue: %s" x))
   | `Error `Retry ->
     Time.sleep 5.
     >>= fun () ->
@@ -77,7 +78,18 @@ module FromLVM = struct
     >>= fun () ->
     push t item
   | `Ok x -> return x
+  let rec pop t =
+    fatal_error (prefix "pop")
+      (R.Consumer.fold ~f:(fun item acc -> item :: acc) ~t ~init:[] ())
+    >>= fun (position, rev_items) ->
+      let items = List.rev rev_items in
+      return (position, items)
+  let c_advance t position =
+    fatal_error (prefix "advance") (R.Consumer.advance ~t ~position ())
   let p_advance t position =
-    fatal_error "FromLVM.advance" (R.Producer.advance ~t ~position ())
+    fatal_error (prefix "advance") (R.Producer.advance ~t ~position ())
 end
+
+module FromLVM = Ring(FreeAllocation)
+module ToLVM = Ring(ExpandVolume)
 

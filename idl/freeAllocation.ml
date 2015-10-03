@@ -7,3 +7,5 @@ end
 
 include SexpToCstruct.Make(T)
 include T
+
+let name = "FromLVM"
