@@ -1,9 +1,8 @@
 open Errors
 open Lwt
-open Vg_io
 
 module Ring(Op:S.CSTRUCTABLE) = struct
-  module R = Shared_block.Ring.Make(Log)(Vg_IO.Volume)(Op)
+  module R = Shared_block.Ring.Make(Log)(Vg_io.Volume)(Op)
 
   type item = Op.t
 
@@ -24,7 +23,7 @@ module Ring(Op:S.CSTRUCTABLE) = struct
     let initial_state = ref `Running in
     let rec loop () = R.Producer.attach ~queue:(prefix "Producer") ~client:"xenvmd" ~disk () >>= function
       | `Error `Suspended ->
-        Time.sleep 5.
+        Vg_io.Time.sleep 5.
         >>= fun () ->
         initial_state := `Suspended;
         loop ()
@@ -60,11 +59,11 @@ module Ring(Op:S.CSTRUCTABLE) = struct
   let rec push t item = R.Producer.push ~t ~item () >>= function
   | `Error (`Msg x) -> fatal_error_t (prefix (Printf.sprintf "Error pushing to the queue: %s" x))
   | `Error `Retry ->
-    Time.sleep 5.
+    Vg_io.Time.sleep 5.
     >>= fun () ->
     push t item
   | `Error `Suspended ->
-    Time.sleep 5.
+    Vg_io.Time.sleep 5.
     >>= fun () ->
     push t item
   | `Ok x -> return x

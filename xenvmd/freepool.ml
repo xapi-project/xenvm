@@ -90,14 +90,14 @@ let perform_expand_free ef connected_host =
                | None -> [
                    Lvm.Redo.Op.LvAddTag (connected_host.Host.free_LV_uuid, tag_of_generation 1)]
              in
-             `Ok (Some (op1::genops))
+             `Ok (op1::genops)
            | `Error x -> `Error x
          with
          | Not_found ->
            error "Couldn't find the free LV for host: %s" connected_host.Host.free_LV;
            error "This is fatal for this host's update.";
            `Error (`Msg "not found")
-       end else `Ok None)
+       end else `Ok [])
   >>= fun () ->
   read (fun vg ->
       let current_allocation = allocation_of_lv vg connected_host.Host.free_LV_uuid in
@@ -132,10 +132,10 @@ let journal = ref None
 let start name =
   Vg_io.myvg >>= fun vg ->
   debug "Opening LV '%s' to use as a freePool journal" name;
-  ( match Vg_IO.find vg name with
+  ( match Vg_io.find vg name with
     | Some lv -> return lv
     | None -> assert false ) >>= fun v ->
-  ( Vg_IO.Volume.connect v >>= function
+  ( Vg_io.Volume.connect v >>= function
       | `Error _ -> fatal_error_t ("open " ^ name)
       | `Ok x -> return x )
   >>= fun device ->

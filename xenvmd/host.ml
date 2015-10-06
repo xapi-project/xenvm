@@ -1,5 +1,4 @@
 open Lwt
-open Vg_io
 open Log
 
 type connected_host = {
@@ -35,7 +34,7 @@ let create name =
   let toLVM = toLVM name in
   let fromLVM = fromLVM name in
   Vg_io.myvg >>= fun vg ->
-  match Vg_IO.find vg freeLVM with
+  match Vg_io.find vg freeLVM with
   | Some lv ->
     debug "Found freeLVM exists already";
     return () (* We've already done this *)
@@ -45,37 +44,37 @@ let create name =
       let size = Int64.(mul 4L (mul 1024L 1024L)) in
       let creation_host = Unix.gethostname () in
       let creation_time = Unix.gettimeofday () |> Int64.of_float in
-      write (fun vg ->
+      Vg_io.write (fun vg ->
           Lvm.Vg.create vg toLVM size ~creation_host ~creation_time
-        ) >>= fun () ->
-      write (fun vg ->
+        ) >>= fun _ ->
+      Vg_io.write (fun vg ->
           Lvm.Vg.create vg fromLVM size ~creation_host ~creation_time
-        ) >>= fun () ->
+        ) >>= fun _ ->
       (* The local allocator needs to see the volumes now *)
       Vg_io.sync () >>= fun () ->
       Vg_io.myvg >>= fun vg ->
 
-      ( match Vg_IO.find vg toLVM with
+      ( match Vg_io.find vg toLVM with
         | Some lv -> return lv
         | None -> assert false ) >>= fun v ->
-      Vg_IO.Volume.connect v
+      Vg_io.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
       | `Ok disk ->
-        let module Eraser = Lvm.EraseBlock.Make(Vg_IO.Volume) in
+        let module Eraser = Lvm.EraseBlock.Make(Vg_io.Volume) in
         Eraser.erase ~pattern:(Printf.sprintf "xenvmd erased the %s volume" toLVM) disk
         >>= function
         | `Error _ -> fail (Failure (Printf.sprintf "Failed to erase %s" toLVM))
         | `Ok () ->
           Rings.ToLVM.create ~disk ()
           >>= fun () ->
-          Vg_IO.Volume.disconnect disk
+          Vg_io.Volume.disconnect disk
           >>= fun () ->
 
-          ( match Vg_IO.find vg fromLVM with
+          ( match Vg_io.find vg fromLVM with
             | Some lv -> return lv
             | None -> assert false ) >>= fun v ->
-          Vg_IO.Volume.connect v
+          Vg_io.Volume.connect v
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
           | `Ok disk ->
@@ -85,12 +84,12 @@ let create name =
             | `Ok () ->
               Rings.FromLVM.create ~disk ()
               >>= fun () ->
-              Vg_IO.Volume.disconnect disk >>= fun () ->
+              Vg_io.Volume.disconnect disk >>= fun () ->
               (* Create the freeLVM LV at the end - we can use the existence
                   of this as a flag to show that we've finished host creation *)
-              write (fun vg ->
+              Vg_io.write (fun vg ->
                   Lvm.Vg.create vg freeLVM size ~creation_host ~creation_time
-                ) >>= fun () ->
+                ) >>= fun _ ->
               Vg_io.sync ()
     end
 
@@ -121,15 +120,15 @@ let connect name =
     return ()
   end else begin
     connecting_hosts := StringSet.add name !connecting_hosts;
-    match Vg_IO.find vg toLVM, Vg_IO.find vg fromLVM, Vg_IO.find vg freeLVM with
+    match Vg_io.find vg toLVM, Vg_io.find vg fromLVM, Vg_io.find vg freeLVM with
     | Some toLVM_id, Some fromLVM_id, Some freeLVM_id ->
       (* Persist at this point that we're going to connect this host *)
       (* All of the following logic is idempotent *)
-      write (fun vg ->
+      Vg_io.write (fun vg ->
           Lvm.Vg.add_tag vg toLVM connected_tag
-        ) >>= fun () ->
+        ) >>= fun _ ->
       let background_t () =
-        Vg_IO.Volume.connect toLVM_id
+        Vg_io.Volume.connect toLVM_id
         >>= function
         | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" toLVM))
         | `Ok disk ->
@@ -141,7 +140,7 @@ let connect name =
           Rings.ToLVM.resume toLVM_q
           >>= fun () ->
 
-          Vg_IO.Volume.connect fromLVM_id
+          Vg_io.Volume.connect fromLVM_id
           >>= function
           | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" fromLVM))
           | `Ok disk ->
@@ -152,7 +151,7 @@ let connect name =
               from_LVM = fromLVM_q;
               to_LVM = toLVM_q;
               free_LV = freeLVM;
-              free_LV_uuid = (Vg_IO.Volume.metadata_of freeLVM_id).Lvm.Lv.id
+              free_LV_uuid = (Vg_io.Volume.metadata_of freeLVM_id).Lvm.Lv.id
             } in
             Hashtbl.replace connected_hosts name connected_host;
             connecting_hosts := StringSet.remove name !connecting_hosts;
@@ -160,7 +159,7 @@ let connect name =
               then begin
                 connected_host.state <- Xenvm_interface.Resending_free_blocks;
                 debug "The Rings.FromLVM queue was already suspended: resending the free blocks";
-                let allocation = Lvm.Lv.to_allocation (Vg_IO.Volume.metadata_of freeLVM_id) in
+                let allocation = Lvm.Lv.to_allocation (Vg_io.Volume.metadata_of freeLVM_id) in
                 Rings.FromLVM.push fromLVM_q allocation
                 >>= fun pos ->
                 Rings.FromLVM.p_advance fromLVM_q pos
@@ -218,12 +217,12 @@ let flush_already_locked name =
     >>= fun (pos, items) ->
     debug "Rings.FromLVM queue %s has %d items" name (List.length items);
     Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
-        write (fun vg ->
+        Vg_io.write (fun vg ->
             debug "Expanding volume %s" volume;
             let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
             let free_id = connected_host.free_LV_uuid in
             Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvTransfer(free_id, id, segments)))
-          )
+          ) >>= fun _ -> Lwt.return ()
       ) items
     >>= fun () ->
     Rings.ToLVM.c_advance to_lvm pos
@@ -248,9 +247,9 @@ let disconnect ~cooperative name =
       Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
       >>= fun () ->
       let toLVM = toLVM name in
-      write (fun vg ->
+      Vg_io.write (fun vg ->
           Lvm.Vg.remove_tag vg toLVM connected_tag
-        ) >>= fun () ->
+        ) >>= fun _ ->
       Hashtbl.remove connected_hosts name;
       return ()
     | x ->
@@ -263,15 +262,16 @@ let destroy name =
   let toLVM = toLVM name in
   let fromLVM = fromLVM name in
   let freeLVM = freeLVM name in
-  write (fun vg ->
+  Vg_io.write (fun vg ->
       Lvm.Vg.remove vg toLVM
-    ) >>= fun () ->
-  write (fun vg ->
+    ) >>= fun _ ->
+  Vg_io.write (fun vg ->
       Lvm.Vg.remove vg fromLVM
-    ) >>= fun () ->
-  write (fun vg ->
+    ) >>= fun _ ->
+  Vg_io.write (fun vg ->
       Lvm.Vg.remove vg freeLVM
-    )
+    ) >>= fun _ ->
+  Lwt.return ()
 
 let all () =
   let list = Hashtbl.fold (fun n c acc -> (n,c)::acc) connected_hosts [] in
@@ -293,7 +293,7 @@ let all () =
        Rings.FromLVM.p_debug_info t
        >>= fun debug_info ->
        let fromLVM = { Xenvm_interface.lv; suspended; debug_info } in
-       read (fun vg ->
+       Vg_io.read (fun vg ->
            try
              let lv = Lvm.Vg.LVs.find_by_name (freeLVM name) vg.Lvm.Vg.lvs in
              return (Lvm.Lv.size_in_extents lv)
@@ -304,7 +304,7 @@ let all () =
     ) list
 
 let reconnect_all () =
-  read (fun vg ->
+  Vg_io.read (fun vg ->
       debug "Reconnecting";
       Lvm.Vg.LVs.fold (fun key v acc ->
           debug "Checking LV: %s" v.Lvm.Lv.name;
@@ -338,4 +338,4 @@ let shutdown () =
   let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
   Lwt_list.iter_s (disconnect ~cooperative:true) hosts
   >>= fun () ->
-  sync ()
+  Vg_io.sync ()

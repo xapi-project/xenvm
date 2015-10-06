@@ -14,13 +14,13 @@ sig
   type cposition
   type producer
   type pposition
-  val create : disk:Vg_io.Vg_IO.Volume.t -> unit -> unit Lwt.t
+  val create : disk:Vg_io.Volume.t -> unit -> unit Lwt.t
   val attach_as_producer :
     name:string ->
-    disk:Vg_io.Vg_IO.Volume.t ->
-    unit -> ([> `Running | `Suspended ] * producer) Lwt.t
+    disk:Vg_io.Volume.t ->
+    unit -> ([ `Running | `Suspended ] * producer) Lwt.t
   val attach_as_consumer :
-    name:string -> disk:Vg_io.Vg_IO.Volume.t -> unit -> consumer Lwt.t
+    name:string -> disk:Vg_io.Volume.t -> unit -> consumer Lwt.t
   val p_state : producer -> [ `Running | `Suspended ] Lwt.t
   val c_state : consumer -> [ `Running | `Suspended ] Lwt.t
   val c_debug_info : consumer -> (string * string) list Lwt.t

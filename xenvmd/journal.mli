@@ -18,7 +18,7 @@ sig
     ?name:string ->
     ?client:string ->
     ?flush_interval:float ->
-    Vg_io.Vg_IO.Volume.t ->
+    Vg_io.Volume.t ->
     (Op.t list -> unit result Lwt.t) -> t result Lwt.t
   val shutdown : t -> unit Lwt.t
   type waiter = {

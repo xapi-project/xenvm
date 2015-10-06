@@ -45,7 +45,7 @@ let query_lvm config =
   >>= fun device ->
   with_block device
     (fun x ->
-      Vg_io.Vg_IO.connect [ x ] `RO
+      Vg_io.connect [ x ] `RO
       >>|= fun x ->
       return x
     )
@@ -91,10 +91,10 @@ module FreePool = struct
 
     let start config vg =
       debug "Initialising the FreePool";
-      ( match Vg_io.Vg_IO.find vg config.Config.Local_allocator.fromLVM with
+      ( match Vg_io.find vg config.Config.Local_allocator.fromLVM with
         | Some x -> return x
         | None -> assert false ) >>= fun v ->
-      Vg_io.Vg_IO.Volume.connect v
+      Vg_io.Volume.connect v
       >>= function
       | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.Config.Local_allocator.fromLVM))
       | `Ok disk ->
@@ -225,12 +225,12 @@ let main use_mock config daemon socket journal fromLVM toLVM =
 
     query_lvm config
     >>= fun vg ->
-    let metadata = Vg_io.Vg_IO.metadata_of vg in
+    let metadata = Vg_io.metadata_of vg in
 
-    ( match Vg_io.Vg_IO.find vg config.toLVM with
+    ( match Vg_io.find vg config.toLVM with
       | Some x -> return x
       | None -> assert false ) >>= fun v ->
-    Vg_io.Vg_IO.Volume.connect v
+    Vg_io.Volume.connect v
     >>= function
     | `Error _ -> fail (Failure (Printf.sprintf "Failed to open %s" config.toLVM))
     | `Ok disk ->

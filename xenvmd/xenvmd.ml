@@ -9,7 +9,8 @@ module Impl = struct
   let return = Lwt.return
   let fail = Lwt.fail
   let handle_failure = Lwt.catch
-
+  let ignore_result _ = Lwt.return ()
+  
   type context = {
     stoppers : (unit Lwt.u) list
   }
@@ -20,37 +21,37 @@ module Impl = struct
   let create context ~name ~size ~creation_host ~creation_time ~tags =
     Vg_io.write (fun vg ->
       Lvm.Vg.create vg name ~creation_host ~creation_time ~tags size
-    )
+    ) >>= ignore_result
 
   let rename context ~oldname ~newname =
     Vg_io.write (fun vg ->
       Lvm.Vg.rename vg oldname newname
-    )
+    ) >>= ignore_result
 
   let remove context ~name =
     Vg_io.write (fun vg ->
       Lvm.Vg.remove vg name
-    )
+    ) >>= ignore_result
 
   let resize context ~name ~size =
     Vg_io.write (fun vg ->
       Lvm.Vg.resize vg name size
-    )
+    ) >>= ignore_result
 
   let set_status context ~name ~readonly =
     Vg_io.write (fun vg ->
       Lvm.Vg.set_status vg name Lvm.Lv.Status.(if readonly then [Read] else [Read; Write])
-    )
+    ) >>= ignore_result
 
   let add_tag context ~name ~tag =
     Vg_io.write (fun vg ->
       Lvm.Vg.add_tag vg name tag
-    )
+    ) >>= ignore_result
 
   let remove_tag context ~name ~tag =
     Vg_io.write (fun vg ->
       Lvm.Vg.remove_tag vg name tag
-    )
+    ) >>= ignore_result
 
   let get_lv context ~name =
     let open Lvm in

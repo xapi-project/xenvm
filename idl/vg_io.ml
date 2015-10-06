@@ -9,6 +9,8 @@ end
 
 module Vg_IO = Lvm.Vg.Make(Log)(Block)(Time)(Clock)
 
+include Vg_IO
+
 let sector_size, sector_size_u = Lwt.task ()
 let myvg, myvg_u = Lwt.task ()
 let lock = Lwt_mutex.create ()
@@ -60,21 +62,18 @@ let write fn =
   Lwt_mutex.with_lock lock (fun () ->
     myvg >>= fun myvg ->
     fn (Vg_IO.metadata_of myvg)
-    >>*= fun (_, op) ->
+    >>*= fun (x, op) ->
     Vg_IO.update myvg [ op ]
     >>|= fun () ->
-    Lwt.return ()
+    Lwt.return x
   )
 
 let maybe_write fn =
   Lwt_mutex.with_lock lock (fun () ->
       myvg >>= fun myvg ->
       fn (Vg_IO.metadata_of myvg)
-      >>*= (function
-      | Some ops ->
-        Vg_IO.update myvg ops
-      | None ->
-        Lwt.return (`Ok ()))
+      >>*= function ops ->
+      Vg_IO.update myvg ops
       >>|= fun () ->
       Lwt.return ()
     )

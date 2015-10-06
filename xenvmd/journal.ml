@@ -1,5 +1,4 @@
 open Sexplib.Std
-open Vg_io
 
 module Op = struct
   module T = struct
@@ -19,4 +18,4 @@ module Op = struct
   include T
 end
 
-module J = Shared_block.Journal.Make(Log)(Vg_IO.Volume)(Time)(Clock)(Op)
+module J = Shared_block.Journal.Make(Log)(Vg_io.Volume)(Vg_io.Time)(Clock)(Op)
