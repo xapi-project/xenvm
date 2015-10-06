@@ -78,8 +78,8 @@ let start owner vg =
       match !reporter_cache with
       | Some r -> return r
       | None ->
+        info "Starting RRDD reporter" >>= fun () ->
         let reporter =
-          info "Starting RRDD reporter";
           Reporter.start_async
             (module D : Debug.DEBUG)
             ~uid:(Printf.sprintf "xenvmd-%d-stats" (Unix.getpid ()))
@@ -93,24 +93,29 @@ let start owner vg =
     let open Reporter in
     match get_state reporter with
     | Running ->
-      debug "RRDD reporter currently running; will check again in 60s...";
+      debug "RRDD reporter currently running; will check again in 60s..."
+      >>= fun () ->
       Lwt_unix.sleep 60. >>= loop
     | Stopped `New ->
-      debug "RRDD reporter not yet started; will check again in 5s...";
+      debug "RRDD reporter not yet started; will check again in 5s..."
+      >>= fun () ->
       Lwt_unix.sleep 5. >>= loop
     | Stopped (`Failed exn) ->
       debug "RRDD reporter has failed with exception: %s; restarting in 60s..."
-        (Printexc.to_string exn);
+        (Printexc.to_string exn)
+      >>= fun () ->
       reporter_cache := None;
       Lwt_unix.sleep 60. >>= loop
     | Stopped `Cancelled | Cancelled ->
-      debug "RRDD reporter was explictly stopped; not restarting.";
+      debug "RRDD reporter was explictly stopped; not restarting."
+      >>= fun () ->
       return ()
   in
   Lwt.async (fun () -> Lwt.pick [stop_signal_t; loop ()])
 
 let stop () =
-  info "Stopping RRDD reporter";
+  info "Stopping RRDD reporter"
+  >>= fun () ->
   Lwt.wakeup_later stop_signal_u ();
   Lwt_mutex.with_lock reporter_m (fun () ->
     match !reporter_cache with

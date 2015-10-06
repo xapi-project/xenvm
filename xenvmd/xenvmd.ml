@@ -102,16 +102,19 @@ let maybe_write_pid config =
   match config.Config.Xenvmd.listenPath with
   | None ->
       (* don't need a lock file because we'll fail to bind to the port *)
-    ()
+    Lwt.return ()
   | Some path ->
-    info "Writing pidfile to %s" path;
-    Pidfile.write_pid (path ^ ".lock")
+    info "Writing pidfile to %s" path
+    >>= fun () ->
+    Pidfile.write_pid (path ^ ".lock");
+    Lwt.return ()
 
 let run port sock_path config =
-  maybe_write_pid config;
-
   let t =
-    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config));
+    maybe_write_pid config
+    >>= fun () ->
+    info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config))
+    >>= fun () ->
     Vg_io.vgopen ~devices:config.Config.Xenvmd.devices
     >>= fun () ->
     Freepool.start Xenvm_interface._journal_name
@@ -146,7 +149,7 @@ let run port sock_path config =
         | `Unix_domain_socket (`File p) -> Printf.sprintf "Unix domain socket '%s'" p
         | _ -> "<unknown>"
       in
-      Printf.printf "Listening for HTTP request on: %s\n" ty;
+      Lwt.ignore_result (debug "Listening for HTTP request on: %s\n" ty);
       let info = Printf.sprintf "Served by Cohttp/Lwt listening on %s" ty in
       let conn_closed (ch,conn) = () in
       let callback = handler ~info stoppers in

@@ -14,16 +14,19 @@ let dm = ref (module Devmapper.Linux : Devmapper.S.DEVMAPPER)
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
 
 let retry ~dbg ~retries ~interval f =
-  debug "Attempting to '%s': will try at most %d times with a %ds interval."
-    dbg retries interval;
+  debug "Attempting to '%s': will try at most %d times with a %fs interval."
+    dbg retries interval
+  >>= fun () ->
   let rec aux n =
-    if n <= 0 then f ()
+    if n <= 0 then Lwt.return (f ())
     else
-      try f ()
+      try Lwt.return (f ())
       with exn ->
         warn "warning: '%s' failed with '%s'; will retry %d more time%s..."
-          dbg (Printexc.to_string exn) retries (if retries = 1 then "" else "s");
-        Unix.sleep interval;
+          dbg (Printexc.to_string exn) retries (if retries = 1 then "" else "s")
+        >>= fun () ->
+        Time.sleep interval
+        >>= fun () ->
         aux (retries - 1) in
   aux retries
 
@@ -69,7 +72,8 @@ module FreePool = struct
     Lwt_mutex.with_lock m
       (fun () ->
         debug "FreePool.extents %Ld extents from %s" nr_extents
-          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t !free));
+          (Sexplib.Sexp.to_string_hum (Lvm.Pv.Allocator.sexp_of_t !free))
+        >>= fun () ->
         let rec wait () =
           match Lvm.Pv.Allocator.find !free nr_extents with
           | `Ok x ->
@@ -90,7 +94,8 @@ module FreePool = struct
       )
 
     let start config vg =
-      debug "Initialising the FreePool";
+      debug "Initialising the FreePool"
+      >>= fun () ->
       ( match Vg_io.find vg config.Config.Local_allocator.fromLVM with
         | Some x -> return x
         | None -> assert false ) >>= fun v ->
@@ -102,21 +107,25 @@ module FreePool = struct
       >>= fun from_lvm ->
       FromLVM.c_state from_lvm
       >>= fun state ->
-      debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+      debug "FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended")
+      >>= fun () ->
 
       (* Suspend and resume the queue: the producer will resend us all
          the free blocks on resume. *)
-      debug "Suspending FromLVM queue";
+      debug "Suspending FromLVM queue"
+      >>= fun () ->
       FromLVM.suspend from_lvm
       >>= fun () ->
       (* Drop all queue entries to free space. They'll be duplicates
          of the large request we expect on resume. *)
-      debug "Dropping FromLVM allocations";
+      debug "Dropping FromLVM allocations"
+      >>= fun () ->
       FromLVM.pop from_lvm
       >>= fun (pos, _) ->
       FromLVM.c_advance from_lvm pos
       >>= fun () ->
-      debug "Resuming FromLVM queue";
+      debug "Resuming FromLVM queue"
+      >>= fun () ->
       (* Resume the queue and we're good to go! *)
       FromLVM.resume from_lvm
       >>= fun () ->
@@ -131,8 +140,9 @@ module FreePool = struct
         ) >>= fun () ->
         Lwt_list.iter_s
           (fun t ->
-            sexp_of_t t |> Sexplib.Sexp.to_string_hum |> debug "FreePool: received new allocation: %s";
-            add t
+             sexp_of_t t |> Sexplib.Sexp.to_string_hum |> debug "FreePool: received new allocation: %s"
+             >>= fun () ->
+             add t
           ) ts
         >>= fun () ->
         FromLVM.c_advance from_lvm pos
@@ -184,8 +194,8 @@ let extend_volume device vg existing_targets extents =
           segment :: segments,
           target :: targets
         with Not_found ->
-          error "PV with name %s not found in volume group; where did this allocation come from?"
-            (Lvm.Pv.Name.to_string pvname);
+          Lwt.ignore_result (error "PV with name %s not found in volume group; where did this allocation come from?"
+            (Lvm.Pv.Name.to_string pvname));
           next_sector, segments, targets
       ) (next_sector, [], []) extents in
    List.rev segments, List.rev targets
@@ -195,7 +205,8 @@ let targets_of x =
   match D.stat x with
   | Some x -> return (`Ok x.D.targets)
   | None ->
-    error "The device mapper device %s has disappeared." x;
+    error "The device mapper device %s has disappeared." x
+    >>= fun () ->
     return (`Error `Retry)
 
 let main use_mock config daemon socket journal fromLVM toLVM =
@@ -207,7 +218,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     toLVM = (match toLVM with None -> config.toLVM | Some x -> x);
     fromLVM = (match fromLVM with None -> config.fromLVM | Some x -> x);
   } in
-  debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config));
+
   dm := if use_mock then (module Devmapper.Mock: Devmapper.S.DEVMAPPER) else (module Devmapper.Linux: Devmapper.S.DEVMAPPER);
 
   let module D = (val !dm: Devmapper.S.DEVMAPPER) in
@@ -217,6 +228,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
   Pidfile.write_pid (config.socket ^ ".lock");
 
   let t =
+    debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config))
+    >>= fun () ->
+
     Device.read_sector_size config.devices
     >>= fun sector_size ->
 
@@ -238,22 +252,27 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     >>= fun (_,tolvm) ->
     ToLVM.p_state tolvm
     >>= fun state ->
-    debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+    debug "ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended")
+    >>= fun () ->
 
     let extent_size = metadata.Lvm.Vg.extent_size in (* in sectors *)
     let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
 
-    info "Device %s has %d byte sectors" (List.hd config.devices) sector_size;
-    info "The Volume Group has %Ld sector (%Ld MiB) extents" extent_size extent_size_mib;
+    info "Device %s has %d byte sectors" (List.hd config.devices) sector_size
+    >>= fun () ->
+    info "The Volume Group has %Ld sector (%Ld MiB) extents" extent_size extent_size_mib
+    >>= fun () ->
 
     let rec wait_for_shutdown_forever () =
       ToLVM.p_state tolvm
       >>= function
       | `Suspended ->
-        info "The ToLVM queue has been suspended. We will acknowledge and exit";
+        info "The ToLVM queue has been suspended. We will acknowledge and exit"
+        >>= fun () ->
         exit 0
       | `Running ->
-        debug "The ToLVM queue is still running";
+        debug "The ToLVM queue is still running"
+        >>= fun () ->
         Lwt_unix.sleep 5.
         >>= fun () ->
         wait_for_shutdown_forever () in
@@ -272,22 +291,24 @@ let main use_mock config daemon socket journal fromLVM toLVM =
         >>= fun to_device_targets ->
         (* Append the physical blocks to toLV *)
         let to_targets = to_device_targets @ t.device.ExpandDevice.targets in
-        retry ~dbg:"Suspend local dm device" ~retries:3 ~interval:1 (fun () ->
-          D.suspend t.device.ExpandDevice.device);
-        retry ~dbg:"Reload local dm device" ~retries:3 ~interval:1 (fun () ->
-          D.reload t.device.ExpandDevice.device to_targets);
+        retry ~dbg:"Suspend local dm device" ~retries:3 ~interval:1. (fun () ->
+            D.suspend t.device.ExpandDevice.device)
+        >>= fun () ->
+        retry ~dbg:"Reload local dm device" ~retries:3 ~interval:1. (fun () ->
+            D.reload t.device.ExpandDevice.device to_targets)
+        >>= fun () ->
         ToLVM.p_advance tolvm position
         >>= fun () ->
-        retry ~dbg:"Resume local dm device" ~retries:3 ~interval:1 (fun () ->
-          D.resume t.device.ExpandDevice.device);
-        return ()
+        retry ~dbg:"Resume local dm device" ~retries:3 ~interval:1. (fun () ->
+            D.resume t.device.ExpandDevice.device)
       ) ops
       >>= fun () ->
       return (`Ok ()) in
 
     let module J = Shared_block.Journal.Make(Log)(Block)(Time)(Clock)(Op) in
     ( if not (Sys.file_exists config.localJournal) then begin
-        info "Creating an empty journal: %s" config.localJournal;
+        info "Creating an empty journal: %s" config.localJournal
+        >>= fun () ->
         Lwt_unix.openfile config.localJournal [ Lwt_unix.O_CREAT; Lwt_unix.O_WRONLY ] 0o0666 >>= fun fd ->
         Lwt_unix.LargeFile.lseek fd Int64.(sub journal_size 1L) Lwt_unix.SEEK_CUR >>= fun _ ->
         Lwt_unix.write_string fd "\000" 0 1 >>= fun _ ->
@@ -323,7 +344,8 @@ let main use_mock config daemon socket journal fromLVM toLVM =
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
-                error "Couldn't find device mapper device: %s" device;
+                error "Couldn't find device mapper device: %s" device
+                >>= fun () ->
                 return (ResizeResponse.Device_mapper_device_does_not_exist device)
               | Some data_volume ->
                 let sector_size = Int64.of_int sector_size in
@@ -336,7 +358,8 @@ let main use_mock config daemon socket journal fromLVM toLVM =
                 | `IncreaseBy x ->
                   Int64.(div (add x extent_b) extent_b) in
                 if nr_extents <= 0L then begin
-                  error "Request for %Ld (<= 0) segments" nr_extents;
+                  error "Request for %Ld (<= 0) segments" nr_extents
+                  >>= fun () ->
                   return (ResizeResponse.Request_for_no_segments nr_extents)
                 end else begin
                   FreePool.remove nr_extents
@@ -364,7 +387,8 @@ let main use_mock config daemon socket journal fromLVM toLVM =
           ) in
 
     let ls = D.ls () in
-    debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls);
+    debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls)
+    >>= fun () ->
 
     let rec stdin () =
       Lwt_io.read_line Lwt_io.stdin
@@ -375,12 +399,14 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       Lwt_io.write_line Lwt_io.stdout (Sexplib.Sexp.to_string_hum (ResizeResponse.sexp_of_t resp))
       >>= fun () ->
       stdin () in
-    debug "Creating Unix domain socket %s" config.socket;
+    debug "Creating Unix domain socket %s" config.socket
+    >>= fun () ->
     let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
     Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR true;
     Lwt.catch (fun () -> Lwt_unix.unlink config.socket) (fun _ -> return ())
     >>= fun () ->
-    debug "Binding and listening on the socket";
+    debug "Binding and listening on the socket"
+    >>= fun () ->
     Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.socket));
     Lwt_unix.listen s 5;
     let conn_handler fd () =
@@ -395,21 +421,24 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       >>= fun () ->
       Lwt_io.close oc in
     let rec unix () =
-      debug "Calling accept on the socket";
+      debug "Calling accept on the socket"
+      >>= fun () ->
       Lwt_unix.accept s
       >>= fun (fd, _) ->
       async (conn_handler fd);
       unix () in
     let listen_unix = unix () in
-    debug "Waiting forever for requests";
+    debug "Waiting forever for requests"
+    >>= fun () ->
     Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ]))
     >>= fun () ->
-    debug "Stopped listening";
+    debug "Stopped listening"
+    >>= fun () ->
     return () in
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
-    error "%s" msg;
+    Lwt_main.run (error "%s" msg);
     `Error(false, msg)
 
 open Cmdliner

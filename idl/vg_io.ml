@@ -18,7 +18,8 @@ let lock = Lwt_mutex.create ()
 let vgopen ~devices =
   Lwt_list.map_s
     (fun filename ->
-       Printf.printf "filename: %s\n%!" filename;
+       debug "filename: %s\n%!" filename
+       >>= fun () ->
        Block.connect filename >>= function
       | `Error _ -> fatal_error_t ("open " ^ filename)
       | `Ok x -> return x
@@ -29,18 +30,22 @@ let vgopen ~devices =
     (fun (filename, device) ->
       Label_IO.read device >>= function
       | `Error (`Msg m) ->
-        error "Failed to read PV label from device: %s" m;
+        error "Failed to read PV label from device: %s" m
+        >>= fun () ->
         fail (Failure "Failed to read PV label from device")
       | `Ok label ->
-        info "opened %s: %s" filename (Lvm.Label.to_string label);
+        info "opened %s: %s" filename (Lvm.Label.to_string label)
+        >>= fun () ->
         begin match Lvm.Label.Label_header.magic_of label.Lvm.Label.label_header with
         | Some `Lvm ->
-          error "Device has normal LVM PV label. I will only open devices with the new PV label.";
+          error "Device has normal LVM PV label. I will only open devices with the new PV label."
+          >>= fun () ->
           fail (Failure "Device has wrong LVM PV label")
         | Some `Journalled ->
           return ()
         | _ ->
-          error "Device has an unrecognised LVM PV label. I will only open devices with the new PV label.";
+          error "Device has an unrecognised LVM PV label. I will only open devices with the new PV label."
+          >>= fun () ->
           fail (Failure "Device has wrong PV label")
         end
     ) (List.combine devices devices')

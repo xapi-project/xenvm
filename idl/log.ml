@@ -6,10 +6,10 @@ type traced_operation = [
 ] with sexp
 type traced_operation_list = traced_operation list with sexp
 
-let debug fmt = Printf.ksprintf (fun s -> print_endline s) fmt
-let info  fmt = Printf.ksprintf (fun s -> print_endline s) fmt
-let warn fmt = Printf.ksprintf (fun s -> print_endline s) fmt
-let error fmt = Printf.ksprintf (fun s -> print_endline s) fmt
+let debug fmt = Lwt_log.debug_f fmt
+let info fmt = Lwt_log.info_f fmt
+let warn fmt = Lwt_log.warning_f fmt
+let error fmt = Lwt_log.error_f fmt
 
 let trace ts =
   let string_of_key = function

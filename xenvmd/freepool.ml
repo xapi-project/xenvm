@@ -56,6 +56,8 @@ let perform_expand_free ef connected_host =
      the LV tags so that it can be updated atomically alongside
      the increase in size. *)
 
+  let msgs = ref [] in
+
   maybe_write
     (fun vg ->
        let current_allocation = allocation_of_lv vg connected_host.Host.free_LV_uuid in
@@ -75,8 +77,10 @@ let perform_expand_free ef connected_host =
              match Lvm.Pv.Allocator.find vg.Lvm.Vg.free_space Int64.(div ef.extra_size extent_size_mib) with
              | `Ok allocation -> allocation
              | `Error (`OnlyThisMuchFree (needed_extents, free_extents)) ->
-               info "LV %s expansion required, but number of free extents (%Ld) is less than needed extents (%Ld)" connected_host.Host.free_LV free_extents needed_extents;
-               info "Expanding to use all the available space.";
+               msgs := !msgs @ [
+                   Printf.sprintf "LV %s expansion required, but number of free extents (%Ld) is less than needed extents (%Ld)"
+                     connected_host.Host.free_LV free_extents needed_extents;
+                   "Expanding to use all the available space."];
                vg.Lvm.Vg.free_space
            in
            match Lvm.Vg.do_op vg (lvm_op_of_free_allocation vg connected_host allocation) with
@@ -94,10 +98,10 @@ let perform_expand_free ef connected_host =
            | `Error x -> `Error x
          with
          | Not_found ->
-           error "Couldn't find the free LV for host: %s" connected_host.Host.free_LV;
-           error "This is fatal for this host's update.";
-           `Error (`Msg "not found")
+           `Error (`Msg (Printf.sprintf "Couldn't find the free LV for host: %s" connected_host.Host.free_LV))
        end else `Ok [])
+  >>= fun () ->
+  Lwt_list.iter_s (fun msg -> debug "%s" msg) !msgs
   >>= fun () ->
   read (fun vg ->
       let current_allocation = allocation_of_lv vg connected_host.Host.free_LV_uuid in
@@ -110,7 +114,8 @@ let perform_expand_free ef connected_host =
   Rings.FromLVM.p_advance connected_host.Host.from_LVM pos
 
 let perform t =
-  debug "%s" (Journal.Op.sexp_of_t t |> Sexplib.Sexp.to_string_hum);
+  debug "%s" (Journal.Op.sexp_of_t t |> Sexplib.Sexp.to_string_hum)
+  >>= fun () ->
   match t with
   | Journal.Op.ExpandFree ef ->
     begin
@@ -118,8 +123,7 @@ let perform t =
       | Some connected_host ->
         perform_expand_free ef connected_host
       | None ->
-        error "Journalled entry exists, but the host does not!";
-        Lwt.return ()
+        error "Journalled entry exists, but the host does not!"
     end
 
 let perform ops =
@@ -131,7 +135,8 @@ let journal = ref None
 
 let start name =
   Vg_io.myvg >>= fun vg ->
-  debug "Opening LV '%s' to use as a freePool journal" name;
+  debug "Opening LV '%s' to use as a freePool journal" name
+  >>= fun () ->
   ( match Vg_io.find vg name with
     | Some lv -> return lv
     | None -> assert false ) >>= fun v ->
@@ -199,7 +204,8 @@ let top_up_host config host connected_host =
     let size_mib = Int64.mul (Lvm.Lv.size_in_extents lv) extent_size_mib in
     if size_mib < config.host_low_water_mark then begin
       info "LV %s is %Ld MiB < low_water_mark %Ld MiB; allocating"
-        connected_host.Host.free_LV size_mib config.host_low_water_mark;
+        connected_host.Host.free_LV size_mib config.host_low_water_mark
+      >>= fun () ->
       match !journal with
       | Some j ->
         let open Journal.Op in
@@ -211,12 +217,10 @@ let top_up_host config host connected_host =
         >>|= fun wait ->
         wait.Journal.J.sync ()
       | None ->
-        error "No journal configured!";
-        Lwt.return ()
+        error "No journal configured!"
     end else return ()
   | None ->
-    error "Host has disappeared!";
-    Lwt.return ()
+    error "Host has disappeared!"
 
 let top_up_free_volumes config =
   let hosts = Host.get_connected_hosts () in

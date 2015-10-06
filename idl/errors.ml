@@ -24,7 +24,7 @@ let (>>|=) m f = m >>= fun x -> x >>*= f
 (* This error must cause the system to stop for manual maintenance.
  * Perhaps we could scope this later and take down only a single connection? *)
 let fatal_error_t msg =
-  Log.error "%s" msg;
+  Log.error "%s" msg >>= fun () ->
   fail (Failure msg)
 
 let fatal_error msg m = m >>= function
