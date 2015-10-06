@@ -472,9 +472,8 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     Lwt_unix.bind s (Lwt_unix.ADDR_UNIX(config.socket));
     Lwt_unix.listen s 5;
     let conn_handler fd () =
-      let ic = Lwt_io.of_fd ~mode:Lwt_io.input fd in
-      let oc = Lwt_io.of_fd ~mode:Lwt_io.output ~close:return fd in
-      (* read one line *)
+      let ic = Lwt_io.of_fd ~mode:Lwt_io.input ~close:return fd in
+      let oc = Lwt_io.of_fd ~mode:Lwt_io.output fd in
       Lwt_io.read_line ic
       >>= fun message ->
       let r = ResizeRequest.t_of_sexp (Sexplib.Sexp.of_string message) in
@@ -482,10 +481,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       >>= fun resp ->
       Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeResponse.sexp_of_t resp))
       >>= fun () ->
-      Lwt_io.flush oc
-      >>= fun () ->
-      Lwt_io.close ic
-    in
+      Lwt_io.close oc in
     let rec unix () =
       debug "Calling accept on the socket";
       Lwt_unix.accept s
@@ -543,6 +539,7 @@ let mock_dm_arg =
   Arg.(value & flag & info ["mock-devmapper"] ~doc)
 
 let () =
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
