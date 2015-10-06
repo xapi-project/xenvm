@@ -459,11 +459,13 @@ let la_extend device =
          Lwt_unix.sleep 20.0 >>= fun () ->
          ignore(xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
          ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
-         Lwt_unix.sleep 10.0 >>= fun () ->
+         Lwt_unix.sleep 15.0 >>= fun () ->
          Client.get_lv lvname >>= fun (myvg, lv) ->
          ignore(myvg,lv);
          let size = Lvm.Lv.size_in_extents lv in
          Printf.printf "final size=%Ld\n%!" size;
+         assert_equal ~msg:"Unexpected final size"
+           ~printer:Int64.to_string 31L size;
          ignore(xenvm ["host-disconnect"; vg; "host1"]);
          Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
          >>= fun log ->
@@ -485,16 +487,22 @@ let la_extend_multi device =
          ignore(xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg]);
          ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
          ignore(xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2]);
-         Lwt_unix.sleep 10.0 >>= fun () ->
+         Lwt_unix.sleep 15.0 >>= fun () ->
          Client.get_lv lvname >>= fun (myvg, lv) ->
          Client.get_lv lvname2 >>= fun (_, lv2) ->
          ignore(myvg,lv,lv2);
          let size = Lvm.Lv.size_in_extents lv in
          let size2 = Lvm.Lv.size_in_extents lv2 in
+         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname]);
+         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname2]);
          Printf.printf "Sanity checking VG\n%!";
          Client.get () >>= fun myvg -> 
          Common.sanity_check myvg;
          Printf.printf "final size=%Ld final_size2=%Ld\n%!" size size2;
+         assert_equal ~msg:"Unexpected final size"
+           ~printer:Int64.to_string 33L size;
+                  assert_equal ~msg:"Unexpected final size"
+           ~printer:Int64.to_string 33L size2;
          ignore(xenvm ["host-disconnect"; vg; "host1"]);
          ignore(xenvm ["host-disconnect"; vg; "host2"]);
          let la_dead = la_thread >>= fun _ -> la_thread2 in

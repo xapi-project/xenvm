@@ -32,3 +32,26 @@ let fatal_error msg m = m >>= function
   | `Error `Suspended -> fatal_error_t (msg ^ ": queue is suspended")
   | `Error `Retry -> fatal_error_t (msg ^ ": queue temporarily unavailable")
   | `Ok x -> return x
+
+let rec retry_forever f =
+  f ()
+  >>= function
+  | `Ok x -> return (`Ok x)
+  | `Error `Retry ->
+    Lwt_unix.sleep 5.
+    >>= fun () ->
+    retry_forever f
+  | `Error x -> return (`Error x)
+
+let wait_for f result =
+  let new_f () =
+    f () >>= function
+    | `Error _ as x -> return x
+    | `Ok s when s=result -> return (`Ok ())
+    | `Ok _ -> return (`Error `Retry)
+  in retry_forever new_f
+
+let suspended_is_ok x =
+  match x with
+  | `Error `Suspended -> return (`Ok ())
+  | y -> return y
