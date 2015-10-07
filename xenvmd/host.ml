@@ -36,11 +36,13 @@ let create name =
   Vg_io.myvg >>= fun vg ->
   match Vg_io.find vg freeLVM with
   | Some lv ->
-    debug "Found freeLVM exists already";
+    debug "Found freeLVM exists already"
+    >>= fun () ->
     return () (* We've already done this *)
   | None ->
     begin
-      debug "No freeLVM volume";
+      debug "No freeLVM volume"
+      >>= fun () ->
       let size = Int64.(mul 4L (mul 1024L 1024L)) in
       let creation_host = Unix.gethostname () in
       let creation_time = Unix.gettimeofday () |> Int64.of_float in
@@ -97,24 +99,27 @@ let sexp_of_exn e = Sexplib.Sexp.Atom (Printexc.to_string e)
 
 let connect name =
   Vg_io.myvg >>= fun vg ->
-  info "Registering host %s" name;
+  info "Registering host %s" name
+  >>= fun () ->
   let toLVM = toLVM name in
   let fromLVM = fromLVM name in
   let freeLVM = freeLVM name in
 
   let is_connecting = StringSet.mem name (!connecting_hosts) in
 
-  let try_again =
-    if Hashtbl.mem connected_hosts name then begin
-      let connected_host = Hashtbl.find connected_hosts name in
-      match connected_host.state with
-      | Xenvm_interface.Failed msg ->
-        info "Connection to host %s has failed with %s: retrying" name msg;
-        true
-      | x ->
-        info "Connction to host %s in state %s" name (Jsonrpc.to_string (Xenvm_interface.rpc_of_connection_state x));
-        false
-    end else true in
+  begin if Hashtbl.mem connected_hosts name then begin
+    let connected_host = Hashtbl.find connected_hosts name in
+    match connected_host.state with
+    | Xenvm_interface.Failed msg ->
+      info "Connection to host %s has failed with %s: retrying" name msg
+      >>= fun () ->
+      Lwt.return true
+    | x ->
+      info "Connction to host %s in state %s" name (Jsonrpc.to_string (Xenvm_interface.rpc_of_connection_state x))
+      >>= fun () ->
+      Lwt.return false
+    end else Lwt.return true end
+  >>= fun try_again ->
 
   if is_connecting || (not try_again) then begin
     return ()
@@ -136,7 +141,8 @@ let connect name =
           >>= fun toLVM_q ->
           Rings.ToLVM.c_state toLVM_q
           >>= fun state ->
-          debug "Rings.ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+          debug "Rings.ToLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended")
+          >>= fun () ->
           Rings.ToLVM.resume toLVM_q
           >>= fun () ->
 
@@ -158,23 +164,24 @@ let connect name =
             ( if initial_state = `Suspended
               then begin
                 connected_host.state <- Xenvm_interface.Resending_free_blocks;
-                debug "The Rings.FromLVM queue was already suspended: resending the free blocks";
+                debug "The Rings.FromLVM queue was already suspended: resending the free blocks"
+                >>= fun () ->
                 let allocation = Lvm.Lv.to_allocation (Vg_io.Volume.metadata_of freeLVM_id) in
                 Rings.FromLVM.push fromLVM_q allocation
                 >>= fun pos ->
                 Rings.FromLVM.p_advance fromLVM_q pos
                 >>= fun () ->
-                debug "Free blocks pushed";
-                return ()
+                debug "Free blocks pushed"
               end else begin
-                debug "The Rings.FromLVM queue was running: no need to resend the free blocks";
-                return ()
+                debug "The Rings.FromLVM queue was running: no need to resend the free blocks"
               end )
             >>= fun () ->
             debug "querying state";
+            >>= fun () ->
             Rings.FromLVM.p_state fromLVM_q
             >>= fun state ->
-            debug "Rings.FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended");
+            debug "Rings.FromLVM queue is currently %s" (match state with `Running -> "Running" | `Suspended -> "Suspended")
+            >>= fun () ->
             return connected_host in
 
       (* Run the blocking stuff in the background *)
@@ -188,7 +195,8 @@ let connect name =
                 return ()
              ) (fun e ->
                  let msg = Printexc.to_string e in
-                 error "Connecting to %s failed with: %s" name msg;
+                 error "Connecting to %s failed with: %s" name msg
+                 >>= fun () ->
                  begin
                    try
                      let connected_host = Hashtbl.find connected_hosts name in
@@ -199,7 +207,8 @@ let connect name =
         );
       return ()
     | _, _, _ ->
-      info "At least one of host %s's volumes does not exist" name;
+      info "At least one of host %s's volumes does not exist" name
+      >>= fun () ->
       connecting_hosts := StringSet.remove name !connecting_hosts;
       fail Xenvm_interface.HostNotCreated
   end
@@ -215,10 +224,12 @@ let flush_already_locked name =
     let to_lvm = connected_host.to_LVM in
     Rings.ToLVM.pop to_lvm
     >>= fun (pos, items) ->
-    debug "Rings.FromLVM queue %s has %d items" name (List.length items);
+    debug "Rings.FromLVM queue %s has %d items" name (List.length items)
+    >>= fun () ->
     Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
+        debug "Expanding volume %s" volume
+        >>= fun () ->
         Vg_io.write (fun vg ->
-            debug "Expanding volume %s" volume;
             let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
             let free_id = connected_host.free_LV_uuid in
             Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvTransfer(free_id, id, segments)))
@@ -238,12 +249,14 @@ let disconnect ~cooperative name =
     | Xenvm_interface.Connected ->
       let to_lvm = connected_host.to_LVM in
       ( if cooperative then begin
-            debug "Cooperative disconnect: suspending Rings.ToLVM queue for %s" name;
+            debug "Cooperative disconnect: suspending Rings.ToLVM queue for %s" name
+            >>= fun () ->
             Rings.ToLVM.suspend to_lvm
           end else return ()
       ) >>= fun () ->
       (* There may still be updates in the Rings.ToLVM queue *)
-      debug "Flushing Rings.ToLVM queue for %s" name;
+      debug "Flushing Rings.ToLVM queue for %s" name
+      >>= fun () ->
       Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
       >>= fun () ->
       let toLVM = toLVM name in
@@ -305,21 +318,18 @@ let all () =
 
 let reconnect_all () =
   Vg_io.read (fun vg ->
-      debug "Reconnecting";
+      debug "Reconnecting"
+      >>= fun () ->
       Lvm.Vg.LVs.fold (fun key v acc ->
-          debug "Checking LV: %s" v.Lvm.Lv.name;
           let name = v.Lvm.Lv.name in
           match Stringext.split name ~on:'-' |> List.rev with
           | "toLVM" :: host_bits ->
             let host = String.concat "-" (List.rev host_bits) in
-            debug "This is a 'toLVM' LV";
             (* It's a toLVM - check to see whether it has the 'connected' flag *)
             let tags = List.map Lvm.Name.Tag.to_string v.Lvm.Lv.tags in
             let was_connected = List.mem connected_tag tags in
-            debug "host=%s was_connected=%b" host was_connected;
             (host,was_connected)::acc
           | e ->
-            debug "got list: %s" (String.concat "," e);
             acc)
         vg.Lvm.Vg.lvs [] |> Lwt.return
     ) >>= fun host_states ->

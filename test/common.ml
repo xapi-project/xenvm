@@ -18,7 +18,7 @@ open Vg
 open Lwt
 
 (* Mock kernel devices so we can run as a regular user *)
-let use_mock = ref true
+let use_mock = ref false
 
 module Time = struct
   type 'a io = 'a Lwt.t
