@@ -18,6 +18,7 @@ sig
     ?name:string ->
     ?client:string ->
     ?flush_interval:float ->
+    ?retry_interval:float ->
     Vg_io.Volume.t ->
     (Op.t list -> unit result Lwt.t) -> t result Lwt.t
   val shutdown : t -> unit Lwt.t
