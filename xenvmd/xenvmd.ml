@@ -104,10 +104,19 @@ let maybe_write_pid config =
       (* don't need a lock file because we'll fail to bind to the port *)
     Lwt.return ()
   | Some path ->
-    info "Writing pidfile to %s" path
+    let pidfile = path ^ ".lock" in
+    info "Writing pidfile to %s" pidfile
     >>= fun () ->
-    Pidfile.write_pid (path ^ ".lock");
-    Lwt.return ()
+    begin
+      match Pidfile.write_pid pidfile with
+      | `Ok _ ->
+        Lwt.return ()
+      | `Error (`Msg msg) ->
+        Log.error "Caught exception while writing pidfile: %s" msg >>= fun () ->
+        Log.error "The pidfile %s is locked: you cannot start the program twice!" pidfile >>= fun () ->
+        Log.error "If the process was shutdown cleanly then verify and remove the pidfile." >>= fun () ->
+        exit 1
+    end
 
 let run port sock_path config =
   let t =
@@ -244,6 +253,7 @@ let main port sock_path config daemon =
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with listenPort = match port with None -> config.listenPort | Some x -> Some x } in
   let config = { config with listenPath = match sock_path with None -> config.listenPath | Some x -> Some x } in
+  Lwt_log.add_rule "*" Lwt_log.Debug;
 
   if daemon then daemonize config;
 

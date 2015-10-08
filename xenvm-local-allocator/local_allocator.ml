@@ -219,16 +219,37 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     fromLVM = (match fromLVM with None -> config.fromLVM | Some x -> x);
   } in
 
+  Lwt_log.add_rule "*" Lwt_log.Debug;
+
   dm := if use_mock then (module Devmapper.Mock: Devmapper.S.DEVMAPPER) else (module Devmapper.Linux: Devmapper.S.DEVMAPPER);
 
   let module D = (val !dm: Devmapper.S.DEVMAPPER) in
 
-  if daemon then Lwt_daemon.daemonize ();
-
-  Pidfile.write_pid (config.socket ^ ".lock");
+  let oc =
+    if daemon
+    then
+      begin
+        Lwt_log.default := Lwt_log.syslog ~facility:`Daemon ();
+        Some (Daemon.daemonize ())
+      end
+    else None
+  in
 
   let t =
+    info "Starting local allocator thread" >>= fun () ->
     debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config))
+    >>= fun () ->
+
+    begin
+      let pidfile = config.socket ^ ".lock" in
+      match Pidfile.write_pid pidfile with
+      | `Ok _ -> Lwt.return ()
+      | `Error (`Msg msg) ->
+        Log.error "Caught exception while writing pidfile: %s" msg >>= fun () ->
+        Log.error "The pidfile %s is locked: you cannot start the program twice!" pidfile >>= fun () ->
+        Log.error "If the process was shutdown cleanly then verify and remove the pidfile." >>= fun () ->
+        exit 1
+    end
     >>= fun () ->
 
     Device.read_sector_size config.devices
@@ -428,6 +449,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       async (conn_handler fd);
       unix () in
     let listen_unix = unix () in
+    (* At this point, we ask our parent to exit *)
+    Daemon.parent_should_exit oc 0
+    >>= fun () ->
     debug "Waiting forever for requests"
     >>= fun () ->
     Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ]))
@@ -435,10 +459,15 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     debug "Stopped listening"
     >>= fun () ->
     return () in
+
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
-    Lwt_main.run (error "%s" msg);
+    Lwt_main.run (
+      error "%s" msg
+      >>= fun () ->
+      Daemon.parent_should_exit oc 1
+    );
     `Error(false, msg)
 
 open Cmdliner

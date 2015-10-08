@@ -107,9 +107,8 @@ let start_local_allocator host devices =
   } in
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
   |> file_of_string config_file;
-  let local_allocator_thread = Lwt_preemptive.detach local_allocator [ "--config"; config_file; ] in
   ignore(xenvm [ "host-connect"; vg; hostname]);
-  local_allocator_thread
+  ignore(local_allocator [ "--config"; config_file; "--daemon"])
 
 let lvchange_offline =
   "lvchange vg/lv --offline: check that we can activate volumes offline" >::
@@ -389,6 +388,36 @@ let lvchange_n =
   end;
   xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
+let lvremove_deactivates =
+  "lvremove: check that lvremove deactivates the LV" >::
+  fun () ->
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L name;
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
+  let map_name = Mapper.name_of vg_metadata.name lv_metadata.Lv.name in
+  xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
+  run "udevadm" [ "settle" ] |> ignore_string;
+  if not !Common.use_mock then begin (* FIXME: #99 *)
+  Printf.printf "Checking dev path does not exist...\n%!";
+  assert_equal ~printer:string_of_bool true (file_exists (dev_path_of name));
+  Printf.printf "Checking mapper path does not exist... (mapper_path_of_name=%s)\n%!" (mapper_path_of name);
+  assert_equal ~printer:string_of_bool true (file_exists (mapper_path_of name));
+  Printf.printf "Checking map name does not exist\n%!";
+  assert_equal ~printer:string_of_bool true (dm_exists map_name);
+  end;
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string;
+  run "udevadm" [ "settle" ] |> ignore_string;
+  if not !Common.use_mock then begin (* FIXME: #99 *)
+  Printf.printf "Checking dev path does not exist...\n%!";
+  assert_equal ~printer:string_of_bool false (file_exists (dev_path_of name));
+  Printf.printf "Checking mapper path does not exist...\n%!";
+  assert_equal ~printer:string_of_bool false (file_exists (mapper_path_of name));
+  Printf.printf "Checking map name does not exist\n%!";
+  assert_equal ~printer:string_of_bool false (dm_exists map_name);
+  end
+
+
 let parse_int x =
   int_of_string (String.trim x)
 
@@ -424,6 +453,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvchange_addtag;
   lvchange_deltag;
   lvchange_n;
+  lvremove_deactivates;
   lvextend_toobig;
   vgs_online;
   benchmark;
@@ -431,18 +461,32 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
 
 exception Timeout
 
+let la_is_running host =
+  let pidfile = Printf.sprintf "%s.lock" (get_local_allocator_sockpath host) in
+  match Pidfile.write_pid pidfile with
+  | `Ok fd ->
+    (* It clearly wasn't running, as we've got the lock *)
+    Unix.close fd;
+    Unix.unlink pidfile;
+    false
+  | `Error _ ->
+    (* It's still running *)
+    true
+
+let rec wait_la_stop host =
+  if la_is_running host then
+    Lwt_unix.sleep 0.1 >>= fun () -> wait_la_stop host
+  else Lwt.return ()
+
 let la_start device =
   "Start and shutdown the local allocator" >::
   (fun () ->
      ignore(Lwt_main.run (
          let rec n_times n =
            if n=0 then Lwt.return () else begin
-             let la_thread = start_local_allocator 1 [device] in
+             start_local_allocator 1 [device];
              ignore(xenvm ["host-disconnect"; vg; "host1"]);
-             Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
-             >>= fun log ->
-             Lwt_io.(with_file output (Printf.sprintf "local_allocator.%d.log" n)
-               (fun chan -> write chan log))
+             Lwt.choose [wait_la_stop 1; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
              >>= fun () ->
              n_times (n-1)
            end
@@ -455,11 +499,10 @@ let la_extend device =
   (fun () ->
      ignore(Lwt_main.run (
          let lvname = "test" in
-         let la_thread = start_local_allocator 1 [device] in
-         Lwt_unix.sleep 20.0 >>= fun () ->
+         start_local_allocator 1 [device];
          ignore(xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
          ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
-         Lwt_unix.sleep 15.0 >>= fun () ->
+         Lwt_unix.sleep 11.0 >>= fun () ->
          Client.get_lv lvname >>= fun (myvg, lv) ->
          ignore(myvg,lv);
          let size = Lvm.Lv.size_in_extents lv in
@@ -467,10 +510,12 @@ let la_extend device =
          assert_equal ~msg:"Unexpected final size"
            ~printer:Int64.to_string 31L size;
          ignore(xenvm ["host-disconnect"; vg; "host1"]);
-         Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
-         >>= fun log ->
-         Lwt_io.(with_file output "local_allocator.log"
-                   (fun chan -> write chan log)))))
+         Lwt.choose [wait_la_stop 1; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)])))
+
+let inparallel fns =
+  Lwt.join (
+    List.map (fun fn ->
+        Lwt_preemptive.detach (fun () -> ignore(fn ())) ()) fns)
 
 let la_extend_multi device =
   "Extend an LV with the local allocator" >::
@@ -478,16 +523,18 @@ let la_extend_multi device =
      ignore(Lwt_main.run (
          let lvname = "test2" in
          let lvname2 = "test3" in
-         let la_thread = start_local_allocator 1 [device] in
-         Lwt_unix.sleep 10.0 >>= fun () ->
-         let la_thread2 = start_local_allocator 2 [device] in
+         start_local_allocator 1 [device];
+         start_local_allocator 2 [device];
          set_vg_info device vg 2;
-         Lwt_unix.sleep 20.0 >>= fun () ->
-         ignore(xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
-         ignore(xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg]);
-         ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
-         ignore(xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2]);
-         Lwt_unix.sleep 15.0 >>= fun () ->
+         inparallel [(fun () -> xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
+                     (fun () -> xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg])]
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
+                     (fun () -> xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2])]
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ["host-disconnect"; vg; "host1"] |> ignore);
+                     (fun () -> xenvm ["host-disconnect"; vg; "host2"] |> ignore)]
+         >>= fun () ->
          Client.get_lv lvname >>= fun (myvg, lv) ->
          Client.get_lv lvname2 >>= fun (_, lv2) ->
          ignore(myvg,lv,lv2);
@@ -503,18 +550,9 @@ let la_extend_multi device =
            ~printer:Int64.to_string 33L size;
                   assert_equal ~msg:"Unexpected final size"
            ~printer:Int64.to_string 33L size2;
-         ignore(xenvm ["host-disconnect"; vg; "host1"]);
-         ignore(xenvm ["host-disconnect"; vg; "host2"]);
-         let la_dead = la_thread >>= fun _ -> la_thread2 in
+
+         let la_dead = wait_la_stop 1 >>= fun _ -> wait_la_stop 2 in
          Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
-         >>= fun _ ->
-         la_thread >>= fun log ->
-         Lwt_io.(with_file output "local_allocator.log"
-                   (fun chan -> write chan log))
-         >>= fun _ ->
-         la_thread2 >>= fun log ->
-         Lwt_io.(with_file output "local_allocator2.log"
-                   (fun chan -> write chan log))
        )))
 
 let local_allocator_suite device = "Commands which require the local allocator" >::: [
@@ -533,4 +571,5 @@ let _ =
   with_xenvmd (fun _ _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
   if not !Common.use_mock then begin (* FIXME: #99 *)
     with_xenvmd (fun _ device -> run_test_tt_main (local_allocator_suite device) |> check_results_with_exit_code)
-  end
+  end;
+  dump_stats ()
