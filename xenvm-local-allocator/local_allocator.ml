@@ -225,7 +225,15 @@ let main use_mock config daemon socket journal fromLVM toLVM =
 
   let module D = (val !dm: Devmapper.S.DEVMAPPER) in
 
-  if daemon then Lwt_daemon.daemonize ();
+  let oc =
+    if daemon
+    then
+      begin
+        Lwt_log.default := Lwt_log.syslog ~facility:`Daemon ();
+        Some (Daemon.daemonize ())
+      end
+    else None
+  in
 
   let t =
     info "Starting local allocator thread" >>= fun () ->
@@ -441,6 +449,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       async (conn_handler fd);
       unix () in
     let listen_unix = unix () in
+    (* At this point, we ask our parent to exit *)
+    Daemon.parent_should_exit oc 0
+    >>= fun () ->
     debug "Waiting forever for requests"
     >>= fun () ->
     Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ]))
@@ -448,10 +459,15 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     debug "Stopped listening"
     >>= fun () ->
     return () in
+
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
-    Lwt_main.run (error "%s" msg);
+    Lwt_main.run (
+      error "%s" msg
+      >>= fun () ->
+      Daemon.parent_should_exit oc 1
+    );
     `Error(false, msg)
 
 open Cmdliner
