@@ -219,16 +219,29 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     fromLVM = (match fromLVM with None -> config.fromLVM | Some x -> x);
   } in
 
+  Lwt_log.add_rule "*" Lwt_log.Debug;
+
   dm := if use_mock then (module Devmapper.Mock: Devmapper.S.DEVMAPPER) else (module Devmapper.Linux: Devmapper.S.DEVMAPPER);
 
   let module D = (val !dm: Devmapper.S.DEVMAPPER) in
 
   if daemon then Lwt_daemon.daemonize ();
 
-  Pidfile.write_pid (config.socket ^ ".lock");
-
   let t =
+    info "Starting local allocator thread" >>= fun () ->
     debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config))
+    >>= fun () ->
+
+    begin
+      let pidfile = config.socket ^ ".lock" in
+      match Pidfile.write_pid pidfile with
+      | `Ok _ -> Lwt.return ()
+      | `Error (`Msg msg) ->
+        Log.error "Caught exception while writing pidfile: %s" msg >>= fun () ->
+        Log.error "The pidfile %s is locked: you cannot start the program twice!" pidfile >>= fun () ->
+        Log.error "If the process was shutdown cleanly then verify and remove the pidfile." >>= fun () ->
+        exit 1
+    end
     >>= fun () ->
 
     Device.read_sector_size config.devices
