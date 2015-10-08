@@ -109,7 +109,7 @@ let maybe_write_pid config =
     >>= fun () ->
     begin
       match Pidfile.write_pid pidfile with
-      | `Ok () ->
+      | `Ok _ ->
         Lwt.return ()
       | `Error (`Msg msg) ->
         Log.error "Caught exception while writing pidfile: %s" msg >>= fun () ->
@@ -253,6 +253,7 @@ let main port sock_path config daemon =
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with listenPort = match port with None -> config.listenPort | Some x -> Some x } in
   let config = { config with listenPath = match sock_path with None -> config.listenPath | Some x -> Some x } in
+  Lwt_log.add_rule "*" Lwt_log.Debug;
 
   if daemon then daemonize config;
 
