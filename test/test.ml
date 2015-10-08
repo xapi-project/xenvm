@@ -388,6 +388,36 @@ let lvchange_n =
   end;
   xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string
 
+let lvremove_deactivates =
+  "lvremove: check that lvremove deactivates the LV" >::
+  fun () ->
+  let name = Uuid.(to_string (create ())) in
+  xenvm [ "lvcreate"; "-n"; name; "-L"; "3"; vg ] |> ignore_string;
+  assert_lv_exists ~expected_size_in_extents:1L name;
+  let vg_metadata, lv_metadata = Lwt_main.run (Client.get_lv name) in
+  let map_name = Mapper.name_of vg_metadata.name lv_metadata.Lv.name in
+  xenvm [ "lvchange"; "-ay"; "/dev/" ^ vg ^ "/" ^ name ] |> ignore_string;
+  run "udevadm" [ "settle" ] |> ignore_string;
+  if not !Common.use_mock then begin (* FIXME: #99 *)
+  Printf.printf "Checking dev path does not exist...\n%!";
+  assert_equal ~printer:string_of_bool true (file_exists (dev_path_of name));
+  Printf.printf "Checking mapper path does not exist... (mapper_path_of_name=%s)\n%!" (mapper_path_of name);
+  assert_equal ~printer:string_of_bool true (file_exists (mapper_path_of name));
+  Printf.printf "Checking map name does not exist\n%!";
+  assert_equal ~printer:string_of_bool true (dm_exists map_name);
+  end;
+  xenvm [ "lvremove"; vg ^ "/" ^ name ] |> ignore_string;
+  run "udevadm" [ "settle" ] |> ignore_string;
+  if not !Common.use_mock then begin (* FIXME: #99 *)
+  Printf.printf "Checking dev path does not exist...\n%!";
+  assert_equal ~printer:string_of_bool false (file_exists (dev_path_of name));
+  Printf.printf "Checking mapper path does not exist...\n%!";
+  assert_equal ~printer:string_of_bool false (file_exists (mapper_path_of name));
+  Printf.printf "Checking map name does not exist\n%!";
+  assert_equal ~printer:string_of_bool false (dm_exists map_name);
+  end
+
+
 let parse_int x =
   int_of_string (String.trim x)
 
@@ -423,6 +453,7 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
   lvchange_addtag;
   lvchange_deltag;
   lvchange_n;
+  lvremove_deactivates;
   lvextend_toobig;
   vgs_online;
   benchmark;

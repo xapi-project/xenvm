@@ -9,8 +9,9 @@ let lvremove copts (vg_name,lv_opt) force =
   Lwt_main.run (
     get_vg_info_t copts vg_name >>= fun info ->
     set_uri copts info;
-    Client.get () >>= fun vg ->
+    Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
     if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
+    Lvchange.deactivate vg lv >>= fun _ ->
     Client.remove lv_name)
 
 let lvremove_cmd =
