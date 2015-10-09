@@ -18,7 +18,7 @@ open Vg
 open Lwt
 
 (* Mock kernel devices so we can run as a regular user *)
-let use_mock = ref false
+let use_mock = ref true
 
 module Time = struct
   type 'a io = 'a Lwt.t
@@ -40,9 +40,9 @@ let ignore_string (_: string) = ()
 let log fmt =
   Printf.ksprintf
     (fun s ->
-      output_string stderr s;
-      output_string stderr "\n";
-      flush stderr;
+      output_string stdout s;
+      output_string stdout "\n";
+      flush stdout;
       ) fmt
 let debug fmt = log fmt
 let warn fmt = debug fmt
@@ -151,7 +151,10 @@ let canonicalise x =
 
 exception Bad_exit of int * string * string list * string * string
 
+let times = ref []
+
 let run ?(env= Unix.environment()) ?stdin cmd args =
+  let starttime = Unix.gettimeofday () in
   let cmd = canonicalise cmd in
   debug "%s %s" cmd (String.concat " " args);
   let null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
@@ -206,9 +209,15 @@ let run ?(env= Unix.environment()) ?stdin cmd args =
 
     let _, status = Unix.waitpid [] pid in
 
+    let completed = Unix.gettimeofday () in
+
     let stdout = read_all stdout_readable in
     let stderr = read_all stderr_readable in    
     close_all ();
+    debug "done (%s %s - %f)" cmd (String.concat " " args) (completed -. starttime);
+    let cmd = Printf.sprintf "%s %s" cmd (String.concat " " args) in
+    let time = completed -. starttime in
+    times := (time, cmd)::(!times);
 
     match status with
     | Unix.WEXITED 0 ->
@@ -220,6 +229,11 @@ let run ?(env= Unix.environment()) ?stdin cmd args =
   with e ->
     close_all ();
     raise e
+
+
+let dump_stats () =
+  let stats = List.sort (fun (t1,_) (t2,_) -> compare t1 t2) !times in
+  List.iter (fun (time,cmd) -> Printf.printf "%f: %s\n" time cmd) stats
 
 module Int64 = struct
   include Int64
