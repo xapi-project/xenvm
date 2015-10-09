@@ -92,6 +92,8 @@ let lvresize copts live (vg_name,lv_opt) real_size percent_size =
     match live, info with
     | true, Some { Xenvm_common.local_allocator_path = Some allocator } ->
       resize_locally allocator vg_name lv_name size
+    | true, _ ->
+      fail (Failure "Live resize requested, but local allocator path unset") 
     | _, _ ->
       resize_remotely info vg_name lv_name size
   in
