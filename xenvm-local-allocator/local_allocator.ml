@@ -3,32 +3,15 @@ open Sexplib.Std
 open Log
 open Errors
 open Rings
-    
+
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
 end
 
-let dm = ref (module Devmapper.Linux : Devmapper.S.DEVMAPPER)
+let dm = ref (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER)
 
 let journal_size = Int64.(mul 4L (mul 1024L 1024L))
-
-let retry ~dbg ~retries ~interval f =
-  debug "Attempting to '%s': will try at most %d times with a %fs interval."
-    dbg retries interval
-  >>= fun () ->
-  let rec aux n =
-    if n <= 0 then Lwt.return (f ())
-    else
-      try Lwt.return (f ())
-      with exn ->
-        warn "warning: '%s' failed with '%s'; will retry %d more time%s..."
-          dbg (Printexc.to_string exn) retries (if retries = 1 then "" else "s")
-        >>= fun () ->
-        Time.sleep interval
-        >>= fun () ->
-        aux (retries - 1) in
-  aux retries
 
 let with_block filename f =
   let open Lwt in
@@ -201,8 +184,9 @@ let extend_volume device vg existing_targets extents =
    List.rev segments, List.rev targets
 
 let targets_of x =
-  let module D = (val !dm: Devmapper.S.DEVMAPPER) in
-  match D.stat x with
+  let module D = (val !dm: S.RETRYMAPPER) in
+  D.stat x >>= fun s -> 
+  match s with
   | Some x -> return (`Ok x.D.targets)
   | None ->
     error "The device mapper device %s has disappeared." x
@@ -221,9 +205,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
 
   Lwt_log.add_rule "*" Lwt_log.Debug;
 
-  dm := if use_mock then (module Devmapper.Mock: Devmapper.S.DEVMAPPER) else (module Devmapper.Linux: Devmapper.S.DEVMAPPER);
+  dm := if use_mock then (module Retrymapper.Make(Devmapper.Mock): S.RETRYMAPPER) else (module Retrymapper.Make(Devmapper.Linux): S.RETRYMAPPER);
 
-  let module D = (val !dm: Devmapper.S.DEVMAPPER) in
+  let module D = (val !dm: S.RETRYMAPPER) in
 
   let oc =
     if daemon
@@ -312,16 +296,13 @@ let main use_mock config daemon socket journal fromLVM toLVM =
         >>= fun to_device_targets ->
         (* Append the physical blocks to toLV *)
         let to_targets = to_device_targets @ t.device.ExpandDevice.targets in
-        retry ~dbg:"Suspend local dm device" ~retries:3 ~interval:1. (fun () ->
-            D.suspend t.device.ExpandDevice.device)
+        D.suspend t.device.ExpandDevice.device
         >>= fun () ->
-        retry ~dbg:"Reload local dm device" ~retries:3 ~interval:1. (fun () ->
-            D.reload t.device.ExpandDevice.device to_targets)
+        D.reload t.device.ExpandDevice.device to_targets
         >>= fun () ->
         ToLVM.p_advance tolvm position
         >>= fun () ->
-        retry ~dbg:"Resume local dm device" ~retries:3 ~interval:1. (fun () ->
-            D.resume t.device.ExpandDevice.device)
+        D.resume t.device.ExpandDevice.device
       ) ops
       >>= fun () ->
       return (`Ok ()) in
@@ -360,8 +341,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       fun { ResizeRequest.local_dm_name = device; action } ->
         Lwt_mutex.with_lock m
           (fun () ->
-            (* We may need to enlarge in multiple chunks if the free pool is depleted *)
-            let rec expand action = match D.stat device with
+             (* We may need to enlarge in multiple chunks if the free pool is depleted *)
+            D.stat device >>= fun s ->
+            let rec expand action = match s with
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
@@ -406,8 +388,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
                 end in
             expand action
           ) in
-
-    let ls = D.ls () in
+    D.ls () >>= fun ls ->
     debug "Visible device mapper devices: [ %s ]\n%!" (String.concat "; " ls)
     >>= fun () ->
 

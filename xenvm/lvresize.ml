@@ -5,9 +5,10 @@ open Lwt
 open Xenvm_common
 
 let resize_remotely info vg_name lv_name size =
-  let module DM = (val !dm : Devmapper.S.DEVMAPPER) in
+  let module DM = (val !dm : S.RETRYMAPPER) in
   let dm_name = Mapper.name_of vg_name lv_name in
-  let device_is_active = List.mem dm_name (DM.ls ()) in
+  DM.ls () >>= fun all ->
+  let device_is_active = List.mem dm_name all in
 
   Client.get_lv ~name:lv_name >>= fun (vg, lv) ->
   if vg.Lvm.Vg.name <> vg_name then failwith "Invalid VG name";
@@ -17,7 +18,12 @@ let resize_remotely info vg_name lv_name size =
 
   let existing_size = Int64.(mul (mul 512L vg.Lvm.Vg.extent_size) (Lvm.Lv.size_in_extents lv)) in
 
-  if device_is_active then DM.suspend dm_name;
+  begin
+    if device_is_active then DM.suspend dm_name
+    else return ()
+  end
+  >>= fun () ->
+
   Lwt.catch
     (fun () ->
       match size with
@@ -26,11 +32,9 @@ let resize_remotely info vg_name lv_name size =
     ) (function
       | Xenvm_interface.Insufficient_free_space(needed, available) ->
         Printf.fprintf Pervasives.stderr "Insufficient free space: %Ld extents needed, but only %Ld available\n%!" needed available;
-        if device_is_active then DM.resume dm_name;
-        exit 5
+        (if device_is_active then DM.resume dm_name else Lwt.return ()) >>= fun () -> exit 5
       | e ->
-        if device_is_active then DM.resume dm_name;
-        fail e
+        (if device_is_active then DM.resume dm_name else Lwt.return ()) >>= fun () -> fail e
     )
   >>= fun () ->
   if device_is_active then begin
@@ -38,13 +42,13 @@ let resize_remotely info vg_name lv_name size =
     Mapper.read [ local_device ]
     >>= fun devices ->
     let targets = Mapper.to_targets devices vg lv in
-    DM.reload dm_name targets;
-    DM.resume dm_name;
-    return ()
+
+    DM.reload dm_name targets
+    >>= fun () ->
+    DM.resume dm_name
   end else return ()
 
 let resize_locally allocator vg_name lv_name size =
-  let module DM = (val !dm : Devmapper.S.DEVMAPPER) in
   let dm_name = Mapper.name_of vg_name lv_name in
   let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
   Lwt_unix.connect s (Unix.ADDR_UNIX allocator)

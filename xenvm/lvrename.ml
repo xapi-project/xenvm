@@ -19,7 +19,7 @@ let retry fn =
   inner 5
 
 let lvrename copts (vg_name,lv_opt) newname physical_device =
-  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
+  let module Devmapper = (val !Xenvm_common.dm : S.RETRYMAPPER) in
   let lv_name = match lv_opt with | Some l -> l | None -> failwith "Need an LV name" in
   (* It seems you can say "vg/lv" or "lv" *)
   let newname = match newname with
@@ -40,18 +40,17 @@ let lvrename copts (vg_name,lv_opt) newname physical_device =
     >>= fun () ->
     (* Delete the old device node *)
     Lwt.catch (fun () -> Lwt_unix.unlink (Printf.sprintf "/dev/%s/%s" vg_name lv_name)) (fun _ -> Lwt.return ()) >>= fun () ->
-    let all = Devmapper.ls () in
+    Devmapper.ls () >>= fun all ->
     let old_name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
     if List.mem old_name all then begin
-      retry (fun () -> Devmapper.remove old_name)
+      Devmapper.remove old_name
       >>= fun () ->
       Mapper.read [ local_device ]
       >>= fun devices ->
       let targets = Mapper.to_targets devices vg lv in
       let new_name = Mapper.name_of vg.Lvm.Vg.name newname in
-      Devmapper.create new_name targets;
-      Devmapper.mknod new_name (Printf.sprintf "/dev/%s/%s" vg_name newname) 0x0600;
-      return ()
+      Devmapper.create new_name targets >>= fun () -> 
+      Devmapper.mknod new_name (Printf.sprintf "/dev/%s/%s" vg_name newname) 0x0600
     end else return ()
   )
 

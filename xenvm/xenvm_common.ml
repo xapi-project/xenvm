@@ -3,7 +3,7 @@ open Cmdliner
 open Lwt
 open Errors
 
-let dm = ref (module Devmapper.Linux : Devmapper.S.DEVMAPPER)
+let dm = ref (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER)
 
 let syslog = Lwt_log.syslog ~facility:`Daemon ()
 
@@ -33,6 +33,7 @@ end
   
 type fieldty =
   | Literal of string
+  | LiteralLwt of string Lwt.t
   | Size of int64 (* Sectors *)
 
 let convert_size vg nosuffix units size =
@@ -53,7 +54,7 @@ type field = { key: string; name: string; fn:fieldfn }
    for canonical description of this field. *)
 
 let attr_of_lv vg lv =
-  let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
+  let module Devmapper = (val !dm: S.RETRYMAPPER) in
 
   (* Since we're single-shot, cache the active devices here *)
   let devmapper_ls =
@@ -69,14 +70,17 @@ let attr_of_lv vg lv =
   in
 
   let devmapper_stat name =
-    if List.mem name (devmapper_ls ())
+    devmapper_ls () >>= fun all ->
+    if List.mem name all
     then Devmapper.stat name
-    else None
+    else Lwt.return None
   in
 
   let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
-  let info = devmapper_stat name in
-  Printf.sprintf "%c%c%c%c%c%c%c%c%c%c"
+
+  devmapper_stat name >>= fun info ->
+
+  Lwt.return (Printf.sprintf "%c%c%c%c%c%c%c%c%c%c"
     ('-')
     (if List.mem Lvm.Lv.Status.Write lv.Lvm.Lv.status
      then 'w'
@@ -98,7 +102,7 @@ let attr_of_lv vg lv =
     ('-')
     ('-')
     ('-')
-    ('-')
+    ('-'))
 
 let attr_of_vg vg =
   let open Lvm.Vg in
@@ -131,7 +135,7 @@ let all_fields = [
   {key="lv_name"; name="LV"; fn=Lv_fun (fun lv -> Literal lv.Lvm.Lv.name) };
   {key="vg_name"; name="VG"; fn=Vg_fun (fun vg -> Literal vg.Lvm.Vg.name) };
   {key="vg_extent_size"; name="Ext"; fn=Vg_fun (fun vg -> Size vg.Lvm.Vg.extent_size) };
-  {key="lv_attr"; name="Attr"; fn=VgLv_fun (fun (vg,lv) -> Literal (attr_of_lv vg lv)) };
+  {key="lv_attr"; name="Attr"; fn=VgLv_fun (fun (vg,lv) -> LiteralLwt (attr_of_lv vg lv)) };
   {key="lv_size"; name="LSize"; fn=VgLv_fun (fun (vg,lv) -> Size (Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv))) };
   {key="pool_lv"; name="Pool"; fn=Lv_fun (fun _ -> Literal "")};
   {key="origin"; name="Origin"; fn=Lv_fun (fun _ -> Literal "")};
@@ -203,8 +207,9 @@ let row_of (vg,pv_opt,lv_opt,seg_opt) nosuffix units output =
         | _,_,_,_ -> acc)
     | None -> acc) [] output |>
     List.map (function
-    | Literal x -> x
-    | Size y -> convert_size vg nosuffix units y) |> List.rev
+    | Literal x -> Lwt.return x
+    | Size y -> Lwt.return (convert_size vg nosuffix units y)
+    | LiteralLwt x -> x) |> List.rev
       
 let headings_of output =
   List.fold_left (fun acc name ->
@@ -225,7 +230,7 @@ type copts_t = {
 }
 
 let make_copts config uri_override sockpath_override mock_dm =
-  dm := if mock_dm then (module Devmapper.Mock : Devmapper.S.DEVMAPPER) else (module Devmapper.Linux : Devmapper.S.DEVMAPPER);
+  dm := if mock_dm then (module Retrymapper.Make(Devmapper.Mock) : S.RETRYMAPPER) else (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER);
   { uri_override; config; sockpath_override }
 
 let config =
