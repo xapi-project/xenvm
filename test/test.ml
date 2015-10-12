@@ -99,7 +99,6 @@ let start_local_allocator host devices =
   let config_file = Printf.sprintf "local_allocator.%s.conf" hostname in
   let config = {
     Config.Local_allocator.socket = get_local_allocator_sockpath host;
-    allocation_quantum = None;
     localJournal = Printf.sprintf "%s-localJournal" hostname;
     devices = devices;
     toLVM = Printf.sprintf "%s-toLVM" hostname;
