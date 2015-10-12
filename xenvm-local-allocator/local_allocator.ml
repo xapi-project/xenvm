@@ -204,7 +204,7 @@ let main use_mock config daemon socket journal fromLVM toLVM =
   } in
 
   Lwt_log.add_rule "*" Lwt_log.Debug;
-
+  Lwt_log.default := Lwt_log.channel ~close_mode:`Keep ~channel:Lwt_io.stdout ();
   dm := if use_mock then (module Retrymapper.Make(Devmapper.Mock): S.RETRYMAPPER) else (module Retrymapper.Make(Devmapper.Linux): S.RETRYMAPPER);
 
   let module D = (val !dm: S.RETRYMAPPER) in
@@ -223,18 +223,27 @@ let main use_mock config daemon socket journal fromLVM toLVM =
     info "Starting local allocator thread" >>= fun () ->
     debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config))
     >>= fun () ->
+    debug "pid=%d" (Unix.getpid ()) >>= fun () ->
 
-    begin
+    let rec retry n =
       let pidfile = config.socket ^ ".lock" in
       match Pidfile.write_pid pidfile with
       | `Ok _ -> Lwt.return ()
       | `Error (`Msg msg) ->
-        Log.error "Caught exception while writing pidfile: %s" msg >>= fun () ->
-        Log.error "The pidfile %s is locked: you cannot start the program twice!" pidfile >>= fun () ->
-        Log.error "If the process was shutdown cleanly then verify and remove the pidfile." >>= fun () ->
-        exit 1
-    end
-    >>= fun () ->
+	if n>0 then begin
+          Log.error "Caught possibly transient error while writing pidfile. Retrying" >>= fun () ->
+          Lwt_unix.sleep 5.0 >>= fun () ->
+          retry (n-1)
+        end else begin
+          Log.error "Caught exception while writing pidfile: %s" msg >>= fun () ->
+          Log.error "The pidfile %s is locked: you cannot start the program twice!" pidfile >>= fun () ->
+          Log.error "If the process was shutdown cleanly then verify and remove the pidfile." >>= fun () ->
+          Daemon.parent_should_exit oc 1 >>= fun () ->
+          exit 1
+        end
+    in
+
+    retry 1 >>= fun () ->
 
     Device.read_sector_size config.devices
     >>= fun sector_size ->
@@ -273,8 +282,6 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       >>= function
       | `Suspended ->
         info "The ToLVM queue has been suspended. We will acknowledge and exit"
-        >>= fun () ->
-        exit 0
       | `Running ->
         debug "The ToLVM queue is still running"
         >>= fun () ->
@@ -430,17 +437,14 @@ let main use_mock config daemon socket journal fromLVM toLVM =
       async (conn_handler fd);
       unix () in
     let listen_unix = unix () in
+    ignore(listen_unix, stdin);
     (* At this point, we ask our parent to exit *)
     Daemon.parent_should_exit oc 0
     >>= fun () ->
     debug "Waiting forever for requests"
     >>= fun () ->
-    Lwt.join (listen_unix :: (if daemon then [] else [ stdin () ]))
-    >>= fun () ->
-    debug "Stopped listening"
-    >>= fun () ->
-    return () in
-
+    wait_for_shutdown_forever ()
+  in
   try
     `Ok (Lwt_main.run t)
   with Failure msg ->
