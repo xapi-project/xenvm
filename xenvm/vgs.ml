@@ -67,7 +67,7 @@ let vgs copts noheadings nosuffix units fields vg_names =
         >>= fun vg ->
       Lwt.return (info,vg)) vg_names >>= fun vgs ->
     let rows = List.concat (List.map do_row vgs) in
-    let inner l = Lwt_list.fold_left_s (fun acc s -> s >>= fun s -> Lwt.return (s::acc)) [] l in
+    let inner l = Lwt_list.fold_left_s (fun acc s -> s >>= fun s -> Lwt.return (s::acc)) [] l >>= fun l -> Lwt.return (List.rev l) in
     inner (List.map inner rows) >>= fun rows ->
     let lines = print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows) in
     Lwt_list.iter_s (fun x -> stdout "%s" x) lines
