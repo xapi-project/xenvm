@@ -349,8 +349,9 @@ let main use_mock config daemon socket journal fromLVM toLVM =
         Lwt_mutex.with_lock m
           (fun () ->
              (* We may need to enlarge in multiple chunks if the free pool is depleted *)
-            D.stat device >>= fun s ->
-            let rec expand action = match s with
+            let rec expand action =
+              D.stat device >>= fun s ->
+              match s with
               | None ->
                 (* Log this kind of error. This tapdisk may block but at least
                    others will keep going *)
