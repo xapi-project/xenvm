@@ -21,13 +21,15 @@ let print_verbose vg lv =
       tm.tm_hour tm.tm_min tm.tm_sec in
 
   let device =
-    let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
+    let module Devmapper = (val !dm: S.RETRYMAPPER) in
     let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
-    match Devmapper.stat name with
+    Devmapper.stat name >>= fun s ->
+    match s with
     | Some info ->
-      Some (Printf.sprintf "%ld:%ld" info.Devmapper.major info.Devmapper.minor)
+      Lwt.return (Some (Printf.sprintf "%ld:%ld" info.Devmapper.major info.Devmapper.minor))
     | None ->
-      None in
+      Lwt.return (None) in
+  device >>= fun device ->
 
   let lines = [
     "--- Logical volume ---";
@@ -59,14 +61,16 @@ let print_verbose vg lv =
 *)
 let print_colon vg lv =
   let sectors = Int64.mul vg.Lvm.Vg.extent_size (Lvm.Lv.size_in_extents lv) in
-  let major, minor =
-    let module Devmapper = (val !dm: Devmapper.S.DEVMAPPER) in
+  let majorminor =
+    let module Devmapper = (val !dm: S.RETRYMAPPER) in
     let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
-    match Devmapper.stat name with
+    Devmapper.stat name >>= fun s ->
+    match s with
     | Some info ->
-      Int32.to_string info.Devmapper.major, Int32.to_string info.Devmapper.minor
+      Lwt.return (Int32.to_string info.Devmapper.major, Int32.to_string info.Devmapper.minor)
     | None ->
-      "-1", "-1" in
+      Lwt.return ("-1", "-1") in
+  majorminor >>= fun (major,minor) ->
   let parts = [
     Printf.sprintf "/dev/%s/%s" vg.Lvm.Vg.name lv.Lvm.Lv.name;
     vg.Lvm.Vg.name;

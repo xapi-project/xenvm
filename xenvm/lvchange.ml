@@ -11,7 +11,7 @@ let dev_path_of vg_name lv_name =
   Printf.sprintf "/dev/%s/%s" vg_name lv_name
 
 let activate vg lv local_device =
-  let module Devmapper = (val !Xenvm_common.dm: Devmapper.S.DEVMAPPER) in
+  let module Devmapper = (val !Xenvm_common.dm: S.RETRYMAPPER) in
   let path = dev_path_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   Lwt.catch (fun () -> Lwt_unix.mkdir (Filename.dirname path) 0x755) (fun _ -> Lwt.return ()) >>= fun () -> 
   Mapper.read [ local_device ]
@@ -19,12 +19,17 @@ let activate vg lv local_device =
   let targets = Mapper.to_targets devices vg lv in
   let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   (* Don't recreate it if it already exists *)
-  let all = Devmapper.ls () in
-  if not(List.mem name all)
-  then Devmapper.create name targets;
+  Devmapper.ls ()
+  >>= fun all ->
+  begin
+    if not(List.mem name all)
+    then Devmapper.create name targets
+    else Lwt.return ()
+  end
+  >>= fun () ->
   (* Recreate the device node *)
   Lwt.catch (fun () -> Lwt_unix.unlink path) (fun _ -> Lwt.return ()) >>= fun () ->
-  Devmapper.mknod name path 0o0600;
+  Devmapper.mknod name path 0o0600 >>= fun () ->
   return ()
 
 let lvchange_activate copts vg_name lv_name physical_device (offline:bool) : unit =
@@ -53,16 +58,17 @@ let lvchange_activate copts vg_name lv_name physical_device (offline:bool) : uni
   )
 
 let deactivate vg lv =
-  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
+  let module Devmapper = (val !Xenvm_common.dm : S.RETRYMAPPER) in
   let open Xenvm_common in
   let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
   (* This can fail with an EBUSY *)
   let rec retry n =
-    let all = Devmapper.ls () in
+    Devmapper.ls () >>= fun all ->
     let result =
       try
-        if List.mem name all then Devmapper.remove name;
-        return (`Ok ())
+        if List.mem name all
+        then Devmapper.remove name >>= fun () -> Lwt.return (`Ok ())
+        else return (`Ok ())
       with e ->
         stderr "Caught %s while removing dm device %s" (Printexc.to_string e) name
         >>= fun () ->
@@ -71,7 +77,7 @@ let deactivate vg lv =
     result >>= function
     | `Ok () -> return ()
     | `Retry ->
-      Unix.sleep 1;
+      Lwt_unix.sleep 1. >>= fun () ->
       retry (n - 1) in
   retry 30
   >>= fun () ->
@@ -81,15 +87,15 @@ let deactivate vg lv =
   Client.flush ~name:lv.Lvm.Lv.name
 
 let reload vg lv local_device =
-  let module Devmapper = (val !Xenvm_common.dm : Devmapper.S.DEVMAPPER) in
+  let module Devmapper = (val !Xenvm_common.dm : S.RETRYMAPPER) in
   let open Xenvm_common in
   Mapper.read [ local_device ]
   >>= fun devices ->
   let targets = Mapper.to_targets devices vg lv in
   let name = Mapper.name_of vg.Lvm.Vg.name lv.Lvm.Lv.name in
-  Devmapper.suspend name;
-  Devmapper.reload name targets;
-  Devmapper.resume name;
+  Devmapper.suspend name >>= fun () ->
+  Devmapper.reload name targets >>= fun () ->
+  Devmapper.resume name >>= fun () ->
   return ()
 
 let lvchange_deactivate copts vg_name lv_name =
