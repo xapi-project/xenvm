@@ -69,7 +69,7 @@ let lvs copts noheadings nosuffix units fields offline physical_device (vg_name,
         let lv = List.find (fun lv -> lv.Lvm.Lv.name = lv_name) lvs in
 	do_row dev vg lv
     in
-    let inner l = Lwt_list.fold_left_s (fun acc s -> s >>= fun s -> Lwt.return (s::acc)) [] l in
+    let inner l = Lwt_list.fold_left_s (fun acc s -> s >>= fun s -> Lwt.return (s::acc)) [] l >>= fun l -> Lwt.return (List.rev l) in
     inner (List.map inner rows) >>= fun rows ->
     let lines = print_table noheadings (" "::headings) (List.map (fun r -> " "::r) rows) in
     Lwt_list.iter_s (fun x -> stdout "%s" x) lines
