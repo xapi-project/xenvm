@@ -1,27 +1,6 @@
 open Lwt
 open Log
 
-type connected_host = {
-  mutable state : Xenvm_interface.connection_state;
-  to_LVM : Rings.ToLVM.consumer;
-  from_LVM : Rings.FromLVM.producer;
-  free_LV : string;
-  free_LV_uuid : Lvm.Vg.LVs.key;
-}
-
-module StringSet = Set.Make(String)
-let connecting_hosts : StringSet.t ref = ref StringSet.empty
-let connected_hosts : (string, connected_host) Hashtbl.t = Hashtbl.create 11
-
-let get_connected_hosts () =
-  Hashtbl.fold (fun k v acc -> (k,v)::acc) connected_hosts []
-
-let get_connected_host host =
-  try
-    Some (Hashtbl.find connected_hosts host)
-  with Not_found ->
-    None
-
 let connected_tag = "xenvm_connected"
 
 (* Conventional names of the metadata volumes *)
@@ -105,26 +84,27 @@ let connect name =
   let fromLVM = fromLVM name in
   let freeLVM = freeLVM name in
 
-  let is_connecting = StringSet.mem name (!connecting_hosts) in
-
-  begin if Hashtbl.mem connected_hosts name then begin
-    let connected_host = Hashtbl.find connected_hosts name in
-    match connected_host.state with
-    | Xenvm_interface.Failed msg ->
-      info "Connection to host %s has failed with %s: retrying" name msg
-      >>= fun () ->
-      Lwt.return true
-    | x ->
-      info "Connction to host %s in state %s" name (Jsonrpc.to_string (Xenvm_interface.rpc_of_connection_state x))
-      >>= fun () ->
-      Lwt.return false
-    end else Lwt.return true end
+  begin match Hostdb.get name with
+    | Hostdb.Connected connected_host -> begin
+        match connected_host.Hostdb.state with
+        | Xenvm_interface.Failed msg ->
+          info "Connection to host %s has failed with %s: retrying" name msg
+          >>= fun () ->
+          Lwt.return true
+        | x ->
+          info "Connction to host %s in state %s" name (Jsonrpc.to_string (Xenvm_interface.rpc_of_connection_state x))
+          >>= fun () ->
+          Lwt.return false
+      end
+    | Hostdb.Disconnected -> return true (* We should try again *)
+    | Hostdb.Connecting -> return false (* If we're already connecting, no need to do anything *)
+  end
   >>= fun try_again ->
 
-  if is_connecting || (not try_again) then begin
+  if (not try_again) then begin
     return ()
   end else begin
-    connecting_hosts := StringSet.add name !connecting_hosts;
+    Hostdb.set name Hostdb.Connecting;
     match Vg_io.find vg toLVM, Vg_io.find vg fromLVM, Vg_io.find vg freeLVM with
     | Some toLVM_id, Some fromLVM_id, Some freeLVM_id ->
       (* Persist at this point that we're going to connect this host *)
@@ -152,18 +132,17 @@ let connect name =
           | `Ok disk ->
             Rings.FromLVM.attach_as_producer ~name ~disk ()
             >>= fun (initial_state, fromLVM_q) ->
-            let connected_host = {
+            let connected_host = Hostdb.({
               state = Xenvm_interface.Resuming_to_LVM;
               from_LVM = fromLVM_q;
               to_LVM = toLVM_q;
               free_LV = freeLVM;
               free_LV_uuid = (Vg_io.Volume.metadata_of freeLVM_id).Lvm.Lv.id
-            } in
-            Hashtbl.replace connected_hosts name connected_host;
-            connecting_hosts := StringSet.remove name !connecting_hosts;
+            }) in
+            Hostdb.set name (Hostdb.Connected connected_host);
             ( if initial_state = `Suspended
               then begin
-                connected_host.state <- Xenvm_interface.Resending_free_blocks;
+                connected_host.Hostdb.state <- Xenvm_interface.Resending_free_blocks;
                 debug "The Rings.FromLVM queue was already suspended: resending the free blocks"
                 >>= fun () ->
                 let allocation = Lvm.Lv.to_allocation (Vg_io.Volume.metadata_of freeLVM_id) in
@@ -191,17 +170,16 @@ let connect name =
              (fun () ->
                 background_t ()
                 >>= fun connected_host ->
-                connected_host.state <- Xenvm_interface.Connected;
+                connected_host.Hostdb.state <- Xenvm_interface.Connected;
                 return ()
              ) (fun e ->
                  let msg = Printexc.to_string e in
                  error "Connecting to %s failed with: %s" name msg
                  >>= fun () ->
                  begin
-                   try
-                     let connected_host = Hashtbl.find connected_hosts name in
-                     connected_host.state <- Xenvm_interface.Failed msg;
-                   with Not_found -> ()
+                   match Hostdb.get name with
+                   | Hostdb.Connected ch -> ch.Hostdb.state <- Xenvm_interface.Failed msg
+                   | _ -> ()
                  end;
                  return ())
         );
@@ -209,7 +187,7 @@ let connect name =
     | _, _, _ ->
       info "At least one of host %s's volumes does not exist" name
       >>= fun () ->
-      connecting_hosts := StringSet.remove name !connecting_hosts;
+      Hostdb.set name Hostdb.Disconnected;
       fail Xenvm_interface.HostNotCreated
   end
 
@@ -217,11 +195,10 @@ let connect name =
 let flush_m = Lwt_mutex.create ()
 
 let flush_already_locked name =
-  if not (Hashtbl.mem connected_hosts name)
-  then return ()
-  else begin
-    let connected_host = Hashtbl.find connected_hosts name in
-    let to_lvm = connected_host.to_LVM in
+  match Hostdb.get name with
+  | Hostdb.Disconnected | Hostdb.Connecting -> return ()
+  | Hostdb.Connected connected_host ->
+    let to_lvm = connected_host.Hostdb.to_LVM in
     Rings.ToLVM.pop to_lvm
     >>= fun (pos, items) ->
     debug "Rings.FromLVM queue %s has %d items" name (List.length items)
@@ -231,43 +208,43 @@ let flush_already_locked name =
         >>= fun () ->
         Vg_io.write (fun vg ->
             let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
-            let free_id = connected_host.free_LV_uuid in
+            let free_id = connected_host.Hostdb.free_LV_uuid in
             Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvTransfer(free_id, id, segments)))
           ) >>= fun _ -> Lwt.return ()
       ) items
     >>= fun () ->
     Rings.ToLVM.c_advance to_lvm pos
-  end
 
 let disconnect ~cooperative name =
-  if StringSet.mem name !connecting_hosts then
+  match Hostdb.get name with
+  | Hostdb.Disconnected -> return ()
+  | Hostdb.Connecting ->
     fail (Xenvm_interface.(HostStillConnecting (Jsonrpc.to_string (rpc_of_connection_state Xenvm_interface.Resuming_to_LVM))))
-  else
-  if Hashtbl.mem connected_hosts name then begin
-    let connected_host = Hashtbl.find connected_hosts name in
-    match connected_host.state with
-    | Xenvm_interface.Connected ->
-      let to_lvm = connected_host.to_LVM in
-      ( if cooperative then begin
-            debug "Cooperative disconnect: suspending Rings.ToLVM queue for %s" name
-            >>= fun () ->
-            Rings.ToLVM.suspend to_lvm
-          end else return ()
-      ) >>= fun () ->
-      (* There may still be updates in the Rings.ToLVM queue *)
-      debug "Flushing Rings.ToLVM queue for %s" name
-      >>= fun () ->
-      Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
-      >>= fun () ->
-      let toLVM = toLVM name in
-      Vg_io.write (fun vg ->
-          Lvm.Vg.remove_tag vg toLVM connected_tag
-        ) >>= fun _ ->
-      Hashtbl.remove connected_hosts name;
-      return ()
-    | x ->
-      fail (Xenvm_interface.(HostStillConnecting (Jsonrpc.to_string (rpc_of_connection_state x))))
-  end else return ()
+  | Hostdb.Connected connected_host ->
+    begin
+      match connected_host.Hostdb.state with
+      | Xenvm_interface.Connected ->
+        let to_lvm = connected_host.Hostdb.to_LVM in
+        ( if cooperative then begin
+              debug "Cooperative disconnect: suspending Rings.ToLVM queue for %s" name
+              >>= fun () ->
+              Rings.ToLVM.suspend to_lvm
+            end else return ()
+        ) >>= fun () ->
+        (* There may still be updates in the Rings.ToLVM queue *)
+        debug "Flushing Rings.ToLVM queue for %s" name
+        >>= fun () ->
+        Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
+        >>= fun () ->
+        let toLVM = toLVM name in
+        Vg_io.write (fun vg ->
+            Lvm.Vg.remove_tag vg toLVM connected_tag
+          ) >>= fun _ ->
+        Hostdb.set name Hostdb.Disconnected;
+        return ()
+      | x ->
+        fail (Xenvm_interface.(HostStillConnecting (Jsonrpc.to_string (rpc_of_connection_state x))))
+    end
 
 let destroy name =
   disconnect ~cooperative:false name
@@ -287,34 +264,40 @@ let destroy name =
   Lwt.return ()
 
 let all () =
-  let list = Hashtbl.fold (fun n c acc -> (n,c)::acc) connected_hosts [] in
+  let all = Hostdb.all () in
   Lwt_list.map_s
-    (fun (name, connected_host) ->
-       let lv = toLVM name in
-       let t = connected_host.to_LVM in
-       ( Rings.ToLVM.c_state t >>= function
-           | `Suspended -> return true
-           | `Running -> return false ) >>= fun suspended ->
-       Rings.ToLVM.c_debug_info t
-       >>= fun debug_info ->
-       let toLVM = { Xenvm_interface.lv; suspended; debug_info } in
-       let lv = fromLVM name in
-       let t = connected_host.from_LVM in
-       ( Rings.FromLVM.p_state t >>= function
-           | `Suspended -> return true
-           | `Running -> return false ) >>= fun suspended ->
-       Rings.FromLVM.p_debug_info t
-       >>= fun debug_info ->
-       let fromLVM = { Xenvm_interface.lv; suspended; debug_info } in
-       Vg_io.read (fun vg ->
-           try
-             let lv = Lvm.Vg.LVs.find_by_name (freeLVM name) vg.Lvm.Vg.lvs in
-             return (Lvm.Lv.size_in_extents lv)
-           with Not_found -> return 0L
-         ) >>= fun freeExtents ->
-       let connection_state = Some connected_host.state in
-       return { Xenvm_interface.name; connection_state; fromLVM; toLVM; freeExtents }
-    ) list
+    (fun (name,state) ->
+       match state with
+       | Hostdb.Connected connected_host ->
+         let lv = toLVM name in
+         let t = connected_host.Hostdb.to_LVM in
+         ( Rings.ToLVM.c_state t >>= function
+             | `Suspended -> return true
+             | `Running -> return false ) >>= fun suspended ->
+         Rings.ToLVM.c_debug_info t
+         >>= fun debug_info ->
+         let toLVM = { Xenvm_interface.lv; suspended; debug_info } in
+         let lv = fromLVM name in
+         let t = connected_host.Hostdb.from_LVM in
+         ( Rings.FromLVM.p_state t >>= function
+             | `Suspended -> return true
+             | `Running -> return false ) >>= fun suspended ->
+         Rings.FromLVM.p_debug_info t
+         >>= fun debug_info ->
+         let fromLVM = { Xenvm_interface.lv; suspended; debug_info } in
+         Vg_io.read (fun vg ->
+             try
+               let lv = Lvm.Vg.LVs.find_by_name (freeLVM name) vg.Lvm.Vg.lvs in
+               return (Lvm.Lv.size_in_extents lv)
+             with Not_found -> return 0L
+           ) >>= fun freeExtents ->
+         let connection_state = Some connected_host.Hostdb.state in
+         return (Some ({ Xenvm_interface.name; connection_state; fromLVM; toLVM; freeExtents }))
+       | _ -> return None
+    ) all
+  >>= fun l -> 
+  Lwt.return (List.rev (List.fold_left (fun acc entry -> match entry with Some e -> e::acc | None -> acc) [] l))
+
 
 let reconnect_all () =
   Vg_io.read (fun vg ->
@@ -341,11 +324,19 @@ let flush_one host =
     (fun () -> flush_already_locked host)
 
 let flush_all () =
-  let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
-  Lwt_list.iter_s flush_one hosts
+  let all = Hostdb.all () in
+  Lwt_list.iter_s
+    (fun (h, state) ->
+       match state with
+       | Hostdb.Connected _ -> flush_one h
+       | _ -> return ()) all
 
 let shutdown () =
-  let hosts = Hashtbl.fold (fun h _ acc -> h::acc) connected_hosts [] in
-  Lwt_list.iter_s (disconnect ~cooperative:true) hosts
+  let all = Hostdb.all () in
+  Lwt_list.iter_s
+    (fun (h, state) ->
+       match state with
+       | Hostdb.Connected _ -> disconnect ~cooperative:true h
+       | _ -> return ()) all
   >>= fun () ->
   Vg_io.sync ()
