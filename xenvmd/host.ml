@@ -3,6 +3,43 @@ open Log
 
 let connected_tag = "xenvm_connected"
 
+(* Hold this mutex when actively flushing from the Rings.ToLVM queues *)
+let flush_m = Lwt_mutex.create ()
+
+let flush_already_locked name =
+  match Hostdb.get name with
+  | Hostdb.Disconnected | Hostdb.Connecting -> return ()
+  | Hostdb.Connected connected_host ->
+    let to_lvm = connected_host.Hostdb.to_LVM in
+    Rings.ToLVM.pop to_lvm
+    >>= fun (pos, items) ->
+    debug "Rings.FromLVM queue %s has %d items" name (List.length items)
+    >>= fun () ->
+    Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
+        debug "Expanding volume %s" volume
+        >>= fun () ->
+        Vg_io.write (fun vg ->
+            let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
+            let free_id = connected_host.Hostdb.free_LV_uuid in
+            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvTransfer(free_id, id, segments)))
+          ) >>= fun _ -> Lwt.return ()
+      ) items
+    >>= fun () ->
+    Rings.ToLVM.c_advance to_lvm pos
+
+let flush_one host =
+  Lwt_mutex.with_lock flush_m
+    (fun () -> flush_already_locked host)
+
+let flush_all () =
+  let all = Hostdb.all () in
+  Lwt_list.iter_s
+    (fun (h, state) ->
+       match state with
+       | Hostdb.Connected _ -> flush_one h
+       | _ -> return ()) all
+
+
 (* Conventional names of the metadata volumes *)
 let toLVM host = host ^ "-toLVM"
 let fromLVM host = host ^ "-fromLVM"
@@ -191,30 +228,6 @@ let connect name =
       fail Xenvm_interface.HostNotCreated
   end
 
-(* Hold this mutex when actively flushing from the Rings.ToLVM queues *)
-let flush_m = Lwt_mutex.create ()
-
-let flush_already_locked name =
-  match Hostdb.get name with
-  | Hostdb.Disconnected | Hostdb.Connecting -> return ()
-  | Hostdb.Connected connected_host ->
-    let to_lvm = connected_host.Hostdb.to_LVM in
-    Rings.ToLVM.pop to_lvm
-    >>= fun (pos, items) ->
-    debug "Rings.FromLVM queue %s has %d items" name (List.length items)
-    >>= fun () ->
-    Lwt_list.iter_s (function { ExpandVolume.volume; segments } ->
-        debug "Expanding volume %s" volume
-        >>= fun () ->
-        Vg_io.write (fun vg ->
-            let id = (Lvm.Vg.LVs.find_by_name volume vg.Lvm.Vg.lvs).Lvm.Lv.id in
-            let free_id = connected_host.Hostdb.free_LV_uuid in
-            Lvm.Vg.do_op vg (Lvm.Redo.Op.(LvTransfer(free_id, id, segments)))
-          ) >>= fun _ -> Lwt.return ()
-      ) items
-    >>= fun () ->
-    Rings.ToLVM.c_advance to_lvm pos
-
 let disconnect ~cooperative name =
   match Hostdb.get name with
   | Hostdb.Disconnected -> return ()
@@ -319,18 +332,6 @@ let reconnect_all () =
   Lwt_list.iter_s (fun (host, was_connected) ->
       if was_connected then connect host else disconnect ~cooperative:false host) host_states
 
-let flush_one host =
-  Lwt_mutex.with_lock flush_m
-    (fun () -> flush_already_locked host)
-
-let flush_all () =
-  let all = Hostdb.all () in
-  Lwt_list.iter_s
-    (fun (h, state) ->
-       match state with
-       | Hostdb.Connected _ -> flush_one h
-       | _ -> return ()) all
-
 let shutdown () =
   let all = Hostdb.all () in
   Lwt_list.iter_s
@@ -340,3 +341,5 @@ let shutdown () =
        | _ -> return ()) all
   >>= fun () ->
   Vg_io.sync ()
+
+
