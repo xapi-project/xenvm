@@ -81,9 +81,10 @@ let format config name filenames =
 
 (* LVM locking code can be seen here:
  * https://git.fedorahosted.org/cgit/lvm2.git/tree/lib/misc/lvm-flock.c#n141 *)
-let with_lvm_lock vg_name f =
-  let lock_path = Filename.concat "/run/lock/lvm" ("V_" ^ vg_name ^ ":aux") in
-  Flock.with_flock lock_path f
+let with_lvm_lock config vg_name f =
+  if config.mock_dm then f () else
+    let lock_path = Filename.concat "/run/lock/lvm" ("V_" ^ vg_name ^ ":aux") in
+    Flock.with_flock lock_path f
 
 (* Change the label on the PV and revert it if the function [f] fails *)
 let with_label_change block magic f =
@@ -99,7 +100,7 @@ let with_label_change block magic f =
 let upgrade config physical_device (vg_name, _) =
   let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
   let t =
-    with_lvm_lock vg_name (fun () ->
+    with_lvm_lock config vg_name (fun () ->
       with_block physical_device (fun block ->
         (* Change the label magic to be Journalled to hide from LVM *)
         with_label_change block `Journalled (fun () ->
@@ -124,7 +125,7 @@ let upgrade config physical_device (vg_name, _) =
 let downgrade config physical_device (vg_name, _) =
   let module Vg_IO = Vg.Make(Log)(Block)(Time)(Clock) in
   let t =
-    with_lvm_lock vg_name (fun () ->
+    with_lvm_lock config vg_name (fun () ->
       with_block physical_device (fun block ->
         (* Change the label magic to be LVM to hide from XenVM *)
         with_label_change block `Lvm (fun () ->

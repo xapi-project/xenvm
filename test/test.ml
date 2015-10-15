@@ -62,6 +62,20 @@ let set_vg_info pvpath vg host =
           "--uri"; "file://local/services/xenvmd/"^vg ]
   |> ignore_string
 
+let is_xenvmd_ok vg =
+  try
+    ignore(xenvm [ "host-list"; vg ]);
+    true
+  with _ ->
+    false
+
+let wait_for_xenvmd_to_start vg =
+  let rec retry () =
+    if is_xenvmd_ok vg
+    then ()
+    else (Thread.delay 0.1; retry ())
+  in retry ()
+
 let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
   let host = 1 in
   let with_xenvmd_running loop =
@@ -77,7 +91,8 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
       } in
       Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config)
       |> file_of_string "test.xenvmd.conf";
-      xenvmd [ "--config"; "./test.xenvmd.conf"; "--daemon" ] |> ignore_string;
+      let _ = Lwt_preemptive.detach (fun () -> xenvmd [ "--config"; "./test.xenvmd.conf" ]) () in
+      wait_for_xenvmd_to_start vg;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
       finally
@@ -92,6 +107,27 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
         with_xenvmd_running loop
       )
     )
+
+let la_has_started host =
+  let dm_name = "XXXdoesntexistXXX" in
+  let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
+  let sockpath = get_local_allocator_sockpath host in
+  Lwt.catch
+    (fun () ->
+       Lwt_unix.connect s (Unix.ADDR_UNIX sockpath)
+       >>= fun () ->
+       let oc = Lwt_io.of_fd ~mode:Lwt_io.output s in
+       let r = { ResizeRequest.local_dm_name = dm_name; action = `Absolute 0L } in
+       Lwt_io.write_line oc (Sexplib.Sexp.to_string (ResizeRequest.sexp_of_t r))
+       >>= fun () ->
+       let ic = Lwt_io.of_fd ~mode:Lwt_io.input ~close:return s in
+       Lwt_io.read_line ic
+       >>= fun txt ->
+       let _ = ResizeResponse.t_of_sexp (Sexplib.Sexp.of_string txt) in
+       Lwt_io.close oc >>= fun () ->
+       Lwt.return true)
+    (fun _ ->
+       Lwt.return false)
 
 let start_local_allocator host devices =
   let hostname = get_hostname host in
@@ -108,7 +144,17 @@ let start_local_allocator host devices =
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
   |> file_of_string config_file;
   ignore(xenvm [ "host-connect"; vg; hostname]);
-  ignore(local_allocator [ "--config"; config_file; "--daemon"])
+  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator [ "--config"; config_file ]) () in
+  la_thread
+
+let wait_for_local_allocator_to_start host =
+  let rec retry () =
+    la_has_started host >>=
+    fun started ->
+    if started
+    then Lwt.return ()
+    else (Lwt_unix.sleep 0.1 >>= fun () -> retry ())
+  in retry ()
 
 let lvchange_offline =
   "lvchange vg/lv --offline: check that we can activate volumes offline" >::
@@ -461,33 +507,17 @@ let xenvmd_suite = "Commands which require xenvmd" >::: [
 
 exception Timeout
 
-let la_is_running host =
-  let pidfile = Printf.sprintf "%s.lock" (get_local_allocator_sockpath host) in
-  match Pidfile.write_pid pidfile with
-  | `Ok fd ->
-    (* It clearly wasn't running, as we've got the lock *)
-    Unix.close fd;
-    Unix.unlink pidfile;
-    false
-  | `Error _ ->
-    (* It's still running *)
-    true
-
-let rec wait_la_stop host =
-  if la_is_running host then
-    Lwt_unix.sleep 0.1 >>= fun () -> wait_la_stop host
-  else Lwt.return ()
-
 let la_start device =
   "Start and shutdown the local allocator" >::
   (fun () ->
      ignore(Lwt_main.run (
          let rec n_times n =
            if n=0 then Lwt.return () else begin
-             start_local_allocator 1 [device];
+             let la_thread = start_local_allocator 1 [device] in
+             wait_for_local_allocator_to_start 1 >>= fun () ->
              ignore(xenvm ["host-disconnect"; vg; "host1"]);
-             Lwt.choose [wait_la_stop 1; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
-             >>= fun () ->
+             Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
+             >>= fun _ ->
              n_times (n-1)
            end
          in
@@ -499,7 +529,8 @@ let la_extend device =
   (fun () ->
      ignore(Lwt_main.run (
          let lvname = "test" in
-         start_local_allocator 1 [device];
+         let la_thread = start_local_allocator 1 [device] in
+         wait_for_local_allocator_to_start 1 >>= fun () ->
          ignore(xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
          ignore(xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
          Lwt_unix.sleep 11.0 >>= fun () ->
@@ -510,7 +541,9 @@ let la_extend device =
          assert_equal ~msg:"Unexpected final size"
            ~printer:Int64.to_string 31L size;
          ignore(xenvm ["host-disconnect"; vg; "host1"]);
-         Lwt.choose [wait_la_stop 1; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)])))
+         Lwt.choose [la_thread; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
+         >>= fun _ ->
+         Lwt.return ())))
 
 let inparallel fns =
   Lwt.join (
@@ -523,8 +556,10 @@ let la_extend_multi device =
      ignore(Lwt_main.run (
          let lvname = "test2" in
          let lvname2 = "test3" in
-         start_local_allocator 1 [device];
-         start_local_allocator 2 [device];
+         let la_thread_1 = start_local_allocator 1 [device] in
+         let la_thread_2 = start_local_allocator 2 [device] in
+         wait_for_local_allocator_to_start 1 >>= fun () ->
+         wait_for_local_allocator_to_start 2 >>= fun () ->
          set_vg_info device vg 2;
          inparallel [(fun () -> xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
                      (fun () -> xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg])]
@@ -551,7 +586,7 @@ let la_extend_multi device =
                   assert_equal ~msg:"Unexpected final size"
            ~printer:Int64.to_string 33L size2;
 
-         let la_dead = wait_la_stop 1 >>= fun _ -> wait_la_stop 2 in
+         let la_dead = la_thread_1 >>= fun _ -> la_thread_2 >>= fun _ -> Lwt.return () in
          Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
        )))
 
