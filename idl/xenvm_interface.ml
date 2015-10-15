@@ -1,8 +1,8 @@
 (* XenVM LVM type thing *)
 
 exception HostNotCreated
-
 exception HostStillConnecting of string
+exception UnknownFistPoint of string
 
 let _journal_name = "xenvm_journal"
 
@@ -78,4 +78,9 @@ module Host = struct
       name [host] *)
 
   external all: unit -> host list = ""
+end
+
+module Fist = struct
+  external set : string -> bool -> unit = ""
+  external list : unit -> (string * bool) list = ""
 end

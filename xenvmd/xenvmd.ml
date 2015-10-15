@@ -87,6 +87,14 @@ module Impl = struct
     let destroy context ~name = Host.destroy name
     let all context () = Host.all ()
   end
+
+  module Fist = struct
+    let set context point value =
+      match Fist.t_of_string point with
+      | Some t -> return (Fist.set t value)
+      | None -> raise (Xenvm_interface.UnknownFistPoint point)
+    let list context () = return (Fist.list ())
+  end
 end
 
 module XenvmServer = Xenvm_interface.ServerM(Impl)
