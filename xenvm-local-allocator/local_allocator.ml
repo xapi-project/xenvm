@@ -495,7 +495,10 @@ let mock_dm_arg =
   Arg.(value & flag & info ["mock-devmapper"] ~doc)
 
 let () =
-  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  Sys.(
+    set_signal sigpipe Signal_ignore;
+    set_signal sigterm (Signal_handle (fun _ -> exit (128+sigterm))));
+
   let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1

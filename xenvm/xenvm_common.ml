@@ -227,11 +227,12 @@ type copts_t = {
   uri_override : string option; (* CLI set URI override *)
   sockpath_override : string option; (* CLI set unix domain socket path override *)
   config : string;
+  mock_dm : bool;
 }
 
 let make_copts config uri_override sockpath_override mock_dm =
   dm := if mock_dm then (module Retrymapper.Make(Devmapper.Mock) : S.RETRYMAPPER) else (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER);
-  { uri_override; config; sockpath_override }
+  { uri_override; config; sockpath_override; mock_dm }
 
 let config =
   let doc = "Path to the config directory" in
