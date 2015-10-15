@@ -103,6 +103,8 @@ let perform_expand_free ef connected_host =
   >>= fun () ->
   Lwt_list.iter_s (fun msg -> debug "%s" msg) !msgs
   >>= fun () ->
+  Fist.maybe_lwt_fail Fist.freepool_fail_point1
+  >>= fun () ->
   read (fun vg ->
       let current_allocation = allocation_of_lv vg connected_host.Host.free_LV_uuid in
       let old_allocation = ef.old_allocation in
@@ -112,6 +114,10 @@ let perform_expand_free ef connected_host =
   Rings.FromLVM.push connected_host.Host.from_LVM allocation
   >>= fun pos ->
   Rings.FromLVM.p_advance connected_host.Host.from_LVM pos
+  >>= fun result ->
+  Fist.maybe_lwt_fail Fist.freepool_fail_point2
+  >>= fun () ->
+  Lwt.return result
 
 let perform t =
   debug "%s" (Journal.Op.sexp_of_t t |> Sexplib.Sexp.to_string_hum)
