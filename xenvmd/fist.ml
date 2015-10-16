@@ -12,7 +12,9 @@ let all = Hashtbl.create 10
 
 let _ =
   Hashtbl.replace all dummy false;
-  Hashtbl.replace all freepool_fail_point1 false
+  Hashtbl.replace all freepool_fail_point0 false;
+  Hashtbl.replace all freepool_fail_point1 false;
+  Hashtbl.replace all freepool_fail_point2 false
     
 
 let get k = Hashtbl.find all k
@@ -23,4 +25,7 @@ let t_of_string str : t option =
   if Hashtbl.mem all str then Some str else None
 
 let maybe_exn k = if get k then raise (FistPointHit k)
-let maybe_lwt_fail k = if get k then Lwt.fail (FistPointHit k) else Lwt.return ()
+let maybe_lwt_fail k =
+  if get k then
+    Lwt.(Log.error "Causing Lwt thread failure due to fist point: %s" k >>= fun () -> Lwt.fail (FistPointHit k))
+  else Lwt.return ()
