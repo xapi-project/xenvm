@@ -162,43 +162,45 @@ let shutdown () =
   | None ->
     return ()
 
-let resend_free_volumes () =
+let resend_free_volume_to connected_host =
   fatal_error "resend_free_volumes unable to read LVM metadata"
     ( read (fun x -> return (`Ok x)) )
   >>= fun lvm ->
+  (* XXX: need to lock the host somehow. Ideally we would still service
+          other queues while one host is locked. *)
+  let from_lvm = connected_host.Hostdb.from_LVM in
+  let freeid = connected_host.Hostdb.free_LV_uuid in
+  let freename = connected_host.Hostdb.free_LV in
+  Rings.FromLVM.p_state from_lvm
+  >>= begin function
+    | `Running -> return ()
+    | `Suspended ->
+      let rec wait () =
+        Rings.FromLVM.p_state from_lvm
+        >>= function
+        | `Suspended ->
+          Lwt_unix.sleep 0.5
+          >>= fun () ->
+          wait ()
+        | `Running -> return () in
+      wait ()
+      >>= fun () ->
+      fatal_error "resend_free_volumes"
+        ( match try Some(Lvm.Vg.LVs.find freeid lvm.Lvm.Vg.lvs) with _ -> None with
+            | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
+            | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" freename))) )
+      >>= fun allocation ->
+      Rings.FromLVM.push from_lvm allocation
+      >>= fun pos ->
+      Rings.FromLVM.p_advance from_lvm pos
+  end
 
+let resend_free_volumes () =
   let all = Hostdb.all () in
   Lwt_list.iter_s
     (function
       | host, Hostdb.Connected connected_host ->
-       (* XXX: need to lock the host somehow. Ideally we would still service
-          other queues while one host is locked. *)
-        let from_lvm = connected_host.Hostdb.from_LVM in
-        let freeid = connected_host.Hostdb.free_LV_uuid in
-        let freename = connected_host.Hostdb.free_LV in
-        Rings.FromLVM.p_state from_lvm
-        >>= begin function
-          | `Running -> return ()
-          | `Suspended ->
-            let rec wait () =
-              Rings.FromLVM.p_state from_lvm
-              >>= function
-              | `Suspended ->
-                Lwt_unix.sleep 5.
-                >>= fun () ->
-                wait ()
-              | `Running -> return () in
-            wait ()
-            >>= fun () ->
-            fatal_error "resend_free_volumes"
-              ( match try Some(Lvm.Vg.LVs.find freeid lvm.Lvm.Vg.lvs) with _ -> None with
-                  | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
-                  | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" freename))) )
-            >>= fun allocation ->
-            Rings.FromLVM.push from_lvm allocation
-            >>= fun pos ->
-            Rings.FromLVM.p_advance from_lvm pos
-        end
+        resend_free_volume_to connected_host
       | host, _ ->
         Lwt.return ()        
     ) all
@@ -226,11 +228,17 @@ let top_up_host config host connected_host =
                extra_size=config.host_allocation_quantum })
         >>|= fun wait ->
         wait.Journal.J.sync ()
+        >>= fun () ->
+        Lwt.return true
       | None ->
         error "No journal configured!"
-    end else return ()
+        >>= fun () ->
+        Lwt.return false
+    end else return false
   | None ->
     error "Host has disappeared!"
+    >>= fun () ->
+    Lwt.return false
 
 let top_up_free_volumes config =
   let hosts = Hostdb.all () in
@@ -238,5 +246,7 @@ let top_up_free_volumes config =
     (function
       | host, Hostdb.Connected connected_host ->
         top_up_host config host connected_host
+        >>= fun _ ->
+        Lwt.return ()
       | _ -> Lwt.return ()
     ) hosts

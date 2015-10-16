@@ -8,7 +8,7 @@ let flush_m = Lwt_mutex.create ()
 
 let flush_already_locked name =
   match Hostdb.get name with
-  | Hostdb.Disconnected | Hostdb.Connecting -> return ()
+  | Hostdb.Disconnected | Hostdb.Connecting -> return false
   | Hostdb.Connected connected_host ->
     let to_lvm = connected_host.Hostdb.to_LVM in
     Rings.ToLVM.pop to_lvm
@@ -26,6 +26,8 @@ let flush_already_locked name =
       ) items
     >>= fun () ->
     Rings.ToLVM.c_advance to_lvm pos
+    >>= fun () ->
+    Lwt.return (List.length items > 0)
 
 let flush_one host =
   Lwt_mutex.with_lock flush_m
@@ -36,9 +38,29 @@ let flush_all () =
   Lwt_list.iter_s
     (fun (h, state) ->
        match state with
-       | Hostdb.Connected _ -> flush_one h
+       | Hostdb.Connected _ -> flush_one h >>= fun _ -> Lwt.return ()
        | _ -> return ()) all
 
+let service_host config host =
+  let rec inner n =
+    match Hostdb.get host with
+    | Hostdb.Connected connected_host ->
+      (* 0. Have any local allocators restarted? *)
+      Freepool.resend_free_volume_to connected_host
+      >>= fun () ->
+      (* 1. Do any of the host free LVs need topping up? *)
+      Freepool.top_up_host config host connected_host
+      >>= fun topped_up ->
+      (* 2. Are there any pending LVM updates from hosts? *)
+      flush_one host
+      >>= fun la_activity ->
+      let activity = topped_up || la_activity in
+      Lwt_unix.sleep (Errors.delayfn n)
+      >>= fun () ->
+      inner (if activity then 0 else n+1)
+    | _ ->
+      Lwt.return () in
+  inner 0
 
 (* Conventional names of the metadata volumes *)
 let toLVM host = host ^ "-toLVM"
@@ -113,7 +135,7 @@ let create name =
 
 let sexp_of_exn e = Sexplib.Sexp.Atom (Printexc.to_string e)
 
-let connect name =
+let connect config name =
   Vg_io.myvg >>= fun vg ->
   info "Registering host %s" name
   >>= fun () ->
@@ -208,6 +230,7 @@ let connect name =
                 background_t ()
                 >>= fun connected_host ->
                 connected_host.Hostdb.state <- Xenvm_interface.Connected;
+                let _ = service_host config name in
                 return ()
              ) (fun e ->
                  let msg = Printexc.to_string e in
@@ -248,7 +271,7 @@ let disconnect ~cooperative name =
         debug "Flushing Rings.ToLVM queue for %s" name
         >>= fun () ->
         Lwt_mutex.with_lock flush_m (fun () -> flush_already_locked name)
-        >>= fun () ->
+        >>= fun _ ->
         let toLVM = toLVM name in
         Vg_io.write (fun vg ->
             Lvm.Vg.remove_tag vg toLVM connected_tag
@@ -312,7 +335,7 @@ let all () =
   Lwt.return (List.rev (List.fold_left (fun acc entry -> match entry with Some e -> e::acc | None -> acc) [] l))
 
 
-let reconnect_all () =
+let reconnect_all config =
   Vg_io.read (fun vg ->
       debug "Reconnecting"
       >>= fun () ->
@@ -330,7 +353,7 @@ let reconnect_all () =
         vg.Lvm.Vg.lvs [] |> Lwt.return
     ) >>= fun host_states ->
   Lwt_list.iter_s (fun (host, was_connected) ->
-      if was_connected then connect host else disconnect ~cooperative:false host) host_states
+      if was_connected then connect config host else disconnect ~cooperative:false host) host_states
 
 let shutdown () =
   let all = Hostdb.all () in
