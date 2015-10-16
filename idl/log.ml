@@ -11,6 +11,8 @@ let info fmt = Lwt_log.info_f fmt
 let warn fmt = Lwt_log.warning_f fmt
 let error fmt = Lwt_log.error_f fmt
 
+let trace_section = Lwt_log.Section.make "trace"
+
 let trace ts =
   let string_of_key = function
   | `Producer -> "producer"
@@ -25,4 +27,4 @@ let trace ts =
     Printf.sprintf "%s.%s := %s" queue (string_of_key key) (string_of_value value)
   | `Get (__, queue, key, value) ->
     Printf.sprintf "%s.%s == %s" queue (string_of_key key) (string_of_value value) in
-  info "%s" (String.concat ", " (List.map one ts))
+  Lwt_log.info_f ~section:trace_section "%s" (String.concat ", " (List.map one ts))
