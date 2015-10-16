@@ -37,14 +37,16 @@ let delayfn n =
   if n>10 then 5.0 else (float_of_int n *. 0.5)
 
 let rec retry_forever f =
-  f ()
-  >>= function
-  | `Ok x -> return (`Ok x)
-  | `Error `Retry ->
-    Lwt_unix.sleep 5.
-    >>= fun () ->
-    retry_forever f
-  | `Error x -> return (`Error x)
+  let rec inner n =
+    f ()
+    >>= function
+    | `Ok x -> return (`Ok x)
+    | `Error `Retry ->
+      Lwt_unix.sleep (delayfn n)
+      >>= fun () ->
+      inner (n+1)
+    | `Error x -> return (`Error x)
+  in inner 0
 
 let wait_for f result =
   let new_f () =
