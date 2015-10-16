@@ -113,12 +113,16 @@ module FreePool = struct
       FromLVM.resume from_lvm
       >>= fun () ->
 
-      let rec loop_forever () =
+      (* n here is the number of times we've been 
+         around the loop without activity. we use
+         it to calculate the delay until next
+         poll. *)
+      let rec loop_forever n =
         FromLVM.pop from_lvm
         >>= fun (pos, ts) ->
         let open FreeAllocation in
         ( if ts = [] then begin
-            Lwt_unix.sleep 5.
+            Lwt_unix.sleep (delayfn n)
           end else return ()
         ) >>= fun () ->
         Lwt_list.iter_s
@@ -130,7 +134,7 @@ module FreePool = struct
         >>= fun () ->
         FromLVM.c_advance from_lvm pos
         >>= fun () ->
-        loop_forever () in
+        loop_forever (if ts = [] then n+1 else 0) in
       return loop_forever
 end
 
@@ -341,7 +345,7 @@ let main mock_dm config daemon socket journal fromLVM toLVM =
 
     FreePool.start config vg
     >>= fun forever_fun ->
-    let (_: unit Lwt.t) = forever_fun () in
+    let (_: unit Lwt.t) = forever_fun 0 in
     let (_: unit Lwt.t) = wait_for_shutdown_forever () in
 
     (* Called to extend a single device. This function decides what needs to be

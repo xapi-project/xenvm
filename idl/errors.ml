@@ -33,6 +33,9 @@ let fatal_error msg m = m >>= function
   | `Error `Retry -> fatal_error_t (msg ^ ": queue temporarily unavailable")
   | `Ok x -> return x
 
+let delayfn n =
+  if n>10 then 5.0 else (float_of_int n *. 0.5)
+
 let rec retry_forever f =
   f ()
   >>= function
