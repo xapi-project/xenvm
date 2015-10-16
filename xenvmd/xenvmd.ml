@@ -92,7 +92,9 @@ module Impl = struct
   module Fist = struct
     let set context point value =
       match Fist.t_of_string point with
-      | Some t -> return (Fist.set t value)
+      | Some t ->
+        debug "Setting fist point: %s=%b" point value >>= fun () ->
+        return (Fist.set t value)
       | None -> raise (Xenvm_interface.UnknownFistPoint point)
     let list context () = return (Fist.list ())
   end
@@ -127,8 +129,15 @@ let maybe_write_pid config =
         exit 1
     end
 
-let run port sock_path config =
+let run port sock_path config log_filename =
   let t =
+    (match log_filename with
+     | Some f ->
+       Lwt_log.file ~mode:`Truncate ~file_name:f () >>= fun logger ->
+       Lwt_log.default := logger;
+       Lwt.return ()
+     | None -> Lwt.return ())
+    >>= fun () ->
     maybe_write_pid config
     >>= fun () ->
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config))
@@ -246,7 +255,7 @@ let daemonize config =
   end;
   Lwt_daemon.daemonize ()
   
-let main port sock_path config daemon =
+let main port sock_path config daemon log =
   let open Config.Xenvmd in
   Sys.(set_signal sigterm (Signal_handle (fun _ -> exit (128+sigterm))));
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
@@ -255,9 +264,15 @@ let main port sock_path config daemon =
 
   Lwt_log.add_rule "*" Lwt_log.Debug;
 
+  let log_filename =
+    match log with
+    | Some f -> if Filename.is_relative f then (Some (Filename.concat (Unix.getcwd ()) f)) else (Some f)
+    | None -> None
+  in
+
   if daemon then daemonize config;
 
-  run port sock_path config
+  run port sock_path config log_filename
     
 open Cmdliner
 
@@ -286,13 +301,17 @@ let daemon =
   let doc = "Detach from the terminal and run as a daemon" in
   Arg.(value & flag & info ["daemon"] ~docv:"DAEMON" ~doc)
 
+let log =
+  let doc = "Log to a file rather than syslog/stdout" in
+  Arg.(value & opt (some string) None & info [ "log" ] ~docv:"LOGFILE" ~doc)
+
 let cmd = 
   let doc = "Start a XenVM daemon" in
   let man = [
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.(pure main $ port $ sock_path $ config $ daemon),
+  Term.(pure main $ port $ sock_path $ config $ daemon $ log),
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
