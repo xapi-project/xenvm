@@ -1,31 +1,21 @@
 (* Fist points for testing *)
 
-type t = string
+type t = Xenvm_interface.fist
+
 exception FistPointHit of string
 
-let dummy = "dummy"
-let freepool_fail_point0 = "freepool_fail_point0"
-let freepool_fail_point1 = "freepool_fail_point1"
-let freepool_fail_point2 = "freepool_fail_point2"
+let string_of_t t = Rpc.to_string (Xenvm_interface.rpc_of_fist t)
 
-let all = Hashtbl.create 10
+let all : (t * bool) list ref = ref []
 
-let _ =
-  Hashtbl.replace all dummy false;
-  Hashtbl.replace all freepool_fail_point0 false;
-  Hashtbl.replace all freepool_fail_point1 false;
-  Hashtbl.replace all freepool_fail_point2 false
-    
+let get k = try List.assoc k !all with _ -> false
+let set k v = all := (k,v) :: (List.filter (fun (k',_) -> k' <> k) !all)
+let list () = !all
 
-let get k = Hashtbl.find all k
-let set k v = Hashtbl.replace all k v
-let list () = Hashtbl.fold (fun k v acc -> (k,v)::acc) all []
-
-let t_of_string str : t option =
-  if Hashtbl.mem all str then Some str else None
-
-let maybe_exn k = if get k then raise (FistPointHit k)
+let maybe_exn k = if get k then raise (FistPointHit (string_of_t k))
 let maybe_lwt_fail k =
   if get k then
-    Lwt.(Log.error "Causing Lwt thread failure due to fist point: %s" k >>= fun () -> Lwt.fail (FistPointHit k))
+    let str = string_of_t k in
+    Lwt.(Log.error "Causing Lwt thread failure due to fist point: %s" str
+         >>= fun () -> Lwt.fail (FistPointHit str))
   else Lwt.return ()

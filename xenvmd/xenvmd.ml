@@ -90,12 +90,7 @@ module Impl = struct
   end
 
   module Fist = struct
-    let set context point value =
-      match Fist.t_of_string point with
-      | Some t ->
-        debug "Setting fist point: %s=%b" point value >>= fun () ->
-        return (Fist.set t value)
-      | None -> raise (Xenvm_interface.UnknownFistPoint point)
+    let set context point value = return (Fist.set point value)
     let list context () = return (Fist.list ())
   end
 end

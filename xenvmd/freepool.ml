@@ -103,7 +103,7 @@ let perform_expand_free ef connected_host =
   >>= fun () ->
   Lwt_list.iter_s (fun msg -> debug "%s" msg) !msgs
   >>= fun () ->
-  Fist.maybe_lwt_fail Fist.freepool_fail_point1
+  Fist.maybe_lwt_fail Xenvm_interface.FreePool1
   >>= fun () ->
   read (fun vg ->
       let current_allocation = allocation_of_lv vg connected_host.Hostdb.free_LV_uuid in
@@ -115,7 +115,7 @@ let perform_expand_free ef connected_host =
   >>= fun pos ->
   Rings.FromLVM.p_advance connected_host.Hostdb.from_LVM pos
   >>= fun result ->
-  Fist.maybe_lwt_fail Fist.freepool_fail_point2
+  Fist.maybe_lwt_fail Xenvm_interface.FreePool2
   >>= fun () ->
   Lwt.return result
 

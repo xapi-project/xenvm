@@ -59,6 +59,11 @@ type host = {
   freeExtents: int64;
 }
 
+type fist =
+  | FreePool0
+  | FreePool1
+  | FreePool2
+
 module Host = struct
 
   external create: name:string -> unit = ""
@@ -81,6 +86,6 @@ module Host = struct
 end
 
 module Fist = struct
-  external set : string -> bool -> unit = ""
-  external list : unit -> (string * bool) list = ""
+  external set : fist -> bool -> unit = ""
+  external list : unit -> (fist * bool) list = ""
 end

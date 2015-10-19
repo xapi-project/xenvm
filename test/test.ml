@@ -613,17 +613,17 @@ let la_extend_multi_fist device =
          inparallel [(fun () -> xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
                      (fun () -> xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg])]
          >>= fun () ->
-         Client.Fist.set "freepool_fail_point2" true
+         Client.Fist.set Xenvm_interface.FreePool2 true
          >>= fun () ->
          Client.Fist.list ()
          >>= fun list ->
-         List.iter (fun (x,b) -> Printf.printf "%s: %b\n%!" x b) list;
+         List.iter (fun (x,b) -> Printf.printf "%s: %b\n%!" (Rpc.to_string (Xenvm_interface.rpc_of_fist x)) b) list;
          inparallel [(fun () -> xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
                      (fun () -> xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2])]
          >>= fun () ->
          Lwt_unix.sleep 10.0
          >>= fun () ->
-         Client.Fist.set "freepool_fail_point2" false
+         Client.Fist.set Xenvm_interface.FreePool2 false
          >>= fun () ->
          inparallel [(fun () -> xenvm ["lvextend"; "-L"; "1000"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
                      (fun () -> xenvm ~host:2 ["lvextend"; "-L"; "1000"; "--live"; Printf.sprintf "%s/%s" vg lvname2])]
