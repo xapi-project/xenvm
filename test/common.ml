@@ -298,13 +298,13 @@ let xenvm ?(host=1) args =
   | [] -> run "./xenvm.native" []
   | cmd :: args ->
     let args = "--configdir" :: configdir :: args in
-    let args = if !use_mock then "--mock-devmapper" :: args else args in
+    let args = if !use_mock then "--mock-devmapper" :: (string_of_int host) :: args else args in
     run "./xenvm.native" (cmd :: args)
 let xenvmd = run "./xenvmd.native"
-let local_allocator =
+let local_allocator ?(host=1) =
   let cmd = "./local_allocator.native" in
   function
   | [] -> run cmd []
   | args ->
-    let args = if !use_mock then args @ ["--mock-devmapper"] else args in
+    let args = if !use_mock then "--mock-devmapper" :: (string_of_int host) :: args else args in
     run cmd args
