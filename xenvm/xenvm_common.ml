@@ -7,9 +7,11 @@ let dm = ref (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER)
 
 let syslog = Lwt_log.syslog ~facility:`Daemon ()
 
-let stdout fmt = Printf.ksprintf (fun s ->
-  Printf.printf "%s\n%!" s;
-  Lwt_log.log ~logger:syslog ~level:Lwt_log.Notice ("stdout:" ^ s)
+let stdout ?(do_syslog=true) fmt = Printf.ksprintf (fun s ->
+    Printf.printf "%s\n%!" s;
+    if do_syslog
+    then Lwt_log.log ~logger:syslog ~level:Lwt_log.Notice ("stdout:" ^ s)
+    else Lwt.return ()
 ) fmt
 let stderr fmt = Printf.ksprintf (fun s ->
   Printf.fprintf stderr "%s\n%!" s;
