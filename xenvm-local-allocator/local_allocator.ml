@@ -197,7 +197,7 @@ let targets_of x =
     >>= fun () ->
     return (`Error `Retry)
 
-let main mock_dm config daemon socket journal fromLVM toLVM =
+let main mock_dm config daemon socket journal fromLVM toLVM log =
   let open Config.Local_allocator in
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
@@ -206,6 +206,12 @@ let main mock_dm config daemon socket journal fromLVM toLVM =
     toLVM = (match toLVM with None -> config.toLVM | Some x -> x);
     fromLVM = (match fromLVM with None -> config.fromLVM | Some x -> x);
   } in
+
+  let log_filename =
+    match log with
+    | Some f -> if Filename.is_relative f then (Some (Filename.concat (Unix.getcwd ()) f)) else (Some f)
+    | None -> None
+  in
 
   Lwt_log.add_rule "*" Lwt_log.Debug;
   Lwt_log.default := Lwt_log.channel ~close_mode:`Keep ~channel:Lwt_io.stdout ();
@@ -230,6 +236,15 @@ let main mock_dm config daemon socket journal fromLVM toLVM =
   in
 
   let t =
+    (match log_filename with
+     | Some f ->
+       Lwt_log.file ~mode:`Truncate ~file_name:f () >>= fun logger ->
+       Lwt_log.default := logger;
+       Lwt.return ()
+     | None ->
+       Lwt.return ()
+    )
+    >>= fun () ->
     info "Starting local allocator thread" >>= fun () ->
     debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config))
     >>= fun () ->
@@ -504,11 +519,15 @@ let mock_dm_arg =
   let doc = "Enable mock interfaces on device mapper." in
   Arg.(value & opt (some string) None & info ["mock-devmapper"] ~doc)
 
+let log =
+  let doc = "Log to a file rather than syslog/stdout" in
+  Arg.(value & opt (some string) None & info [ "log" ] ~docv:"LOGFILE" ~doc)
+
 let () =
   Sys.(set_signal sigpipe Signal_ignore);
   Sys.(set_signal sigterm (Signal_handle (fun _ -> exit (128+sigterm))));
 
-  let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM $ log) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0
