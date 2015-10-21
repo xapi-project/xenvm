@@ -40,13 +40,23 @@ module FreePool = struct
   let m = Lwt_mutex.create ()
   let c = Lwt_condition.create ()
   let free = ref []
+  let generation = ref (-1)
 
-  let add extents =
+  let add gen extents =
     Lwt_mutex.with_lock m
       (fun () ->
-        free := Lvm.Pv.Allocator.merge !free extents;
-        Lwt_condition.broadcast c ();
-        return ()
+         begin
+           if gen <= !generation
+           then
+             (* Ignore updates we've already seen *)
+             ()
+           else begin
+             free := Lvm.Pv.Allocator.merge !free extents;
+             generation := gen
+           end
+         end;
+         Lwt_condition.broadcast c ();
+         return ()
       )
 
   (* Allocate up to [nr_extents]. Blocks if there is no space free. Can return
@@ -129,7 +139,7 @@ module FreePool = struct
           (fun t ->
              sexp_of_t t |> Sexplib.Sexp.to_string_hum |> debug "FreePool: received new allocation: %s"
              >>= fun () ->
-             add t
+             add t.FreeAllocation.generation t.FreeAllocation.blocks
           ) ts
         >>= fun () ->
         FromLVM.c_advance from_lvm pos

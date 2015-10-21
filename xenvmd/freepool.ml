@@ -28,6 +28,21 @@ let tag_of_generation n =
   | `Ok x -> x
   | `Error (`Msg y) -> failwith y
 
+let generation_of_lv lv =
+  List.fold_left
+    (fun acc tag ->
+       match generation_of_tag tag with
+       | None -> acc
+       | x -> x) None lv.Lvm.Lv.tags
+
+let create name size =
+  let creation_host = Unix.gethostname () in
+  let creation_time = Unix.gettimeofday () |> Int64.of_float in
+  Vg_io.write (fun vg ->
+      Lvm.Vg.create vg name size ~creation_host ~creation_time
+        ~tags:[tag_of_generation 1 |> Lvm.Name.Tag.to_string ]
+    )
+    
 let perform_expand_free ef connected_host =
   let open Journal.Op in
   sector_size >>= fun sector_size ->
@@ -67,12 +82,7 @@ let perform_expand_free ef connected_host =
            let lv = Lvm.Vg.LVs.find connected_host.Hostdb.free_LV_uuid vg.Lvm.Vg.lvs in (* Not_found here caught by the try-catch block *)
            let extent_size = vg.Lvm.Vg.extent_size in (* in sectors *)
            let extent_size_mib = Int64.(div (mul extent_size (of_int sector_size)) (mul 1024L 1024L)) in
-           let old_gen = List.fold_left
-               (fun acc tag ->
-                  match generation_of_tag tag with
-                  | None -> acc
-                  | x -> x) None lv.Lvm.Lv.tags
-           in
+           let old_gen = generation_of_lv lv in
            let allocation =
              match Lvm.Pv.Allocator.find vg.Lvm.Vg.free_space Int64.(div ef.extra_size extent_size_mib) with
              | `Ok allocation -> allocation
@@ -106,12 +116,24 @@ let perform_expand_free ef connected_host =
   Fist.maybe_lwt_fail Xenvm_interface.FreePool1
   >>= fun () ->
   read (fun vg ->
+      let lv = Lvm.Vg.LVs.find connected_host.Hostdb.free_LV_uuid vg.Lvm.Vg.lvs in
       let current_allocation = allocation_of_lv vg connected_host.Hostdb.free_LV_uuid in
       let old_allocation = ef.old_allocation in
       let new_extents = Lvm.Pv.Allocator.sub current_allocation old_allocation in
-      Lwt.return new_extents)
-  >>= fun allocation ->
-  Rings.FromLVM.push connected_host.Hostdb.from_LVM allocation
+      let generation = generation_of_lv lv in
+      match generation with
+      | None -> (* This really should never happen *)
+        error "Expecting a generation count in the tags of LV: %s" connected_host.Hostdb.free_LV
+        >>= fun () ->
+        Lwt.fail (Failure "Generation count missing")
+      | Some g ->
+        Lwt.return (new_extents, g))
+  >>= fun (allocation, generation) ->
+  let op = {
+    FreeAllocation.blocks = allocation;
+    FreeAllocation.generation = generation;
+  } in
+  Rings.FromLVM.push connected_host.Hostdb.from_LVM op
   >>= fun pos ->
   Rings.FromLVM.p_advance connected_host.Hostdb.from_LVM pos
   >>= fun result ->
@@ -162,15 +184,42 @@ let shutdown () =
   | None ->
     return ()
 
-let resend_free_volume_to connected_host =
+let send_allocation_to connected_host =
   fatal_error "resend_free_volumes unable to read LVM metadata"
     ( read (fun x -> return (`Ok x)) )
-  >>= fun lvm ->
+  >>= fun vg ->
   (* XXX: need to lock the host somehow. Ideally we would still service
           other queues while one host is locked. *)
+
   let from_lvm = connected_host.Hostdb.from_LVM in
   let freeid = connected_host.Hostdb.free_LV_uuid in
   let freename = connected_host.Hostdb.free_LV in
+
+  fatal_error "resend_free_volumes"
+    ( match try Some(Lvm.Vg.LVs.find freeid vg.Lvm.Vg.lvs) with _ -> None with
+        | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
+        | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" freename))) )
+      >>= fun allocation ->
+      let lv = Lvm.Vg.LVs.find freeid vg.Lvm.Vg.lvs in
+      (match generation_of_lv lv with
+       | Some g -> Lwt.return g
+       | None ->
+         error "Expecting a generation count in the tags of LV: %s" connected_host.Hostdb.free_LV
+         >>= fun () ->
+         Lwt.fail (Failure "Generation count missing")
+      )
+      >>= fun generation ->
+      let op = {
+        FreeAllocation.blocks = allocation;
+        FreeAllocation.generation = generation;
+      } in
+      Rings.FromLVM.push from_lvm op
+      >>= fun pos ->
+      Rings.FromLVM.p_advance from_lvm pos
+
+
+let resend_free_volume_to connected_host =
+  let from_lvm = connected_host.Hostdb.from_LVM in
   Rings.FromLVM.p_state from_lvm
   >>= begin function
     | `Running -> return ()
@@ -185,14 +234,7 @@ let resend_free_volume_to connected_host =
         | `Running -> return () in
       wait ()
       >>= fun () ->
-      fatal_error "resend_free_volumes"
-        ( match try Some(Lvm.Vg.LVs.find freeid lvm.Lvm.Vg.lvs) with _ -> None with
-            | Some lv -> return (`Ok (Lvm.Lv.to_allocation lv))
-            | None -> return (`Error (`Msg (Printf.sprintf "Failed to find LV %s" freename))) )
-      >>= fun allocation ->
-      Rings.FromLVM.push from_lvm allocation
-      >>= fun pos ->
-      Rings.FromLVM.p_advance from_lvm pos
+      send_allocation_to connected_host
   end
 
 let resend_free_volumes () =

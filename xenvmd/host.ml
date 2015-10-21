@@ -127,9 +127,8 @@ let create name =
               Vg_io.Volume.disconnect disk >>= fun () ->
               (* Create the freeLVM LV at the end - we can use the existence
                   of this as a flag to show that we've finished host creation *)
-              Vg_io.write (fun vg ->
-                  Lvm.Vg.create vg freeLVM size ~creation_host ~creation_time
-                ) >>= fun _ ->
+              Freepool.create freeLVM size
+              >>= fun _ ->
               Vg_io.sync ()
     end
 
@@ -204,12 +203,7 @@ let connect config name =
                 connected_host.Hostdb.state <- Xenvm_interface.Resending_free_blocks;
                 debug "The Rings.FromLVM queue was already suspended: resending the free blocks"
                 >>= fun () ->
-                let allocation = Lvm.Lv.to_allocation (Vg_io.Volume.metadata_of freeLVM_id) in
-                Rings.FromLVM.push fromLVM_q allocation
-                >>= fun pos ->
-                Rings.FromLVM.p_advance fromLVM_q pos
-                >>= fun () ->
-                debug "Free blocks pushed"
+                Freepool.send_allocation_to connected_host
               end else begin
                 debug "The Rings.FromLVM queue was running: no need to resend the free blocks"
               end )
