@@ -144,7 +144,7 @@ let start_local_allocator host devices =
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
   |> file_of_string config_file;
   ignore(xenvm [ "host-connect"; vg; hostname]);
-  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator ~host [ "--config"; config_file ]) () in
+  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator ~host [ "--config"; config_file; "--log"; Printf.sprintf "la.%d.log" host ]) () in
   la_thread
 
 let wait_for_local_allocator_to_start host =
@@ -643,9 +643,9 @@ let la_extend_multi_fist device =
          Common.sanity_check myvg;
          Printf.printf "final size=%Ld final_size2=%Ld\n%!" size size2;
          assert_equal ~msg:"Unexpected final size"
-           ~printer:Int64.to_string 66L size;
+           ~printer:Int64.to_string 250L size;
                   assert_equal ~msg:"Unexpected final size"
-           ~printer:Int64.to_string 66L size2;
+           ~printer:Int64.to_string 250L size2;
 
          let la_dead = la_thread_1 >>= fun _ -> la_thread_2 >>= fun _ -> Lwt.return () in
          Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
