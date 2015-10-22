@@ -1,118 +1,107 @@
-set -e
-set -x
+#!/bin/bash
+set -ex
 
-# There is an important bugfix in the master branch. If you see
-# ECONNREFUSED you might need this:
-# opam pin add conduit git://github.com/mirage/ocaml-conduit -y
-# If you are using a XenServer build environment then the patch is
-# already included in the RPM.
+ARTIFACT_DIR=./.test-artifacts
 
-if [ "$EUID" -ne "0" ]; then
-  echo "I am not running with EUID 0. I will use the mock device mapper interface"
-  USE_MOCK=1
-  MOCK_ARG="--mock-devmapper"
-else
-  echo "I am running with EUID 0. I will use the real device mapper interface"
-  USE_MOCK=0
-  MOCK_ARG=""
-fi
+XENVMD_SOCKET=$ARTIFACT_DIR/xenvmd.socket
+XENVMD_CONF=$ARTIFACT_DIR/xenvmd.conf
+XENVMD_LOG=$ARTIFACT_DIR/xenvmd.log
 
-# Making a 1G disk
-rm -f bigdisk
-dd if=/dev/zero of=bigdisk bs=1 seek=256G count=0
+HOST1_NAME=host1
+HOST1_LA_SOCKET=$ARTIFACT_DIR/local-allocator-$HOST1_NAME.socket
+HOST1_LA_JOURNAL=$ARTIFACT_DIR/local-allocator-$HOST1_NAME.journal
+HOST1_TOLVM_RING=$HOST1_NAME-toLVM
+HOST1_FROMLVM_RING=$HOST1_NAME-fromLVM
+HOST1_LA_CONF=$ARTIFACT_DIR/local-allocator-$HOST1_NAME.conf
+HOST1_LA_LOG=$ARTIFACT_DIR/local-allocator-$HOST1_NAME.log
 
-if [ "$USE_MOCK" -eq "0" ]; then
-  LOOP=$(losetup -f)
-  echo Using $LOOP
-  losetup $LOOP bigdisk
-else
-  LOOP=`pwd`/bigdisk
-fi
-cat test.xenvmd.conf.in | sed -r "s|@BIGDISK@|$LOOP|g" > test.xenvmd.conf
-mkdir -p /tmp/xenvm.d
-./xenvm.native format $LOOP --vg djstest --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log &
+XENVM_CONFDIR=$ARTIFACT_DIR/xenvm.d
+XENVM_ARGS="--configdir $XENVM_CONFDIR --mock-devmapper $HOST1_NAME"
 
+MOCK_DISK=$ARTIFACT_DIR/bigdisk
+VG_NAME=myvg
+
+cleanup () {
+pkill -e xenvmd || true
+pkill -e local_allocator || true
+rm -rf $ARTIFACT_DIR dm-mock*
+}
+
+# clean up and exit if that's all we're supposed to do
+###############################################################################
+cleanup
+if [ $1 == "clean" ]; then exit 0; fi
+
+# get ready for a new run
+###############################################################################
+mkdir -p $ARTIFACT_DIR
+mkdir -p $XENVM_CONFDIR
+# Making a 256G disk from a _sparse_ file
+dd if=/dev/zero of=$MOCK_DISK bs=1 seek=256G count=0
+./xenvm.native format $MOCK_DISK --vg $VG_NAME $XENVM_ARGS
+
+# start xenvmd
+###############################################################################
+cat <<EOI > $XENVMD_CONF
+(
+ (listenPort ())
+ (listenPath (Some "$XENVMD_SOCKET"))
+ (host_allocation_quantum 128)
+ (host_low_water_mark 8)
+ (vg $VG_NAME)
+ (devices ($MOCK_DISK))
+)
+EOI
+./xenvmd.native --config $XENVMD_CONF > $XENVMD_LOG 2>&1 &
+# when we can log to file with --log, we can use --daemon and remove the & and the sleep
 sleep 2
 
-./xenvm.native set-vg-info --pvpath $LOOP -S /tmp/xenvmd djstest --local-allocator-path /tmp/host1-socket --uri file://local/services/xenvmd/djstest --configdir /tmp/xenvm.d $MOCK_ARG
+# setup the xenvm CLI config
+###############################################################################
+./xenvm.native set-vg-info --pvpath $MOCK_DISK -S $XENVMD_SOCKET $VG_NAME --local-allocator-path $HOST1_LA_SOCKET --uri file://local/services/xenvmd/$VG_NAME $XENVM_ARGS
 
-./xenvm.native lvcreate -n badname -L 4 djstest --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native lvrename /dev/djstest/badname /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
+# create an LV (in a round-about way to excersize some CLI commands)
+###############################################################################
+./xenvm.native lvcreate -n badname -L 4 $VG_NAME $XENVM_ARGS
+./xenvm.native lvrename /dev/$VG_NAME/badname /dev/$VG_NAME/live $XENVM_ARGS
 
-./xenvm.native vgchange /dev/djstest -ay --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native vgchange /dev/djstest -an --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native vgchange /dev/$VG_NAME -ay $XENVM_ARGS
+./xenvm.native vgchange /dev/$VG_NAME -an $XENVM_ARGS
 
-./xenvm.native lvchange -ay /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvchange -ay /dev/$VG_NAME/live $XENVM_ARGS
 
-./xenvm.native lvdisplay /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native lvdisplay /dev/djstest -c --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native lvs /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native pvs ./bigdisk --configdir /tmp/xenvm.d $MOCK_ARG
+./xenvm.native lvdisplay /dev/$VG_NAME $XENVM_ARGS
+./xenvm.native lvdisplay /dev/$VG_NAME -c $XENVM_ARGS
+./xenvm.native lvs /dev/$VG_NAME $XENVM_ARGS
+./xenvm.native pvs $MOCK_DISK $XENVM_ARGS
 
-#./xenvm.native benchmark
-# create and connect to hosts
-./xenvm.native host-create /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host1|g" > test.local_allocator.host1.conf
-./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > local_allocator.host1.log &
+# simulate a host-connect (and reconnect for good measure)
+###############################################################################
+./xenvm.native host-create /dev/$VG_NAME $HOST1_NAME $XENVM_ARGS
+./xenvm.native host-connect /dev/$VG_NAME $HOST1_NAME $XENVM_ARGS
 
-./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > local_allocator.host1.log2 &
+cat <<EOI > $HOST1_LA_CONF
+(
+ (socket $HOST1_LA_SOCKET)
+ (localJournal $HOST1_LA_JOURNAL)
+ (devices ($MOCK_DISK))
+ (toLVM $HOST1_TOLVM_RING)
+ (fromLVM $HOST1_FROMLVM_RING)
+)
+EOI
+./local_allocator.native --config $HOST1_LA_CONF --mock-devmapper $HOST1_NAME > $HOST1_LA_LOG 2>&1 &
+# when we can log to file with --log, we can use --daemon and remove the & and the sleep
+sleep 10
 
-for ((i=0; i<10; i++)); do
-  ./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-  ./xenvm.native host-connect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-  ./local_allocator.native --config ./test.local_allocator.host1.conf $MOCK_ARG > local_allocator.host1.log3 &
-done
-
-
+./xenvm.native host-disconnect /dev/$VG_NAME $HOST1_NAME $XENVM_ARGS
+./xenvm.native host-connect /dev/$VG_NAME $HOST1_NAME $XENVM_ARGS
+./local_allocator.native --config $HOST1_LA_CONF --mock-devmapper $HOST1_NAME > $HOST1_LA_LOG 2>&1 &
+# when we can log to file with --log, we can use --daemon and remove the & and the sleep
 sleep 20
 
-./xenvm.native lvextend /dev/djstest/live -L 128M --live --configdir /tmp/xenvm.d $MOCK_ARG
+# check local allocator working by extending a volume using --live
+./xenvm.native lvextend /dev/$VG_NAME/live -L 128M --live $XENVM_ARGS
 
-./xenvm.native host-create /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native host-connect /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
-cat test.local_allocator.conf.in | sed -r "s|@BIGDISK@|$LOOP|g"  | sed -r "s|@HOST@|host2|g" > test.local_allocator.host2.conf
-./local_allocator.native --config ./test.local_allocator.host2.conf $MOCK_ARG > local_allocator.host2.log &
-
-sleep 30
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
-
-# Let's check that xenvmd retains its list of connected hosts over a restart
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out
-kill `cat /tmp/xenvmd.lock`
-./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log.2 &
-sleep 10
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out2
-diff -u host-list.out host-list.out2 
-
-# simulate a host failure and uncooperative disconnect
-kill `cat /tmp/host2-socket.lock`
-./xenvm.native host-disconnect --uncooperative /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
-# check we've lost a host in the host-list
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out3
-grep -v host2 host-list.out2 | diff -u - host-list.out3
-# check it doesn't reconnect after a restart
-kill `cat /tmp/xenvmd.lock`
-./xenvmd.native --config ./test.xenvmd.conf > xenvmd.log.3 &
-sleep 10
-./xenvm.native host-list /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG | sort > host-list.out4
-diff -u host-list.out3 host-list.out4
-
-# destroy hosts
-./xenvm.native host-destroy /dev/djstest host2 --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native host-disconnect /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-./xenvm.native host-destroy /dev/djstest host1 --configdir /tmp/xenvm.d $MOCK_ARG
-
-#shutdown
-./xenvm.native lvchange -an /dev/djstest/live --configdir /tmp/xenvm.d $MOCK_ARG || true
-./xenvm.native shutdown /dev/djstest --configdir /tmp/xenvm.d $MOCK_ARG
-
-#echo Run 'sudo ./xenvm.native host-connect /dev/djstest host1' to connect to the local allocator'
-#echo Run 'sudo ./local_allocator.native' and type 'djstest-live' to request an allocation
-echo Run './cleanup.sh' to remove all volumes and devices
-
-sleep 10
-
+# all done
+###############################################################################
+echo "Run '$0 clean' to remove all volumes and devices"

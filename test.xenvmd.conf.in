@@ -1,8 +1,0 @@
-(
- (listenPort ())
- (listenPath (Some "/tmp/xenvmd"))
- (host_allocation_quantum 128)
- (host_low_water_mark 8)
- (vg djstest)
- (devices (@BIGDISK@))
-)

@@ -5,12 +5,8 @@ setup.data
 setup.log
 setup.ml
 *.native
-bigdisk
-masterJournal
-localJournal
-toLVM
-fromLVM
-*.out
+.test-artifacts/
+dm-mock*
 *.dat
 *.gp
 *.png

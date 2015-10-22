@@ -1,8 +1,0 @@
-(
- (socket /tmp/@HOST@-socket)
- (localJournal @HOST@-localJournal)
- (devices (@BIGDISK@))
- (toLVM @HOST@-toLVM)
- (fromLVM @HOST@-fromLVM)
-)
-
