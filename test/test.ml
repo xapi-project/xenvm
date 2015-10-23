@@ -127,6 +127,8 @@ let la_has_started host =
        Lwt_io.close oc >>= fun () ->
        Lwt.return true)
     (fun _ ->
+       Lwt_unix.close s
+       >>= fun () ->
        Lwt.return false)
 
 let start_local_allocator host devices =
@@ -611,7 +613,10 @@ let la_extend_multi_fist device =
          wait_for_local_allocator_to_start 2 >>= fun () ->
          set_vg_info device vg 2;
          inparallel [(fun () -> xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
-                     (fun () -> xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg])]
+                     (fun () -> xenvm ["lvcreate"; "-an"; "-n"; lvname2; "-L"; "4"; vg])]
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ~host:1 ["lvchange"; "-ay"; Printf.sprintf "%s/%s" vg lvname]);
+                     (fun () -> xenvm ~host:2 ["lvchange"; "-ay"; Printf.sprintf "%s/%s" vg lvname2])]
          >>= fun () ->
          Client.Fist.set Xenvm_interface.FreePool2 true
          >>= fun () ->
