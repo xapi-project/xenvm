@@ -128,7 +128,7 @@ let run port sock_path config log_filename =
   let t =
     (match log_filename with
      | Some f ->
-       Lwt_log.file ~mode:`Truncate ~file_name:f () >>= fun logger ->
+       Lwt_log.file ~mode:`Append ~file_name:f () >>= fun logger ->
        Lwt_log.default := logger;
        Lwt.return ()
      | None -> Lwt.return ())
