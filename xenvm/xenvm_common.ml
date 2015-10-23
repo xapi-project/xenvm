@@ -233,7 +233,14 @@ type copts_t = {
 }
 
 let make_copts config uri_override sockpath_override mock_dm =
-  dm := if mock_dm then (module Retrymapper.Make(Devmapper.Mock) : S.RETRYMAPPER) else (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER);
+  let mock_dm = match mock_dm with
+  | Some host_id ->
+    Devmapper.Mock.set_path ("dm-mock-" ^ host_id);
+    dm := (module Retrymapper.Make(Devmapper.Mock) : S.RETRYMAPPER);
+    true
+  | None ->
+    dm := (module Retrymapper.Make(Devmapper.Linux) : S.RETRYMAPPER);
+    false in
   { uri_override; config; sockpath_override; mock_dm }
 
 let config =
@@ -323,8 +330,8 @@ let output_arg default_fields =
   Term.(pure (parse_output default_fields) $ a)
 
 let mock_dm_arg =
-  let doc = "Enable mock interfaces on device mapper." in
-  Arg.(value & flag & info ["mock-devmapper"] ~doc)
+  let doc = "Enable mock interfaces on device mapper. The value is a host identifier." in
+  Arg.(value & opt (some string) None & info ["mock-devmapper"] ~doc)
 
 let copts_t =
   Term.(pure make_copts $ config $ uri_arg $ sock_path_arg $ mock_dm_arg)

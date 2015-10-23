@@ -3,20 +3,18 @@
 open Lwt
 open Log
 
-let retry ~dbg f =
-  let retries = 3 in
-  let interval = 1. in
+let retry ~dbg ?(retries=3) ?(interval=1.) f =
   let rec aux n =
     if n <= 0 then Lwt.return (f ())
     else
       try Lwt.return (f ())
       with exn ->
         warn "warning: 'RetryMapper.%s' failed with '%s'; will retry %d more time%s..."
-          dbg (Printexc.to_string exn) retries (if retries = 1 then "" else "s")
+          dbg (Printexc.to_string exn) n (if n = 1 then "" else "s")
         >>= fun () ->
         Lwt_unix.sleep interval
         >>= fun () ->
-        aux (retries - 1) in
+        aux (n - 1) in
   aux retries
 
 module Make(DM : Devmapper.S.DEVMAPPER) = struct

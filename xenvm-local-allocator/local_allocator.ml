@@ -193,7 +193,7 @@ let targets_of x =
     >>= fun () ->
     return (`Error `Retry)
 
-let main use_mock config daemon socket journal fromLVM toLVM =
+let main mock_dm config daemon socket journal fromLVM toLVM =
   let open Config.Local_allocator in
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
@@ -205,7 +205,13 @@ let main use_mock config daemon socket journal fromLVM toLVM =
 
   Lwt_log.add_rule "*" Lwt_log.Debug;
   Lwt_log.default := Lwt_log.channel ~close_mode:`Keep ~channel:Lwt_io.stdout ();
-  dm := if use_mock then (module Retrymapper.Make(Devmapper.Mock): S.RETRYMAPPER) else (module Retrymapper.Make(Devmapper.Linux): S.RETRYMAPPER);
+  begin match mock_dm with
+  | Some host_id ->
+    Devmapper.Mock.set_path ("dm-mock-" ^ host_id);
+    dm := (module Retrymapper.Make(Devmapper.Mock): S.RETRYMAPPER)
+  | None ->
+    dm := (module Retrymapper.Make(Devmapper.Linux): S.RETRYMAPPER)
+  end;
 
   let module D = (val !dm: S.RETRYMAPPER) in
 
@@ -492,7 +498,7 @@ let fromLVM =
 
 let mock_dm_arg =
   let doc = "Enable mock interfaces on device mapper." in
-  Arg.(value & flag & info ["mock-devmapper"] ~doc)
+  Arg.(value & opt (some string) None & info ["mock-devmapper"] ~doc)
 
 let () =
   Sys.(set_signal sigpipe Signal_ignore);

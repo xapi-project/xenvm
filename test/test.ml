@@ -144,7 +144,7 @@ let start_local_allocator host devices =
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
   |> file_of_string config_file;
   ignore(xenvm [ "host-connect"; vg; hostname]);
-  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator [ "--config"; config_file ]) () in
+  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator ~host [ "--config"; config_file ]) () in
   la_thread
 
 let wait_for_local_allocator_to_start host =
@@ -561,29 +561,31 @@ let la_extend_multi device =
          wait_for_local_allocator_to_start 1 >>= fun () ->
          wait_for_local_allocator_to_start 2 >>= fun () ->
          set_vg_info device vg 2;
-         inparallel [(fun () -> xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
-                     (fun () -> xenvm ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg])]
+         inparallel [(fun () -> xenvm ~host:1 ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
+                     (fun () -> xenvm ~host:1 ["lvcreate"; "-n"; lvname2; "-L"; "4"; vg])]
          >>= fun () ->
-         inparallel [(fun () -> xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
+         inparallel [(fun () -> xenvm ~host:1 ["lvchange"; "-ay"; Printf.sprintf "%s/%s" vg lvname]);
+                     (fun () -> xenvm ~host:2 ["lvchange"; "-ay"; Printf.sprintf "%s/%s" vg lvname2])]
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ~host:1 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
                      (fun () -> xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2])]
          >>= fun () ->
-         inparallel [(fun () -> xenvm ["host-disconnect"; vg; "host1"] |> ignore);
-                     (fun () -> xenvm ["host-disconnect"; vg; "host2"] |> ignore)]
+         inparallel [(fun () -> xenvm ~host:1 ["host-disconnect"; vg; "host1"] |> ignore);
+                     (fun () -> xenvm ~host:1 ["host-disconnect"; vg; "host2"] |> ignore)]
          >>= fun () ->
          Client.get_lv lvname >>= fun (myvg, lv) ->
          Client.get_lv lvname2 >>= fun (_, lv2) ->
-         ignore(myvg,lv,lv2);
          let size = Lvm.Lv.size_in_extents lv in
          let size2 = Lvm.Lv.size_in_extents lv2 in
-         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname]);
-         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname2]);
+         ignore(xenvm ~host:1 ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname]);
+         ignore(xenvm ~host:2 ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname2]);
          Printf.printf "Sanity checking VG\n%!";
          Client.get () >>= fun myvg -> 
          Common.sanity_check myvg;
          Printf.printf "final size=%Ld final_size2=%Ld\n%!" size size2;
          assert_equal ~msg:"Unexpected final size"
            ~printer:Int64.to_string 33L size;
-                  assert_equal ~msg:"Unexpected final size"
+         assert_equal ~msg:"Unexpected final size"
            ~printer:Int64.to_string 33L size2;
 
          let la_dead = la_thread_1 >>= fun _ -> la_thread_2 >>= fun _ -> Lwt.return () in
@@ -604,7 +606,5 @@ let _ =
     then exit 1 in
   run_test_tt_main no_xenvmd_suite |> check_results_with_exit_code;
   with_xenvmd (fun _ _ -> run_test_tt_main xenvmd_suite |> check_results_with_exit_code);
-  if not !Common.use_mock then begin (* FIXME: #99 *)
-    with_xenvmd (fun _ device -> run_test_tt_main (local_allocator_suite device) |> check_results_with_exit_code)
-  end;
+  with_xenvmd (fun _ device -> run_test_tt_main (local_allocator_suite device) |> check_results_with_exit_code);
   dump_stats ()
