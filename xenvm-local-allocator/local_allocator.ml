@@ -40,13 +40,23 @@ module FreePool = struct
   let m = Lwt_mutex.create ()
   let c = Lwt_condition.create ()
   let free = ref []
+  let generation = ref (-1)
 
-  let add extents =
+  let add gen extents =
     Lwt_mutex.with_lock m
       (fun () ->
-        free := Lvm.Pv.Allocator.merge !free extents;
-        Lwt_condition.broadcast c ();
-        return ()
+         begin
+           if gen <= !generation
+           then
+             (* Ignore updates we've already seen *)
+             ()
+           else begin
+             free := Lvm.Pv.Allocator.merge !free extents;
+             generation := gen
+           end
+         end;
+         Lwt_condition.broadcast c ();
+         return ()
       )
 
   (* Allocate up to [nr_extents]. Blocks if there is no space free. Can return
@@ -113,24 +123,28 @@ module FreePool = struct
       FromLVM.resume from_lvm
       >>= fun () ->
 
-      let rec loop_forever () =
+      (* n here is the number of times we've been 
+         around the loop without activity. we use
+         it to calculate the delay until next
+         poll. *)
+      let rec loop_forever n =
         FromLVM.pop from_lvm
         >>= fun (pos, ts) ->
         let open FreeAllocation in
         ( if ts = [] then begin
-            Lwt_unix.sleep 5.
+            Lwt_unix.sleep (delayfn n)
           end else return ()
         ) >>= fun () ->
         Lwt_list.iter_s
           (fun t ->
              sexp_of_t t |> Sexplib.Sexp.to_string_hum |> debug "FreePool: received new allocation: %s"
              >>= fun () ->
-             add t
+             add t.FreeAllocation.generation t.FreeAllocation.blocks
           ) ts
         >>= fun () ->
         FromLVM.c_advance from_lvm pos
         >>= fun () ->
-        loop_forever () in
+        loop_forever (if ts = [] then n+1 else 0) in
       return loop_forever
 end
 
@@ -193,7 +207,7 @@ let targets_of x =
     >>= fun () ->
     return (`Error `Retry)
 
-let main mock_dm config daemon socket journal fromLVM toLVM =
+let main mock_dm config daemon socket journal fromLVM toLVM log =
   let open Config.Local_allocator in
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with
@@ -202,6 +216,12 @@ let main mock_dm config daemon socket journal fromLVM toLVM =
     toLVM = (match toLVM with None -> config.toLVM | Some x -> x);
     fromLVM = (match fromLVM with None -> config.fromLVM | Some x -> x);
   } in
+
+  let log_filename =
+    match log with
+    | Some f -> if Filename.is_relative f then (Some (Filename.concat (Unix.getcwd ()) f)) else (Some f)
+    | None -> None
+  in
 
   Lwt_log.add_rule "*" Lwt_log.Debug;
   Lwt_log.default := Lwt_log.channel ~close_mode:`Keep ~channel:Lwt_io.stdout ();
@@ -226,6 +246,15 @@ let main mock_dm config daemon socket journal fromLVM toLVM =
   in
 
   let t =
+    (match log_filename with
+     | Some f ->
+       Lwt_log.file ~mode:`Append ~file_name:f () >>= fun logger ->
+       Lwt_log.default := logger;
+       Lwt.return ()
+     | None ->
+       Lwt.return ()
+    )
+    >>= fun () ->
     info "Starting local allocator thread" >>= fun () ->
     debug "Loaded configuration: %s" (Sexplib.Sexp.to_string_hum (sexp_of_t config))
     >>= fun () ->
@@ -341,7 +370,7 @@ let main mock_dm config daemon socket journal fromLVM toLVM =
 
     FreePool.start config vg
     >>= fun forever_fun ->
-    let (_: unit Lwt.t) = forever_fun () in
+    let (_: unit Lwt.t) = forever_fun 0 in
     let (_: unit Lwt.t) = wait_for_shutdown_forever () in
 
     (* Called to extend a single device. This function decides what needs to be
@@ -500,11 +529,15 @@ let mock_dm_arg =
   let doc = "Enable mock interfaces on device mapper." in
   Arg.(value & opt (some string) None & info ["mock-devmapper"] ~doc)
 
+let log =
+  let doc = "Log to a file rather than syslog/stdout" in
+  Arg.(value & opt (some string) None & info [ "log" ] ~docv:"LOGFILE" ~doc)
+
 let () =
   Sys.(set_signal sigpipe Signal_ignore);
   Sys.(set_signal sigterm (Signal_handle (fun _ -> exit (128+sigterm))));
 
-  let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM) in
+  let t = Term.(pure main $ mock_dm_arg $ config $ daemon $ socket $ journal $ fromLVM $ toLVM $ log) in
   match Term.eval (t, info) with
   | `Error _ -> exit 1
   | _ -> exit 0

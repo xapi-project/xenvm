@@ -91,7 +91,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
       } in
       Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config)
       |> file_of_string "test.xenvmd.conf";
-      let _ = Lwt_preemptive.detach (fun () -> xenvmd [ "--config"; "./test.xenvmd.conf" ]) () in
+      let _ = Lwt_preemptive.detach (fun () -> xenvmd [ "--config"; "./test.xenvmd.conf"; "--log"; "xenvmd.log"]) () in
       wait_for_xenvmd_to_start vg;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
       Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
@@ -127,6 +127,8 @@ let la_has_started host =
        Lwt_io.close oc >>= fun () ->
        Lwt.return true)
     (fun _ ->
+       Lwt_unix.close s
+       >>= fun () ->
        Lwt.return false)
 
 let start_local_allocator host devices =
@@ -143,7 +145,7 @@ let start_local_allocator host devices =
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
   |> file_of_string config_file;
   ignore(xenvm [ "host-connect"; vg; hostname]);
-  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator ~host [ "--config"; config_file ]) () in
+  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator ~host [ "--config"; config_file; "--log"; Printf.sprintf "la.%d.log" host ]) () in
   la_thread
 
 let wait_for_local_allocator_to_start host =
@@ -154,6 +156,12 @@ let wait_for_local_allocator_to_start host =
     then Lwt.return ()
     else (Lwt_unix.sleep 0.1 >>= fun () -> retry ())
   in retry ()
+
+let write_to_file thread filename =
+  thread
+  >>= fun log ->
+  Lwt_io.(with_file output filename
+            (fun chan -> write chan log))
 
 let lvchange_offline =
   "lvchange vg/lv --offline: check that we can activate volumes offline" >::
@@ -550,7 +558,7 @@ let inparallel fns =
         Lwt_preemptive.detach (fun () -> ignore(fn ())) ()) fns)
 
 let la_extend_multi device =
-  "Extend an LV with the local allocator" >::
+  "Extend 2 LVs on different hosts with the local allocator" >::
   (fun () ->
      ignore(Lwt_main.run (
          let lvname = "test2" in
@@ -591,10 +599,71 @@ let la_extend_multi device =
          Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
        )))
 
+
+let la_extend_multi_fist device =
+  "Extend 2 LVs on different hosts with the local allocator" >::
+  (fun () ->
+     ignore(Lwt_main.run (
+         let lvname = "test4" in
+         let lvname2 = "test5" in
+         let la_thread_1 = start_local_allocator 1 [device] in
+         let la_thread_2 = start_local_allocator 2 [device] in
+         wait_for_local_allocator_to_start 1 >>= fun () ->
+         wait_for_local_allocator_to_start 2 >>= fun () ->
+         set_vg_info device vg 2;
+         inparallel [(fun () -> xenvm ["lvcreate"; "-n"; lvname; "-L"; "4"; vg]);
+                     (fun () -> xenvm ["lvcreate"; "-an"; "-n"; lvname2; "-L"; "4"; vg])]
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ~host:1 ["lvchange"; "-ay"; Printf.sprintf "%s/%s" vg lvname]);
+                     (fun () -> xenvm ~host:2 ["lvchange"; "-ay"; Printf.sprintf "%s/%s" vg lvname2])]
+         >>= fun () ->
+         Client.Fist.set Xenvm_interface.FreePool2 true
+         >>= fun () ->
+         Client.Fist.list ()
+         >>= fun list ->
+         List.iter (fun (x,b) -> Printf.printf "%s: %b\n%!" (Rpc.to_string (Xenvm_interface.rpc_of_fist x)) b) list;
+         inparallel [(fun () -> xenvm ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
+                     (fun () -> xenvm ~host:2 ["lvextend"; "-L"; "132"; "--live"; Printf.sprintf "%s/%s" vg lvname2])]
+         >>= fun () ->
+         Lwt_unix.sleep 10.0
+         >>= fun () ->
+         Client.Fist.set Xenvm_interface.FreePool2 false
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ["lvextend"; "-L"; "1000"; "--live"; Printf.sprintf "%s/%s" vg lvname]);
+                     (fun () -> xenvm ~host:2 ["lvextend"; "-L"; "1000"; "--live"; Printf.sprintf "%s/%s" vg lvname2])]
+         >>= fun () ->
+         inparallel [(fun () -> xenvm ["host-disconnect"; vg; "host1"] |> ignore);
+                     (fun () -> xenvm ["host-disconnect"; vg; "host2"] |> ignore)]
+         >>= fun () ->
+         Client.get_lv lvname >>= fun (myvg, lv) ->
+         Client.get_lv lvname2 >>= fun (_, lv2) ->
+         ignore(myvg,lv,lv2);
+         let size = Lvm.Lv.size_in_extents lv in
+         let size2 = Lvm.Lv.size_in_extents lv2 in
+         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname]);
+         ignore(xenvm ["lvchange"; "-an"; Printf.sprintf "%s/%s" vg lvname2]);
+         Printf.printf "Sanity checking VG\n%!";
+         Client.get () >>= fun myvg ->
+         Common.sanity_check myvg;
+         Printf.printf "final size=%Ld final_size2=%Ld\n%!" size size2;
+         assert_equal ~msg:"Unexpected final size"
+           ~printer:Int64.to_string 250L size;
+                  assert_equal ~msg:"Unexpected final size"
+           ~printer:Int64.to_string 250L size2;
+
+         let la_dead = la_thread_1 >>= fun _ -> la_thread_2 >>= fun _ -> Lwt.return () in
+         Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
+         >>= fun () ->
+         write_to_file la_thread_1 "local_allocator.1.log"
+         >>= fun () ->
+         write_to_file la_thread_2 "local_allocator.2.log"
+       )))
+
 let local_allocator_suite device = "Commands which require the local allocator" >::: [
 (*    la_start device;
       la_extend device;*)
     la_extend_multi device;
+    la_extend_multi_fist device;
 ]
 
 let _ =

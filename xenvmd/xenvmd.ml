@@ -12,7 +12,8 @@ module Impl = struct
   let ignore_result _ = Lwt.return ()
   
   type context = {
-    stoppers : (unit Lwt.u) list
+    stoppers : (unit Lwt.u) list;
+    config : Config.Xenvmd.t
   }
 
   let get context () =
@@ -82,10 +83,15 @@ module Impl = struct
 
   module Host = struct
     let create context ~name = Host.create name
-    let connect context ~name = Host.connect name
+    let connect context ~name = Host.connect context.config name
     let disconnect context ~cooperative ~name = Host.disconnect ~cooperative name
     let destroy context ~name = Host.destroy name
     let all context () = Host.all ()
+  end
+
+  module Fist = struct
+    let set context point value = return (Fist.set point value)
+    let list context () = return (Fist.list ())
   end
 end
 
@@ -93,9 +99,9 @@ module XenvmServer = Xenvm_interface.ServerM(Impl)
 
 open Cohttp_lwt_unix
 
-let handler ~info stoppers (ch,conn) req body =
+let handler ~info stoppers config (ch,conn) req body =
   Cohttp_lwt_body.to_string body >>= fun bodystr ->
-  XenvmServer.process {Impl.stoppers} (Jsonrpc.call_of_string bodystr) >>= fun result ->
+  XenvmServer.process {Impl.stoppers; config} (Jsonrpc.call_of_string bodystr) >>= fun result ->
   Server.respond_string ~status:`OK ~body:(Jsonrpc.string_of_response result) ()
 
 let maybe_write_pid config =
@@ -118,8 +124,15 @@ let maybe_write_pid config =
         exit 1
     end
 
-let run port sock_path config =
+let run port sock_path config log_filename =
   let t =
+    (match log_filename with
+     | Some f ->
+       Lwt_log.file ~mode:`Append ~file_name:f () >>= fun logger ->
+       Lwt_log.default := logger;
+       Lwt.return ()
+     | None -> Lwt.return ())
+    >>= fun () ->
     maybe_write_pid config
     >>= fun () ->
     info "Started with configuration: %s" (Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config))
@@ -128,28 +141,17 @@ let run port sock_path config =
     >>= fun () ->
     Freepool.start Xenvm_interface._journal_name
     >>= fun () ->
-    Host.reconnect_all ()
+    Host.reconnect_all config
     >>= fun () ->
     (* Create a snapshot cache of the metadata for the stats thread *)
     Vg_io.read return >>= fun vg ->
     let stats_vg_cache = ref vg in
 
-    let rec service_queues () =
-      (* 0. Have any local allocators restarted? *)
-      Freepool.resend_free_volumes ()
-      >>= fun () ->
-      (* 1. Do any of the host free LVs need topping up? *)
-      Freepool.top_up_free_volumes config
-      >>= fun () ->
-      (* 2. Are there any pending LVM updates from hosts? *)
-      Host.flush_all ()
-      >>= fun () ->
-      (* 3. Update the metadata snapshot for the stats collection *)
+    let rec service_stats () =
       Vg_io.read return >>= fun vg -> stats_vg_cache := vg;
-
       Lwt_unix.sleep 5.
       >>= fun () ->
-      service_queues () in
+      service_stats () in
 
     (* See below for a description of 'stoppers' and 'stop' *)
     let service_http stoppers mode stop =
@@ -161,7 +163,7 @@ let run port sock_path config =
       Lwt.ignore_result (debug "Listening for HTTP request on: %s\n" ty);
       let info = Printf.sprintf "Served by Cohttp/Lwt listening on %s" ty in
       let conn_closed (ch,conn) = () in
-      let callback = handler ~info stoppers in
+      let callback = handler ~info stoppers config in
       let c = Server.make ~callback ~conn_closed () in
       (* Listen for regular API calls *)
       Server.create ~mode ~stop c in
@@ -201,7 +203,7 @@ let run port sock_path config =
     | None -> ()
     end;
 
-    Lwt.join ((service_queues ())::threads) in
+    Lwt.join ((service_stats ())::threads) in
 
   Lwt_main.run t
 
@@ -248,17 +250,24 @@ let daemonize config =
   end;
   Lwt_daemon.daemonize ()
   
-let main port sock_path config daemon =
+let main port sock_path config daemon log =
   let open Config.Xenvmd in
   Sys.(set_signal sigterm (Signal_handle (fun _ -> exit (128+sigterm))));
   let config = t_of_sexp (Sexplib.Sexp.load_sexp config) in
   let config = { config with listenPort = match port with None -> config.listenPort | Some x -> Some x } in
   let config = { config with listenPath = match sock_path with None -> config.listenPath | Some x -> Some x } in
+
   Lwt_log.add_rule "*" Lwt_log.Debug;
+
+  let log_filename =
+    match log with
+    | Some f -> if Filename.is_relative f then (Some (Filename.concat (Unix.getcwd ()) f)) else (Some f)
+    | None -> None
+  in
 
   if daemon then daemonize config;
 
-  run port sock_path config
+  run port sock_path config log_filename
     
 open Cmdliner
 
@@ -287,13 +296,17 @@ let daemon =
   let doc = "Detach from the terminal and run as a daemon" in
   Arg.(value & flag & info ["daemon"] ~docv:"DAEMON" ~doc)
 
+let log =
+  let doc = "Log to a file rather than syslog/stdout" in
+  Arg.(value & opt (some string) None & info [ "log" ] ~docv:"LOGFILE" ~doc)
+
 let cmd = 
   let doc = "Start a XenVM daemon" in
   let man = [
     `S "EXAMPLES";
     `P "TODO";
   ] in
-  Term.(pure main $ port $ sock_path $ config $ daemon),
+  Term.(pure main $ port $ sock_path $ config $ daemon $ log),
   Term.info "xenvmd" ~version:"0.1" ~doc ~man
 
 let _ =
