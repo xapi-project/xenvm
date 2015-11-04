@@ -1,4 +1,4 @@
-.PHONY: all clean install build
+.PHONY: all clean install build coverage
 all: build doc
 
 export OCAMLRUNPARAM=b
@@ -43,11 +43,12 @@ reinstall: setup.bin
 	@ocamlfind remove $(NAME) || true
 	@./setup.bin -reinstall
 
-release:
-	# Remove our dependencies on bisect
-	sed -i -r s'/, bisect//g' _oasis
-	sed -i -r s'/\"bisect\"//g' opam
-
 clean:
 	@ocamlbuild -clean
 	@rm -f setup.data setup.log setup.bin
+
+travis-coveralls.sh:
+	wget https://raw.githubusercontent.com/simonjbeaumont/ocaml-travis-coveralls/master/$@
+
+coverage: travis-coveralls.sh
+	bash $<
