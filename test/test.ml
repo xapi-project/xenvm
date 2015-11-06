@@ -20,12 +20,6 @@ open Lwt
 
 let vg = "myvg"
 
-let get_hostname host =
-  Printf.sprintf "host%d" host
-
-let get_local_allocator_sockpath host =
-  Printf.sprintf "/tmp/host%d-socket" host
-
 let vgcreate =
   "vgcreate <vg name> <device>: check that we can create a volume group and re-read the metadata." >::
   fun () ->
@@ -42,25 +36,24 @@ let vgcreate =
     Lwt_main.run t 
   )
 
+let set_vg_info ~pvpath ~vg ~host =
+  xenvm ~host [ "set-vg-info";
+    "--pvpath"; pvpath;
+    "-S"; xenvmd_socket;
+    vg;
+    "--local-allocator-path"; la_socket host;
+    "--uri"; "file://local/services/xenvmd/" ^ vg;
+  ] |> ignore_string
+
 let vgs_offline =
   "vgs <device>: check that we can read metadata without xenvmd." >::
   (fun () ->
-    with_temp_file (fun filename ->
-      xenvm [ "vgcreate"; vg; filename ] |> ignore_string;
-      mkdir_rec "/tmp/xenvm.d" 0o0755;
-      xenvm [ "set-vg-info"; "--pvpath"; filename; "-S"; "/tmp/xenvmd"; vg; "--local-allocator-path"; (get_local_allocator_sockpath 1); "--uri"; "file://local/services/xenvmd/"^vg ] |> ignore_string;
+    with_temp_file (fun pvpath ->
+      xenvm [ "vgcreate"; vg; pvpath ] |> ignore_string;
+      set_vg_info ~pvpath ~vg ~host:1;
       xenvm [ "vgs"; vg ] |> ignore_string
     )
   )
-
-let set_vg_info pvpath vg host =
-  xenvm ~host [ "set-vg-info";
-          "--pvpath"; pvpath;
-          "-S"; "/tmp/xenvmd";
-          vg;
-          "--local-allocator-path"; get_local_allocator_sockpath host;
-          "--uri"; "file://local/services/xenvmd/"^vg ]
-  |> ignore_string
 
 let is_xenvmd_ok vg =
   try
@@ -82,7 +75,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
     set_vg_info loop vg host;
     let config = {
         Config.Xenvmd.listenPort = None;
-        listenPath = Some "/tmp/xenvmd";
+        listenPath = Some xenvmd_socket;
         host_allocation_quantum = 128L;
         host_low_water_mark = 8L;
         vg;
@@ -90,11 +83,14 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
         rrd_ds_owner = Some (Printf.sprintf "xenvmd-%d-stats" (Unix.getpid ()));
       } in
       Sexplib.Sexp.to_string_hum (Config.Xenvmd.sexp_of_t config)
-      |> file_of_string "test.xenvmd.conf";
-      let _ = Lwt_preemptive.detach (fun () -> xenvmd [ "--config"; "./test.xenvmd.conf"; "--log"; "xenvmd.log"]) () in
+      |> file_of_string xenvmd_conf;
+      let _ =
+        Lwt_preemptive.detach (fun () ->
+          xenvmd [ "--config"; xenvmd_conf; "--log"; xenvmd_log]
+        ) () in
       wait_for_xenvmd_to_start vg;
       Xenvm_client.Rpc.uri := "file://local/services/xenvmd/" ^ vg;
-      Xenvm_client.unix_domain_socket_path := "/tmp/xenvmd";
+      Xenvm_client.unix_domain_socket_path := xenvmd_socket;
       finally
         (fun () -> f vg loop)
         (fun () -> xenvm [ "shutdown"; "/dev/"^vg ] |> ignore_string ) in
@@ -111,7 +107,7 @@ let with_xenvmd ?existing_vg ?(cleanup_vg=true) (f : string -> string -> 'a) =
 let la_has_started host =
   let dm_name = "XXXdoesntexistXXX" in
   let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
-  let sockpath = get_local_allocator_sockpath host in
+  let sockpath = la_socket host in
   Lwt.catch
     (fun () ->
        Lwt_unix.connect s (Unix.ADDR_UNIX sockpath)
@@ -132,20 +128,22 @@ let la_has_started host =
        Lwt.return false)
 
 let start_local_allocator host devices =
-  let hostname = get_hostname host in
-  ignore(xenvm [ "host-create"; vg; hostname]);
-  let config_file = Printf.sprintf "local_allocator.%s.conf" hostname in
+  let hostname = Printf.sprintf "host%d" host in
+  ignore(xenvm [ "host-create"; vg; hostname ]);
   let config = {
-    Config.Local_allocator.socket = get_local_allocator_sockpath host;
-    localJournal = Printf.sprintf "%s-localJournal" hostname;
+    Config.Local_allocator.socket = la_socket host;
+    localJournal = la_journal host;
     devices = devices;
-    toLVM = Printf.sprintf "%s-toLVM" hostname;
-    fromLVM = Printf.sprintf "%s-fromLVM" hostname;
+    toLVM = la_toLVM_ring host;
+    fromLVM = la_fromLVM_ring host;
   } in
   Sexplib.Sexp.to_string_hum (Config.Local_allocator.sexp_of_t config)
-  |> file_of_string config_file;
+  |> file_of_string (la_conf host);
   ignore(xenvm [ "host-connect"; vg; hostname]);
-  let la_thread = Lwt_preemptive.detach (fun () -> local_allocator ~host [ "--config"; config_file; "--log"; Printf.sprintf "la.%d.log" host ]) () in
+  let la_thread =
+    Lwt_preemptive.detach (fun () ->
+      local_allocator ~host [ "--config"; la_conf host; "--log"; la_log host ]
+    ) () in
   la_thread
 
 let wait_for_local_allocator_to_start host =
@@ -212,9 +210,9 @@ let upgrade =
           ~printer:string_of_int 2 (LVs.cardinal (Vg_IO.metadata_of vg).Vg.lvs);
 
         (* Upgrade the volume to journalled *)
-        xenvm [ "upgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
+        xenvm [ "upgrade"; "--pvpath"; filename; "vg" ] |> ignore_string;
         (* Check it's idempotent *)
-        xenvm [ "upgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
+        xenvm [ "upgrade"; "--pvpath"; filename; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         let module Label_IO = Label.Make(Block) in
@@ -238,9 +236,9 @@ let upgrade =
         );
 
         (* Downgrade the volume to lvm2 *)
-        xenvm [ "downgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
+        xenvm [ "downgrade"; "--pvpath"; filename; "vg" ] |> ignore_string;
         (* Check it's idempotent *)
-        xenvm [ "downgrade"; "--pvpath"; "vg"; "vg" ] |> ignore_string;
+        xenvm [ "downgrade"; "--pvpath"; filename; "vg" ] |> ignore_string;
 
         (* check the changing of the magic persisted *)
         Label_IO.read block >>:= fun label ->
@@ -654,9 +652,9 @@ let la_extend_multi_fist device =
          let la_dead = la_thread_1 >>= fun _ -> la_thread_2 >>= fun _ -> Lwt.return () in
          Lwt.choose [la_dead; (Lwt_unix.sleep 30.0 >>= fun () -> Lwt.fail Timeout)]
          >>= fun () ->
-         write_to_file la_thread_1 "local_allocator.1.log"
+         write_to_file la_thread_1 (la_log 1)
          >>= fun () ->
-         write_to_file la_thread_2 "local_allocator.2.log"
+         write_to_file la_thread_2 (la_log 2)
        )))
 
 let local_allocator_suite device = "Commands which require the local allocator" >::: [
@@ -667,8 +665,9 @@ let local_allocator_suite device = "Commands which require the local allocator" 
 ]
 
 let _ =
+  Common.cleanup ();
   Random.self_init ();
-  List.iter (fun host -> let configdir = Common.get_configdir host in mkdir_rec configdir 0o0755) [1;2;3;4] in
+  List.iter (fun host -> mkdir_rec (xenvm_confdir host) 0o755) [1; 2; 3; 4]
   let check_results_with_exit_code results =
     if List.exists (function RFailure _ | RError _ -> true | _ -> false) results
     then exit 1 in

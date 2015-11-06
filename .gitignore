@@ -6,6 +6,7 @@ setup.log
 setup.ml
 *.native
 .test-artifacts/
+.native-test/
 dm-mock*
 *.dat
 *.gp

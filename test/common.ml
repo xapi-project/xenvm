@@ -20,6 +20,20 @@ open Lwt
 (* Mock kernel devices so we can run as a regular user *)
 let use_mock = ref true
 
+(* Paths that will get cleaned up *)
+let artifacts_dir = ".native-test/"
+let test_artifact = Filename.concat artifacts_dir
+let xenvmd_socket = test_artifact "xenvmd.socket"
+let xenvmd_conf = test_artifact "xenvmd.conf"
+let xenvmd_log = test_artifact "xenvmd.log"
+let xenvm_confdir host = test_artifact (Printf.sprintf "xenvm-host%d.d" host)
+let la_socket host = test_artifact (Printf.sprintf "local-allocator-host%d.socket" host)
+let la_conf host = test_artifact (Printf.sprintf "local-allocator-host%d.conf" host)
+let la_log host = test_artifact (Printf.sprintf "local-allocator-host%d.log" host)
+let la_journal host = test_artifact (Printf.sprintf "local-allocator-host%d.journal" host)
+let la_toLVM_ring host = (Printf.sprintf "host%d-toLVM" host)
+let la_fromLVM_ring host = (Printf.sprintf "host%d-fromLVM" host)
+
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep
@@ -252,7 +266,7 @@ let tib = Int64.(gib * kib)
 module Client = Xenvm_client.Client
 
 let with_temp_file ?(delete=true) fn =
-  let filename = Filename.concat (Unix.getcwd ()) "vg" in
+  let filename = test_artifact "mock-disk" in
   let f = Unix.openfile filename [Unix.O_CREAT; Unix.O_RDWR; Unix.O_TRUNC] 0o644 in
   (* approximately 10000 4MiB extents for volumes, 100MiB for metadata and
      overhead *)
@@ -289,15 +303,11 @@ let with_block filename f =
   | `Ok x ->
     f x (* no point catching errors here *)
 
-let get_configdir host =
-  Printf.sprintf "/tmp/xenvm.host%d.d" host
-
 let xenvm ?(host=1) args =
-  let configdir = get_configdir host in
   match args with
   | [] -> run "./xenvm.native" []
   | cmd :: args ->
-    let args = "--configdir" :: configdir :: args in
+    let args = "--configdir" :: xenvm_confdir host :: args in
     let args = if !use_mock then "--mock-devmapper" :: (string_of_int host) :: args else args in
     run "./xenvm.native" (cmd :: args)
 let xenvmd = run "./xenvmd.native"
@@ -308,3 +318,12 @@ let local_allocator ?(host=1) =
   | args ->
     let args = if !use_mock then "--mock-devmapper" :: (string_of_int host) :: args else args in
     run cmd args
+
+let cleanup () =
+  let pkill pattern =
+    try run "pkill" ["-e"; pattern] |> print_endline
+    with Bad_exit(1,_,_,_,_) -> () (* No processes matched -- see pkill(1) *)
+  in
+  pkill "xenvm";
+  pkill "local_allocator";
+  run "rm" ["-rf"; artifacts_dir; "dm-mock*"] |> print_endline
