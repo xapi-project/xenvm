@@ -11,10 +11,12 @@ remove: [
   [make "uninstall"]
 ]
 depends: [
+  "ocamlfind" {build}
+  "oasis" {build}
+  "ounit" {test}
   "cstruct" {>= "0.7.1"}
   "lwt"
   "core"
-  "ocamlfind"
   "shared-block-ring"
   "mirage-block-volume" {>= "0.9.2"}
   "mirage-clock-unix"
@@ -24,8 +26,6 @@ depends: [
   "rpc"
   "sexplib"
   "camldm"
-  "ounit"
-  "oasis"
   "stringext"
   "xapi-rrdd-plugin"
 ]
