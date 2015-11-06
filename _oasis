@@ -20,7 +20,7 @@ Library xenvmidl
   Path:               idl
   Findlibname:        xenvmidl
   Modules:            Xenvm_interface, Xenvm_client, Log, Result, Errors, ResizeRequest, ResizeResponse, Pidfile, Retrymapper
-  BuildDepends:       rpclib, rpclib.syntax, sexplib, sexplib.syntax, lvm, cohttp.lwt, threads, mirage-block-unix, devmapper, core, mirage-clock-unix
+  BuildDepends:       rpclib, rpclib.syntax, sexplib, sexplib.syntax, lvm, cohttp.lwt, threads, mirage-block-unix, devmapper, mirage-clock-unix
 
 Executable "xenvmd"
   ByteOpt:            -warn-error +a
@@ -40,7 +40,7 @@ Executable "xenvm"
   MainIs:             xenvm.ml
   Custom:             true
   Install:            false
-  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax, stringext
+  BuildDepends:       lwt, lwt.unix, lvm, cmdliner, xenvmidl, devmapper, lvm.mapper, io-page.unix, mirage-clock-unix, sexplib.syntax, stringext, flock
 
 Executable "xenvm-local-allocator"
   ByteOpt:            -warn-error +a
