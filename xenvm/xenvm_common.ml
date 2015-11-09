@@ -28,6 +28,22 @@ let mkdir_rec dir perm =
     mkdir_safe dir perm in
   p_mkdir dir
 
+
+let finally f g = let res = try f () with exn -> g (); raise exn in g (); res
+
+let with_flock path f =
+  let open Flock in
+  mkdir_rec (Filename.dirname path) 0o700;
+  let fd = Unix.(openfile path [O_WRONLY; O_CREAT] 0o644) in
+  let rec try_lock tries =
+    if tries > 0 then
+      if try flock ~nonblocking:true fd LOCK_EX; true with _ -> false then ()
+      else begin Unix.sleep 1; try_lock (tries - 1) end
+    else failwith ("Could not obtain flock: " ^ path)
+  in
+  try_lock 5;
+  finally f (fun () -> flock fd LOCK_UN)
+
 module Time = struct
   type 'a io = 'a Lwt.t
   let sleep = Lwt_unix.sleep

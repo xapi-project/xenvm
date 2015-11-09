@@ -84,7 +84,7 @@ let format config name filenames =
 let with_lvm_lock config vg_name f =
   if config.mock_dm then f () else
     let lock_path = Filename.concat "/run/lock/lvm" ("V_" ^ vg_name ^ ":aux") in
-    Flock.with_flock lock_path f
+    with_flock lock_path f
 
 (* Change the label on the PV and revert it if the function [f] fails *)
 let with_label_change block magic f =
