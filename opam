@@ -28,4 +28,5 @@ depends: [
   "camldm"
   "stringext"
   "xapi-rrdd-plugin"
+  "xapi-stdext"
 ]

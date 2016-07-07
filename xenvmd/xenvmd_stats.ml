@@ -12,7 +12,7 @@
  * GNU Lesser General Public License for more details.
  *)
 open Rrdd_plugin
-open Threadext
+open Stdext.Threadext
 open Lwt
 open Log
 open Lvm
