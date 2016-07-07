@@ -25,7 +25,6 @@ depends: [
   "cohttp"
   "rpc"
   "sexplib"
-  "camldm"
   "stringext"
   "xapi-rrdd-plugin"
   "xapi-stdext"
