@@ -1,5 +1,9 @@
-opam-version: "1"
+opam-version: "1.2"
 maintainer: "dave.scott@citrix.com"
+authors: "xen-api@list.xen.org"
+bug-reports: "https://github.com/xapi-project/xenvm/issues"
+dev-repo: "git://github.com/xapi-project/xenvm.git"
+homepage: "https://xapi-project.github.io/"
 tags: [
   "org:xapi-project"
 ]
@@ -25,7 +29,7 @@ depends: [
   "cohttp"
   "rpc"
   "sexplib"
-  "camldm"
   "stringext"
   "xapi-rrdd-plugin"
+  "xapi-stdext"
 ]
