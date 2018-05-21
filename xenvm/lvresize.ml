@@ -51,7 +51,11 @@ let resize_remotely info vg_name lv_name size =
 let resize_locally allocator vg_name lv_name size =
   let dm_name = Mapper.name_of vg_name lv_name in
   let s = Lwt_unix.socket Lwt_unix.PF_UNIX Lwt_unix.SOCK_STREAM 0 in
-  Lwt_unix.connect s (Unix.ADDR_UNIX allocator)
+  Lwt.catch (fun () ->
+      Lwt_unix.connect s (Unix.ADDR_UNIX allocator)
+    ) (fun e ->
+      Lwt_unix.close s >>= fun () -> Lwt.fail e
+    )
   >>= fun () ->
   let oc = Lwt_io.of_fd ~mode:Lwt_io.output s in
   let r = { ResizeRequest.local_dm_name = dm_name; action = size } in
